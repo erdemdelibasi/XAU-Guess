@@ -1,0 +1,492 @@
+# XAU-Guess
+
+Kişisel kullanım için **altın (GC=F) ve gümüş (SI=F)** tahmin/izleme PWA'sı.
+Anahtarsız kamuya açık piyasa verisi kullanır, **hiçbir aracı kurum hesabı
+yok, gerçek emir yok**. Tüm portföyler sanal/kağıt üzerindedir ($1000
+simülasyon).
+
+XRP-Guess'in kardeşi ve ondan çok şey devraldı — ama **kopyası değil.**
+Farklar sezgiyle değil ölçümle seçildi ve nedenleri aşağıda yazılı.
+
+## Mimari
+
+```
+GitHub Actions (cron, sunucusuz zamanlayıcı)
+  -> backend/predict.py       her iş günü 23:00 UTC (COMEX kapanışından sonra)
+                              iki metal için de sırayla çalışır
+  -> backend/retrain.py       her gün 01:30 UTC
+
+Kullanıcının kendi bilgisayarı (Windows Task Scheduler -- GitHub Actions DEĞİL,
+bkz. aşağıdaki Kanal Finans notu)
+  -> backend/run_kanal_finans_hidden.vbs -> run_kanal_finans.ps1
+                              her 15 dk, tahmin akışından bağımsız
+       |
+       v
+Supabase (Postgres + otomatik REST API, RLS ile korunur)
+       |
+       v
+Vercel (frontend/ statik hosting, GitHub push'unda otomatik deploy)
+```
+
+- **Backend**: Python, `backend/` altında.
+- **Frontend**: framework yok, saf HTML/CSS/JS. `config.js` gerçek Supabase
+  URL + anon key içerir (bilerek — anon key public kullanım için tasarlanmıştır,
+  gerçek koruma RLS'dedir).
+- **Şema**: `supabase/schema.sql` tek doğruluk kaynağı. Değiştirirsen dosyayı
+  güncelle VE kullanıcıya Supabase SQL Editor'de çalıştıracağı migration'ı
+  ayrıca ver (repo'dan otomatik uygulanmaz).
+- **Araştırma tezgâhı**: `backend/research/`, canlı sistemden tamamen ayrık.
+
+---
+
+## ÖNCE BUNU OKU: sistem ne iddia ediyor, ne iddia etmiyor
+
+Bu projenin en önemli bulgusu olumsuz bir bulgudur ve kod her yerde buna
+göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
+özeti:
+
+1. **Altının duvarı aşılabilir.** 5 günlük ufukta başabaş yön isabeti %52,7
+   (XRP'de 15 dakikada %95,7 idi). Oyun oynanabilir.
+2. **Yön modeli şansı yeniyor** — 5 günde %53,26, örtüşme düzeltmeli z=+2,04.
+3. **Ama "hep YUKARI" demeyi yenmiyor.** Altın 5 günde zaten %55,7, gümüş
+   %53,9 ihtimalle yükseliyor. Model hiçbir ufukta bu tabanı geçmiyor ve
+   Brier beceri skoru her ufukta negatif.
+4. **Model pozisyon boyutunu da eğemiyor.** `research/tilt.py`'de eğitim
+   ızgarası zorlanmadan EĞİM=0 seçti.
+5. **Ölçülebilir katkı veren tek mekanizma oynaklığa tepki veren pozisyon
+   boyutlandırma.** 19,9 yıl örneklem dışı: Sharpe 0,58→0,64, maksimum düşüş
+   %44,4→%30,1, karşılığında 2,1 puan yıllık getiri.
+6. **Altın/gümüş oranı yön bilgisi taşımıyor.** 5 form × 3 hedef × 4 ufuk =
+   60 testin **sıfırı** eşiği geçti (`research/ratio.py`). Rotasyon da,
+   çifti birlikte tutmak da altını risk-ayarlı geçemiyor.
+7. **Sorun etikette değil.** Sürüklemesi çıkarılmış bir etiket denendi ve
+   IC +0,055'ten −0,004'e düştü (`research/ablation.py`): taban oranın
+   kendisi öğrenilebilir olan tek şey.
+
+Madde 5'in madde 3'ü **kurtarmadığını** anlamak kritik: oynaklık hedefleme
+hiçbir şey tahmin etmiyor, gerçekleşen oynaklığa tepki veriyor ve oynaklık
+(yönün aksine) güçlü şekilde otokorelasyonlu. Bunlar ayrı iki makine.
+`defense.py`'nin kazancını "demek ki model iyi" diye okuma.
+
+**Bu yüzden `buyhold` gerçek bir portföydür**, raporda bir satır değil.
+XRP-Guess al-ve-tut'u sadece düzyazıda anıyordu ve her stratejinin ona
+yenildiğini okuyucunun kendisi çıkarması gerekiyordu. Burada ekranda,
+diğerlerinin yanında, kıyas rozetiyle duruyor.
+
+---
+
+## Önemli kısıtlar
+
+- **Gerçek para/emir yok.** Metal başına on portföy (dokuzu `trading.py`'nin
+  motoruyla, biri Kanal Finans takipçisi) — toplam yirmi, hepsi sanal.
+- **Hiçbir piyasa verisi anahtarı gerekmiyor.** Yahoo Finance chart API
+  (GC=F, SI=F + 13 makro seri), Binance'in kamuya açık
+  `data-api.binance.vision` uç noktası (altının hafta sonu fiyatı için
+  PAXG), ve YouTube'un anahtarsız RSS'i.
+- **Gümüşün hafta sonu fiyatı YOKTUR.** Altın için PAXG bir 24/7 vekil
+  sağlıyor; gümüşün Binance'te güvenilir bir muadili yok. `get_live_price`
+  bu durumda son COMEX kapanışını döndürür ve kaynağı `SI=F(stale)` diye
+  **etiketler**. Dürüst bir boşluk, kaynağı eğitim verisinden farklı bir
+  sayıdan iyidir. `ANTHROPIC_API_KEY` isteğe bağlı — yoksa `claude` bileşeni
+  sürekli nötr kalır, sistem çökmez.
+- **FRED bu makineden erişilemiyor** (2026-09-07'de tekrarlanan 60 sn
+  zaman aşımı, aynı anda her Yahoo çağrısı geçiyordu). Kurumsal ağ engeli
+  olabilir ve GitHub Actions'tan çalışabilir. Gerçek 10Y reel faiz serisi
+  (DFII10) altının en iyi tek sürücüsüdür, ama `fetch_data.get_fred_series`
+  bilerek `None` dönebilir ve `indicators.py` TIP/IEF vekiline düşer.
+  **Bu vekile asla "reel faiz" gibi kesin bir sayı muamelesi yapma** —
+  şeklini yakalar, seviyesini değil.
+
+### Ufuk bir seçimdir, cron'un yan etkisi değil
+
+XRP-Guess 15 dakika sonrasını tahmin ediyordu çünkü cron 15 dakikada bir
+çalışıyordu. Ufuk zamanlamanın kazasıydı ve projeyi %95,7'lik bir duvarın
+yanlış tarafına hapsetti. Burada ufuk **önce** seçildi (`research/wall.py`),
+sistem sonra kuruldu. `ml_model.HORIZON_DAYS = 5` bu tablodan geliyor:
+1 günde duvar %56,2, 5 günde %52,7, 20 günde %51,3 — ve `edge.py` modelin
+sadece 5 günde duvarı aştığını ölçtü.
+
+### İki metal, tek boru hattı — ama paylaşılan sabit YOK
+
+`assets.py` bu projedeki en önemli dosyalardan biri: metaller arasında
+farklı olabilecek her şey orada ve **her sayısı ölçülmüştür**
+(`research/compare.py`).
+
+| | Altın | Gümüş | Neden farklı |
+|---|---|---|---|
+| `base_rate_up` | 0,557 | 0,539 | `ensemble.py` her bileşeni buna karşı ölçüyor |
+| `target_volatility` | %15 | %28 | gümüş 1,86 kat oynak (ölçüldü) |
+| `fee_rate` | 5 bp | 10 bp | gümüşün spread'i fiyatının daha büyük bir oranı |
+| `leading_drivers` | tip, ief, vix | tip, vix | **`ief` gümüşü öncülemiyor** (t=2,56 vs eşik 3,29) |
+| model dosyası | `xau_model.joblib` | `xag_model.joblib` | farklı özellik seti, değiştirilemezler |
+
+**"Varlık ekle" tek satırlık bir ayar değişikliği gibi görünüp öyle
+değildir.** Altının sayılarını gümüşe kopyalamak hiçbir hata vermez; sadece
+gümüşün tüm skorbordunu sessizce yeniden tabanlar ve oynaklık hedeflemesini
+"daha az gümüş tut"a çevirir. `test_trading.test_target_volatility_is_per_asset_not_global`
+ve `test_ensemble.test_always_up_contributes_nothing_at_silvers_base_rate_too`
+bu ikisini kilitliyor.
+
+Ölçülen tablo şu: **gümüş 25 yılda altınla neredeyse aynı getiriyi
+(%11,7 vs %11,8) iki katı acıyla veriyor** — oynaklık %33,7 vs %18,1,
+maksimum düşüş %75,8 vs %44,4, al-ve-tut Sharpe'ı 0,25 vs 0,56.
+
+İki incelik:
+- **Panelde varlığın kendisi makro kolonu olamaz.** `assets.macro_symbols_for`
+  gümüşün panelinden `silver`'ı çıkarıp `gold`'u koyuyor; yoksa gümüş kendi
+  kapanışıyla mükemmel korelasyonlu bir "makro" kolon taşır ve `gs_ratio`
+  sabit 1,0 olur.
+- **`gs_ratio` her iki panelde de altın/gümüş olmalı.** Körü körüne
+  `close/counterpart` hesaplamak gümüş panelinde **tersini** verir — adı
+  `gs_ratio_z` olan ama işareti ters bir özellik. `indicators.py` bunu
+  açıkça ayırıyor.
+
+### Altın/gümüş oranı: ölçüldü, taşımıyor — ama ekranda kalıyor
+
+Bu proje uzun süre "oran ölçülmedi" itirafını taşıdı. `research/ratio.py`
+onu kaldırdı ve cevap negatif: **60 testin 0'ı** Bonferroni eşiğini geçti.
+
+Üç şey burada yanlış yapılmaya çok müsait:
+
+1. **Tüm-örneklem ortalamasına dönüş testi geleceği okur.** Oran 2011'de
+   32, 2020'de 126 gördü; panelin ilk yarısının medyanı 60,3, ikincisinin
+   78,7. "Ortalama" sabit değil, kaymış bir seviye. Her test **kayan 250
+   günlük z** kullanıyor — tüm-örneklem z'si kullanan bir sürüm harika
+   sonuç verir ve tamamen sahtedir.
+2. **"Oran döner" bir UZUN/KISA iddiasıdır.** log(oran) değişimi = altının
+   log getirisi − gümüşünkü. Bu sistem kısa pozisyon almıyor, dolayısıyla
+   spread testinin geçmesi bile tek başına işe yaramazdı. Ayrı ayrı **bacak
+   testleri** karar verici olandır — ve her iki bacak da **pozitif** çıktı
+   (yüksek oran, ardından iki metalin de yükselmesini öncülüyor), yani
+   hikâyenin öngördüğünün tersi bir yapı.
+3. **Rotasyon kontrolsüz okunursa "işe yarıyor" görünür.** "z yüksekse
+   gümüş tut" kuralı YBG'de altını 2,1 puan geçiyor — çünkü gümüş 1,86 kat
+   oynak ve örneklem yükseliyor. **Oynaklık eşitlendiğinde her boyutta
+   altının altına düşüyor.** `ratio.rotation_curve(vol_match=...)` bu
+   kontrolü zorunlu kılmak için orada; kapatıp okuma.
+
+`gs_ratio_z` `ml_model.FEATURE_COLUMNS` içinde **kaldı**, ve bu bir karar:
+permütasyon önemi ile yürüyen-ileri A/B **her iki metalde de işaret
+bakımından çelişti** (altın +0,19p vs +0,78p, gümüş −1,67p vs −0,20p),
+eşleştirilmiş McNemar p=0,489 ve p=0,935. p=0,49'a dayanarak kolon çıkarmak
+tam olarak bu tezgâhın önlemek için var olduğu şeydir. **Gürültüye göre
+hareket etmek de bir aşırı-uydurmadır.**
+
+Oran arayüzde **tarihsel konumuyla birlikte** gösteriliyor
+(`predictions.gs_ratio`, `gs_ratio_z`) ve yanında ölçüm sonucu yazıyor.
+Çıplak bir "67,1" okuyucuyu ölçekten yoksun bırakır ve akla gelen ölçek
+("60'a döner") tam da desteklenemeyen inançtır. **Bu iki kolonu hiçbir
+strateji ve hiçbir bileşen okumuyor** — okutmadan önce ratio.py'yi yeniden
+çalıştır.
+
+### ML bileşeni taban orana takılı: suç etikette değil
+
+`research/ablation.py` iki açıklamayı ayırdı ve **kendi tercih ettiğim
+hipotezi çürüttü**:
+
+- **A) Etiket.** Altının etiketlerinin %55,8'i 1; sınıflandırıcı marjinali
+  öğrenip duruyor olabilir. Test: sürüklemesi çıkarılmış etiket (L1) eğitim
+  dengesini temiz %51,2'ye getirdi — ve **IC +0,0554'ten −0,0040'a düştü.**
+- **B) Özellikler.** Dört farklı özellik grubu denendi (F1-F4); hiçbiri
+  üretim setinden ayırt edilemedi (en düşük p=0,35).
+
+Yani model taban oranı *yeniden üretiyor* değil; **taban oran öğrenilebilir
+olan tek şey.** Altının +0,055'lik IC'si büyük ölçüde "her şey yükselir"
+bilgisidir. Bir sonraki kişi "etiketi dengeleyelim" diye gelirse: denendi,
+ölçüldü, işe yaramadı.
+
+**Ama negatifin sınırını da yaz:** bu örneklemin sıfırdan ayırt edebileceği
+en küçük IC **0,086**, ölçülen ise 0,055. Yani çalışma "IC > 0,086 değil"
+diyebiliyor, "IC = 0" **diyemiyor**. Doğru okuma "burada bir şey yok" değil,
+"büyük bir şey yok; küçük bir şey varsa 25 yıllık günlük veri onu
+kanıtlayamaz". Çözüm daha çok özellik değil, **daha çok bağımsız gözlem**.
+
+### Taban oran her yere sızar ve düzeltilmezse her şeyi bozar
+
+Altın %55,7, gümüş %53,9 ihtimalle yükseliyor. XRP ~%50/%50 bir yazı-turaydı.
+Bu tek fark dört ayrı yerde düzeltme gerektirdi ve dördü de sessizce yanlış
+olabilirdi:
+
+0. **`base_rate` bir parametredir, modül sabiti değil.** `ensemble.combine`,
+   `component_evidence`, `calibration.fit/apply` hepsi onu argüman olarak
+   alır. Gümüşe altının oranını vermek hiçbir hata üretmez, sadece 1,8
+   puanlık görünmez bir yanlılık enjekte eder.
+1. **`ensemble.py`** — bileşenler artık "P(doğru)" ile değil, **taban orana
+   karşı olabilirlik oranıyla** havuzlanıyor. Hep-YUKARI diyen bir bileşen
+   %55 isabet tutturur ve %50'ye karşı ölçülürse yetenekli görünür; burada
+   tam olarak **sıfır** kanıt üretiyor (`test_ensemble.py` bunu kilitliyor).
+   Bunun için `model_state` tek bir isabet oranı değil **dört sayaç** tutuyor
+   (UP çağrıları/doğruları, DOWN çağrıları/doğruları) — çünkü bir bileşenin
+   UP ve DOWN taraflarının bilgisizlik noktaları **farklıdır** (altında
+   0,557 ve 0,443). İkisini de 0,557'ye büzen ilk sürüm, DOWN tarafında
+   sıfır yeteneği olan bir bileşene +0,024 kanıt ve %4,9 hak edilmemiş etki
+   ağırlığı veriyordu.
+
+   > Bu sabitin kendisi de bir kez yanlıştı: kodda 0,552 yazıyordu, çünkü
+   > `wall.py`'nin tablosundan yanlış satır okunmuştu. Gerçek değer 0,557.
+   > Yarım puan — ama tüm sistemin kalibre edildiği tek sayıda.
+   > `research/compare.py` yakaladı.
+2. **`calibration.py`** — isotonic tabanı 0,5 değil, o varlığın taban oranı.
+   Taban oranı yakalayan bir bileşenin kalibre güveni tam sıfır olmalı.
+   Kalibratör dosyaları da varlık başınadır (`calibration_gold.joblib` /
+   `calibration_silver.joblib`).
+3. **`frontend/app.js`** — her yerde yönün yanında `edge_over_base` gösteriliyor.
+   Sadece "YÜKSELİŞ, %62 güven" yazan bir arayüz sistematik olarak abartır.
+
+`retrain.py` her gece gerçekleşen taban oranı sabitin yanına basıyor;
+6 puandan fazla saparsa yüksek sesle uyarıyor. Çünkü sabit kayarsa her
+bileşenin "becerisi" sessizce yeniden tabanlanır.
+
+### Düz mumlar atılmaz, işaretlenir
+
+GC=F günlük geçmişinin ~%11'i (modern dönemde ~%5) `open=high=low=close`
+olan "düz mum". İlk içgüdü atmaktı. **Ölçüm bunu reddetti**: GLD'ye
+(bağımsız, temiz bir altın serisi) karşı düz mumların ima ettiği günlük
+getiri r=0,737 korelasyon gösteriyor (normal mumlarda 0,892) ve medyan
+mutlak farkı **daha küçük** (%0,175 vs %0,213). **Kapanış gerçek; sadece
+open/high/low uydurma** (kapanışın kopyası).
+
+Atmak iki şeyi bozardı: %11 gerçek kapanışı çöpe atmak, ve daha kötüsü
+**takvim sürekliliğini sessizce kırmak** — Salı'yı silersen Pazartesi'nin
+"ertesi gün getirisi" hiçbir hata vermeden iki günlük getiriye dönüşür.
+Bu yüzden `panel.py` işaretliyor (`flat_bar`) ve `indicators.py` yüksek/düşük
+tabanlı ölçüler yerine **kapanıştan kapanışa** ölçüleri tercih ediyor
+(ATR yerine getiri std sapması, yüksek yerine kapanış Donchian'ı).
+
+### Öncü sürücüler gerçek, ama kontrol serisi olmadan kanıtlanamaz
+
+`research/drivers.py` 16 seriyi iki kez ölçtü: aynı gün (açıklar, alınamaz)
+ve ertesi gün (öncü, alınabilir). Üçü Bonferroni eşiğini geçti: `tip`
+(t=+6,63), `ief` (t=+5,18), `vix` (t=−5,42).
+
+TIP'in ertesi gün r=+0,088'i bir günlük tahmin için **fazla büyük** ve
+şüpheliydi. Doğal şüphe takvim kaymasıydı: altın seansı 17:00 New York'ta,
+tahvil ETF'leri 16:00'da kapanıyor, Yahoo altın mumunu 04:00 UTC'de
+damgalıyor. Birleştirme bir gün kaysa, **eşzamanlı** bir ilişki
+**öngörücü** diye etiketlenir ve harika görünür.
+
+`research/lags.py` bunu öldürmek için yazıldı ve kontrol serisi kesin cevabı
+verdi: **gümüş aynı gün r=+0,783, ertesi gün r=−0,016.** Devasa bir
+eşzamanlı ilişki tek başına lag+1 kuyruğu üretmiyor. Hizalama doğru, TIP'in
+kuyruğu gerçek. `dxy` ve `us10y` de tepe lag 0'da.
+
+**VIX'in işareti hikâyenin tersi ve bu bilerek böyle**: VIX sıçraması ertesi
+gün altın için **kötü**, aynı gün ilişkisi ise sıfır. Standart açıklama
+zorunlu likidasyon. `indicators._score_vix` negatif işaretli; "güvenli
+liman" sezgisiyle düzeltmeye kalkma, ölçüm bunu söylüyor.
+
+### Ölçek sabitleri tahmin edilmez, ölçülür
+
+`indicators.py`'deki yedi skorlayıcının hepsi bir ham büyüklüğü −1..1'e
+sıkıştırıyor. İlk sürümde sabitler tahmindi ve ikisi sürekli kırpılıyordu:
+**macd oturumların %44,9'unda, real_yield %49,1'inde doyuyordu** (medyan
+|skor| 0,881 ve 0,976). Yarı zamanda ±1'e sabitlenmiş bir skor ölçüm değil
+yazı-turadır; harmanın tartması gereken derecelendirmeyi yok eder.
+
+Sabitler artık 25 yıllık panelde ölçülüp **90. yüzdelik ~1,0'e gelecek**
+şekilde ayarlı (doyma %5,7-13,7, medyan |skor| 0,30-0,53).
+
+`real_yield_chg`'de ayrıca bir **birim tutarsızlığı** vardı: `us10y.diff(5)`
+puan cinsinden, `100 × breakeven_chg` ise ETF fiyat oranı. Bir tahvil fiyat
+hareketini getiri hareketine çevirmek **süreye bölmek** demektir; TIP ve IEF
+ikisi de ~7,5 yıl. Düz 100 ile çarpmak breakeven terimini 7,5x şişiriyordu
+(ölçülen medyan büyüklük 0,321 vs tahvil teriminin 0,075) — yani "reel faiz
+değişimi" aslında reel faizin değil, 4 kat baskın bir ETF oranının
+değişimiydi. `BOND_ETF_DURATION_YEARS` bunun için var.
+
+**Düzeltme yeni bir hata doğurdu ve o da ders**: süre düzeltmesi büyüklüğü
+7,5x küçültünce eski bölen (6,0) terimi tamamen susturdu — medyan |skor|
+0,009. Ağırlıklı bir bileşen sessizce hiçbir şey yapmıyordu. Bir ölçeği
+değiştirdiğinde **doyma oranını VE medyan skoru birlikte** kontrol et; biri
+tek başına yanıltıcı.
+
+### Sinyal eğimi iki yönlü olmalı
+
+`trading.SIGNAL_BASE_EXPOSURE = MAX_EXPOSURE - MAX_SIGNAL_TILT` (0,85).
+Tavandan başlarsan yükseliş eğimi kırpılıp yok olur, düşüş eğimi ise hâlâ
+keser — yani her sinyal portföyü, ne söylerse söylesin, sadece kesebilen
+bir makineye dönüşür. İlk sürüm tam bunu yapıyordu:
+`technical`/`ml`/`macro`/`claude` hepsi %100 pozisyon basıyordu.
+`test_trading.test_signal_tilt_is_two_sided` bunu kilitliyor.
+
+### Sert çıkış düşüşü artırır
+
+`trading.TREND_OFF_EXPOSURE = 0.35`, sıfır değil. `research/defense.py`'de
+düşüş-stopu varyantları maksimum düşüşü **kötüleştirdi** (%55,3 vs
+al-ve-tut'un %44,4'ü): dipte satıp yukarıda geri alıyorlar. Kısmen yatırımda
+kalmak toparlanmayı korur. XRP-Guess'in `STOP_LOSS_COOLDOWN_CANDLES`
+dersinin (236 stop-loss'un 235'i 10 saat içinde tekrar tetikleniyordu) aynı
+ailesi.
+
+### Backtest üretim kodunu oynatır, kopyasını değil
+
+`backtest.py` doğrudan `trading.compute_target_exposure()` ve
+`compute_rebalance()` çağırır. `research/edge.py` `ml_model.build_estimator()`
+çağırır. Stratejiyi yeniden yazan bir backtest, yeniden yazımı test eder.
+
+Bu gerçek bir hatayı yakaladı: backtest sinyal yoluna `vol_20d` besliyordu
+ama `trading.VOL_LOOKBACK_DAYS` 60. Yani canlıdan **farklı, daha gürültülü**
+bir strateji test ediliyordu — kolon adının içine saklanmış bir sapma.
+Düzeltince `voltarget` 440 işlemden **158'e** düştü ve Calmar 0,22→0,24.
+
+### Maliyet tek bir sayı değil
+
+`backtest.py` dört senaryoyu birden basar (2/10/40/150 bp gidiş-dönüş).
+Fark belirleyici: ETF maliyetinde `voltarget`, `technical`, `ml` ve `macro`
+al-ve-tut'u Calmar'da geçiyor; **banka gram altın maliyetinde (150 bp)
+hiçbiri geçmiyor.** `macro` bileşeni bunun en net örneği — 19,5 yılda 2288
+işlem yapıyor, 2 bp'de Calmar 0,27 (al-ve-tut 0,23), 150 bp'de 0,03.
+Gerçek bir sinyal, üzerine para koymanın pahalı olduğu bir sinyal.
+
+### Claude bileşeni backtest edilemez
+
+6000 günlük geçmişi ücretli bir LLM çağrısıyla tekrar oynatmak hem pahalı
+hem anlamsız (model o tarihleri zaten biliyor). Canlı-only. Bu sınır
+`backtest.py`'nin raporunda açıkça basılıyor.
+
+Model `claude_signal.MODEL`'de sabit (`claude-opus-5`). XRP-Guess maliyet
+gerekçesiyle daha küçük bir model seçmişti; **o gerekçe burada geçerli
+değil** çünkü orası günde 96, burası günde 1 çağrı yapıyor.
+
+**Prompt dersi devralındı**: XRP-Guess'in sistem prompt'u "teknik sinyalin
+yönünü tekrarlama" diyordu; niyeti papağanlığı önlemekti ama modeli
+*ayrışmaya* itiyordu ve `technical` ölçülen avantajı olan tek bileşendi.
+Canlı veri tutarlıydı: ilk 73 satırda %48 hemfikir, 73'ün 56'sında DOWN,
+%37 isabet. Buradaki prompt açıkça "hemfikir olmak gayet iyi bir cevaptır"
+diyor. **Ayrıca taban oranı prompt'ta söylüyor** — yoksa model 50/50'yi
+nötr sanır ve "UP"ı bilgi taşımaz.
+
+### Haber bileşeni: iki ders devralındı, sözlük yeniden yazıldı
+
+XRP-Guess'in `news_signal.py`'si iki kez hata yaptı: (a) substring eşleşmesi
+(`ban` → `banking` içinde yakalanıyordu), (b) skorun başlık **hacmiyle**
+ölçeklenmesi. Her ikisinin düzeltmesi de burada: kelime-sınırı eşleşmesi,
+**başlık başına tek oy**, toplam eşleşen ağırlığa normalize, ve belirgin
+eğim yoksa **abstain**.
+
+Ama sözlük tamamen farklı, çünkü **altın haberlerinin anlamı tonundan
+bağımsız**: "Fed faiz indirdi" kulağa kötü gelir, altın için olumludur;
+"güçlü istihdam verisi" kulağa iyi gelir, altın için olumsuzdur. Listeler
+**altına etkiye** göre düzenlenmiştir, tona göre değil. Düz bir duygu
+analizi bunların birkaçını ters okur.
+
+Canlı doğrulama (2026-09-07): "Gold eases as strong US jobs data boosts Fed
+rate-hike bets" başlığını doğru şekilde DÜŞÜŞ olarak okudu.
+
+### Kanal Finans TŞ: bir insanın görüşü, bizim tahminimiz değil
+
+`backend/kanal_finans.py` — YouTube @KanalFinans (Tunç Şatıroğlu) kanalının
+videolarından **iki ayrı şey** çıkarır:
+
+- **mentions**: varlık başına (ALTIN / GUMUS / GENEL) sadık tek cümlelik
+  özet, konuşmacının duruşu, al/tut/sat okuması, ve verdiyse ons hedefi /
+  zarar-kes / direnç seviyeleri. `kanalfinans` portföyü bunlara göre işlem
+  yapar.
+- **themes**: o görüşün dayandığı makro hikâye — SAVAS, ABD_POLITIKA,
+  REZERV, DOLAR, ENFLASYON, ARZ_TALEP, BORSA, TURKIYE. **Bilerek işlem
+  üretmez.** Çıplak bir "yükseliş"in bağlamıyla okunabilmesi için var.
+
+Tema sözlüğü **sabit ve küçük** tutuldu: açık uçlu bir "neden bahsetti"
+alanı her videoda farklı bir taksonomi üretir ve zaman içinde hiçbir şey
+sayılamaz.
+
+**`ensemble.COMPONENTS`'e eklenmedi ve `predict.py` bu modülü hiç çağırmıyor.**
+Burada bir tahmin üretmiyoruz, birinin ne dediğini raporluyoruz. Frontend'de
+bu netleşsin diye modelin İngilizce "YÜKSELİŞ/DÜŞÜŞ" etiketlerinden bilerek
+farklı, Türkçe "Olumlu/Olumsuz/Nötr" rozetleri kullanılıyor.
+
+**Neden GitHub Actions'ta DEĞİL de kullanıcının kendi bilgisayarında**:
+XRP-Guess'te canlı doğrulandı (2026-09-02, iki ayrı manuel koşu, her
+birinde 15 videonun 15'i) — Actions'ın Azure IP aralığından yapılan
+transkript istekleri YouTube tarafından `RequestBlocked` ile sistematik
+olarak reddediliyor. Binance'te işe yarayan "alternatif host" çözümünün
+burada karşılığı yok.
+
+**2026-09-03 güncellemesi aynı derecede önemli**: yerel makine de
+`IpBlocked` aldı. Yerele taşımak sorunu azalttı, çözmedi. `RETRY_SCHEDULE`
+bu yüzden bir nezaket özelliği değil — zaten bizi reddeden bir endpoint'i
+günde 96 kez dövmek, geçici bir engeli kalıcıya çevirmenin en garanti
+yoludur. Kalıcı takılı bir video ~2 deneme/gün'e oturur, yeni bir video ise
+hiç geciktirilmez (kaydı yoktur, her zaman "due"dur).
+
+**Bir video ancak transkript VE Claude çıkarımı ikisi de başarılı olunca**
+`kanal_finans_videos`'a yazılır. Herhangi bir adım başarısız olursa video
+hiç yazılmaz ve bir sonraki koşuda otomatik tekrar denenir — takılan bir
+video geciker, kaybolmaz.
+
+**Direnç seviyesi bilerek otomatik satış tetiklemez.** XRP-Guess canlı
+veride konuşmacının direnç kırılmasını bazen *alım fırsatı* olarak
+yorumladığını gördü; sabit "direnç = kar al" kuralı tam da en spesifik
+olduğu videolarda onu ters okurdu. Sadece zarar-kes otomatik tetikler, ve
+`predict.py`'nin her günlük döngüsünde **sürekli** izlenir — bu çağrı
+YouTube'a hiç gitmediği için Actions'ta sorunsuz çalışır.
+
+**Zarar-kes/direnç prompt'undaki "hangi uç" kuralı ters yönlerdir ve
+açıkça yazılmıştır**: zarar-keste EN YÜKSEK (fiyat düşerken oraya önce
+değer), dirençte EN DÜŞÜK. XRP-Guess'te sadece "daha temkinli ucu al"
+denmişti ve model karıştırdı — gerçek bir pozisyonda ~%1,8 fazla zarar.
+
+**Yeni bir mention seviye vermezse önceki korunur.** Konuşmacı her videoda
+seviyeyi tekrar etmiyor; "eksik = değişmedi", "eksik = iptal" değil. Tersi
+her tekrar etmediği videoda zarar-kesi sessizce devre dışı bırakırdı.
+
+### Abstain bir hata değil
+
+Bir bileşen `confidence=0` döndürdüğünde o tur konuşmuyor demektir.
+`predict.resolve_due_predictions` bu satırları `NULL` olarak puanlıyor,
+**yanlış olarak değil**, ve `retrain.py` sicile katmıyor. `macro_signal` ve
+`news_signal` çoğu zaman sessiz kalacak şekilde tasarlandı; bu doğru
+davranış.
+
+### Tahmin satırları idempotent
+
+`predictions` tablosunda `unique(symbol, target_date)` var ve `predict.py`
+pahalı hiçbir işe girmeden önce kontrol ediyor. Elle tetiklenen bir koşu
+cron'la çakışsaydı aynı seans için iki satır yazılır, bileşen sicilleri çift
+sayar ve dokuz portföyün `maybe_trade()`'i iki kez ateşlenirdi.
+
+---
+
+## Geliştirme notları
+
+- **Yeni bir varlık eklerken**: `assets.py`'ye giriş ekle, `research/panel.py`
+  ile panelini kur, **`research/compare.py`'yi çalıştır** ve çıkan sayıları
+  `assets.py`'ye işle. Ölçmeden sabit kopyalama. Ayrıca `supabase/schema.sql`
+  içindeki `portfolios` ve `model_state` seed'lerine o varlığı ekle.
+- **Testler** (`backend/tests/`, pytest): DB'siz saf karar fonksiyonlarını
+  kapsıyor. `cd backend && python -m pytest tests/ -v`. Çoğu test bir
+  **ölçümü** kilitliyor — hangi bulguyu koruduğu docstring'inde yazılı.
+  Canlı sinyal üreten kodun testi yok; o `backtest.py` + canlı izlemeyle
+  doğrulanıyor.
+- **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
+  oku.** Orada ölçülüp elenmiş sekiz hipotez duruyor — oranla ilgili bir
+  fikir aklına geldiyse büyük ihtimalle 8. bölümde zaten var.
+- **Bir özelliği/kolonu çıkarmadan önce eşleştirilmiş test yap.**
+  `research/ablation.py` ve `research/ratio.py` bunun nasıl yapıldığını
+  gösteriyor: `edge.walk_forward(..., features=..., label_values=...)` tek
+  bir şeyi değiştirip aynı satırlarda puanlıyor, McNemar/eşli t farkın
+  gürültüyü aşıp aşmadığını söylüyor. Tek bölmede permütasyon önemi
+  **yetmez** — bu projede ikisi zaten her iki metalde de çelişti.
+- **Negatif bir sonucu yazarken testin gücünü de yaz.** "Hiçbir şey
+  geçmedi" ile "test görecek kadar güçlü değildi" zıt işler gerektirir.
+  `ablation.min_detectable_ic` bu sayıyı üretiyor.
+- Bir parametre değiştirirsen `backtest.py`'ı çalıştırıp etkisini **ölç**.
+  Bu projede sezgiyle konmuş sayı yok.
+- Supabase REST API varsayılan ~1000 satırla sınırlı döner; geniş sorgularda
+  sayfalama gerekir (bkz. `retrain.fetch_resolved`).
+- Doğrulama genelde `curl` ile Supabase REST API'sine doğrudan sorgu atarak
+  yapılır — kullanıcıdan ekran görüntüsü istemeden önce bunu dene.
+- `frontend/sw.js` network-first çalışır; frontend'de büyük bir davranış
+  değişikliği yaptıysan `CACHE_NAME`'i artır.
+- Git kimliği kullanıcının makinesinde ayarlı (`erdemdelibasi@gmail.com`) —
+  Vercel bunu doğrulanmış GitHub e-postasıyla eşleştirip deploy'u
+  bloklayabiliyor.
+
+## Ton / dil
+
+- Kullanıcıyla iletişim Türkçe; kod/tanımlayıcılar ve kod yorumları İngilizce.
+- Uygulama bir yatırım tavsiyesi aracı değildir — bu uyarı README ve UI'da
+  görünür kalmalı.
+- **Olumsuz sonuçları gizleme.** Bu projenin değeri neyin işe yaramadığını
+  dürüstçe ölçmüş olmasında. Bir strateji al-ve-tut'a yeniliyorsa ekranda
+  öyle görünmeli.

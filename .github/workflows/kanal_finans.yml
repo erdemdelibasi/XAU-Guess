@@ -1,0 +1,46 @@
+name: Kanal Finans
+
+# NO `schedule:` TRIGGER, deliberately.
+#
+# YouTube refuses transcript requests from GitHub Actions' Azure IP range --
+# verified in XRP-Guess with two separate manual runs, 15 of 15 videos
+# failing with RequestBlocked each time. There is no alternate public host for
+# this the way data-api.binance.vision exists for Binance.
+#
+# The real schedule lives on the user's own machine: Windows Task Scheduler ->
+# backend/run_kanal_finans_hidden.vbs -> run_kanal_finans.ps1, every 15
+# minutes. See backend/kanal_finans.py and CLAUDE.md.
+#
+# This workflow is kept for manual testing, and so the migration back to a
+# cron is a one-line change if a residential proxy (WEBSHARE_PROXY_*) ever
+# becomes usable from the corporate network.
+on:
+  workflow_dispatch:
+
+jobs:
+  kanal-finans:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Fetch and extract
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional: a residential proxy is the only known fix for the block
+          # described above. Unset means a direct connection, which is what
+          # runs locally today.
+          WEBSHARE_PROXY_USERNAME: ${{ secrets.WEBSHARE_PROXY_USERNAME }}
+          WEBSHARE_PROXY_PASSWORD: ${{ secrets.WEBSHARE_PROXY_PASSWORD }}
+        run: python kanal_finans.py

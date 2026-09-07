@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>XAU-Guess</title>
+
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0b0906" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="XAU-Guess" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="icon" href="icons/icon-192.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main id="app">
+
+  <header class="topbar">
+    <div>
+      <h1>ALTIN <span class="muted">&amp;</span> GÜMÜŞ</h1>
+      <p class="muted small">COMEX vadeli (GC=F / SI=F) &middot; ons başına dolar</p>
+    </div>
+    <!-- The ratio gets its historical placement next to it on purpose. A bare
+         "67,1" invites the reader to supply a scale from memory, and the
+         famous one ("it reverts to 60") is exactly the belief this project
+         measured and could not support -- see backend/research/ratio.py. -->
+    <div class="topbar-right">
+      <div class="muted small">Altın/Gümüş oranı</div>
+      <div id="gs-ratio" class="price">-</div>
+      <div class="muted small" id="gs-ratio-context">-</div>
+    </div>
+  </header>
+
+  <!-- Asset switch. Both metals run the full pipeline independently; the tab
+       only chooses which one's detail is on screen. -->
+  <div class="asset-tabs" id="asset-tabs">
+    <button data-asset="gold" class="active">Altın</button>
+    <button data-asset="silver">Gümüş</button>
+  </div>
+
+  <!-- The current call. `edge_over_base` gets equal billing with the
+       direction on purpose: each metal already rises more often than not, so
+       "UP" on its own is close to content-free. -->
+  <section class="card prediction" id="prediction-card">
+    <div class="prediction-head">
+      <h2>Güncel Tahmin &mdash; <span id="asset-name">Altın</span></h2>
+      <span class="muted small" id="prediction-horizon">-</span>
+    </div>
+    <div class="prediction-body">
+      <div class="prediction-main">
+        <span id="prediction-direction" class="direction">-</span>
+        <span id="prediction-price" class="prediction-price">-</span>
+      </div>
+      <div class="prediction-meta">
+        <div class="meta-item">
+          <span class="muted small">Modelin P(yükseliş)</span>
+          <strong id="prediction-pup">-</strong>
+        </div>
+        <div class="meta-item">
+          <span class="muted small">Taban oran (hiç model yok)</span>
+          <strong id="prediction-base">-</strong>
+        </div>
+        <div class="meta-item highlight">
+          <span class="muted small">Modelin kattığı fark</span>
+          <strong id="prediction-edge">-</strong>
+        </div>
+      </div>
+    </div>
+    <p class="muted small footnote" id="base-rate-note">-</p>
+  </section>
+
+  <section class="card">
+    <h2>Piyasa Durumu</h2>
+    <div class="context-grid" id="context-grid"></div>
+    <p class="muted small footnote" id="gs-ratio-note">-</p>
+  </section>
+
+  <section class="card">
+    <h2>Sinyal Bileşenleri</h2>
+    <p class="muted small">
+      Her bileşen bağımsız bir görüş üretir. Harman, bileşenlerin <em>ölçülmüş</em>
+      sicillerini log-odds uzayında havuzlar; beyan ettikleri güveni değil. Taban orandan
+      daha iyisini yapamamış bir bileşen otomatik olarak susturulur ve %0 görünür.
+    </p>
+    <div class="table-wrap">
+      <table id="components-table">
+        <thead>
+          <tr><th>Bileşen</th><th>Yön</th><th>Güven</th><th>Hedef fiyat</th><th>Etki</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="muted small" id="claude-reasoning"></p>
+  </section>
+
+  <!-- Kanal Finans: a person's opinion, reported not adopted. Styled
+       differently from the model's own output so the two are never confused,
+       and labelled in Turkish ("Olumlu/Olumsuz") where the model's own calls
+       are labelled "YÜKSELİŞ/DÜŞÜŞ". -->
+  <section class="card kanal-finans">
+    <h2>Kanal Finans TŞ</h2>
+    <p class="muted small">
+      Tunç Şatıroğlu'nun videolarında altın ve gümüş hakkında <strong>söyledikleri</strong>.
+      Bu bizim tahminimiz değil, onun görüşünün raporudur &mdash; ve modelin
+      bileşenlerinden biri de değildir. Aşağıdaki <code>kanalfinans</code> portföyü
+      dediklerini birebir uygular.
+    </p>
+
+    <h3 class="sub">Son görüşler</h3>
+    <div class="table-wrap">
+      <table id="kf-mentions-table">
+        <thead>
+          <tr><th>Tarih</th><th>Varlık</th><th>Görüş</th><th>Aksiyon</th><th>Hedef</th><th>Zarar-kes</th><th>Direnç</th><th>Özet</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h3 class="sub">Gerekçeler (makro temalar)</h3>
+    <p class="muted small">
+      Görüşün dayandığı hikâye. Bilerek <em>işlem üretmez</em> &mdash; çıplak bir
+      "yükseliş" ifadesinin bağlamıyla okunabilmesi için tutuluyor.
+    </p>
+    <div id="kf-themes"></div>
+  </section>
+
+  <section class="card">
+    <h2>Kağıt Portföyler &mdash; <span id="portfolio-asset-name">Altın</span></h2>
+    <p class="muted small strategy-intro">
+      Bağımsız $1000 simülasyonları (gerçek para yok, gerçek emir yok), her metal kendi
+      maliyet varsayımıyla. <strong>Al-ve-tut kıyas ölçütüdür</strong>: 25 yılda yıllık
+      ~%11,8 kazandıran, geçilmesi gerçekten zor bir strateji. Diğerleri onu
+      geçemediğinde bu ekranda görünür.
+    </p>
+    <div class="strategy-grid" id="strategy-panels"></div>
+  </section>
+
+  <section class="card">
+    <h2>Geçmiş Tahminler</h2>
+    <div class="table-wrap">
+      <table id="history-table">
+        <thead>
+          <tr>
+            <th>Hedef</th><th>Giriş</th><th>Yön</th><th>P(yük.)</th>
+            <th>Fark</th><th>Sonuç</th><th>Gerçekleşen</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="muted small" id="history-summary">-</p>
+  </section>
+
+  <footer>
+    <p class="muted small">
+      <strong>Bu bir yatırım tavsiyesi aracı değildir.</strong> Tüm portföyler sanaldır;
+      hiçbir gerçek emir verilmez, hiçbir borsa hesabına bağlanılmaz. Ölçülmüş sonuç şudur:
+      yön tahmini al-ve-tut'u geçmiyor; ölçülebilir katkı yalnızca pozisyon
+      boyutlandırmasında (oynaklık hedefleme) ve orada bile mütevazı.
+    </p>
+    <p class="muted small">Veri: Yahoo Finance (GC=F, SI=F ve makro seriler), Binance PAXG (altın hafta sonu fiyatı), YouTube RSS.</p>
+  </footer>
+
+</main>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

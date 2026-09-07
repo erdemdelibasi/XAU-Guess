@@ -1,0 +1,152 @@
+"""Builds and caches the gold + macro daily panel the research bench runs on.
+
+Separate from the live path on purpose: research must be able to re-run a
+hypothesis a hundred times without hammering Yahoo, and must be reproducible
+across a session. `panel.json` is gitignored and rebuilt in ~30 seconds.
+
+Data hygiene applied here, once, so every downstream study inherits it:
+
+  * The final bar is dropped when it is still forming. Yahoo happily serves
+    today's partial session as if it were a closed bar (measured 2026-09-07:
+    a row timestamped 11:03:23 with the day only half traded). Training a
+    next-day label against a half-formed bar is a slow, invisible leak.
+
+  * Flat bars (open == high == low == close) are FLAGGED, not dropped. Yahoo
+    emits these where it has a settlement print but no intraday series --
+    2026-09-04 printed 4429.80 four times on volume 16, between real sessions
+    of ~48000 contracts. They run 27-38% of bars in 2001-2007 and ~4-5% since
+    2018, so dropping them was the first instinct.
+
+    It was wrong, and measuring said so. Against GLD (a clean, independent
+    gold series) the daily return implied by a flat bar's close correlates
+    0.737, versus 0.892 for normal bars, with a median absolute difference
+    of 0.175% -- actually *smaller* than the 0.213% normal bars show. The
+    close is a real settlement price. Only open/high/low are fabricated, as
+    copies of it.
+
+    So dropping them would have thrown away ~11% of genuine closes AND, worse,
+    silently broken calendar continuity: delete Tuesday and Monday's
+    "next-day return" quietly becomes a two-day return, with no error anywhere.
+    Instead `flat_bar` marks them, and the feature set prefers close-to-close
+    measures over high/low ranges (see indicators.py) because the range is
+    the only part that is actually missing.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+# Windows defaults a REDIRECTED stdout to cp1252, which cannot encode the
+# Turkish letters this project prints ("Altın" alone is enough). XRP-Guess
+# lost a scheduled task to exactly this: every run exited 1 with
+# UnicodeEncodeError, the log cut off mid-item, and the failure bookkeeping
+# that should have recorded it never ran. Forcing UTF-8 at every entry point
+# keeps the script correct however it is invoked.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+import assets as assets_module  # noqa: E402
+import fetch_data  # noqa: E402
+
+YEARS = 25
+
+
+def panel_path(asset_key: str) -> Path:
+    return Path(__file__).parent / f"panel_{asset_key}.json"
+
+
+def _drop_forming_bar(gold: pd.DataFrame) -> pd.DataFrame:
+    """Remove the last row if its timestamp is not a clean session open.
+
+    Yahoo stamps completed daily bars at the session open (04:00 UTC for
+    COMEX) and stamps the in-progress bar with the wall clock instead. That
+    difference is the only reliable tell available without a market calendar.
+    """
+    if gold.empty:
+        return gold
+    last = gold["time"].iloc[-1]
+    if not (last.minute == 0 and last.second == 0):
+        return gold.iloc[:-1].reset_index(drop=True)
+    return gold
+
+
+def flag_flat_bars(gold: pd.DataFrame) -> pd.DataFrame:
+    """Adds `flat_bar`: True where open==high==low==close (see module docstring).
+
+    Kept, not dropped -- the close is real, only the range is fabricated.
+    """
+    out = gold.copy()
+    out["flat_bar"] = (
+        (out["open"] == out["high"]) & (out["high"] == out["low"]) & (out["low"] == out["close"])
+    )
+    return out
+
+
+def build(asset_key: str = "gold", years: int = YEARS) -> pd.DataFrame:
+    asset = assets_module.get(asset_key)
+    print(f"{asset.label} gunluk verisi cekiliyor ({years} yil, {asset.symbol})...", flush=True)
+    prices = fetch_data.get_daily(asset.symbol, years=years)
+    raw_rows = len(prices)
+
+    prices = _drop_forming_bar(prices)
+    prices = flag_flat_bars(prices)
+    flat_count = int(prices["flat_bar"].sum())
+    print(f"  {raw_rows} ham satir -> {len(prices)} satir "
+          f"({raw_rows - len(prices)} olusmakta olan mum atildi; "
+          f"{flat_count} duz mum isaretlendi ama TUTULDU -- kapanislari gercek)", flush=True)
+
+    # The asset's own series is swapped out for its counterpart metal --
+    # otherwise silver's panel would carry a `silver` column identical to its
+    # own close (see assets.macro_symbols_for).
+    wanted = assets_module.macro_symbols_for(asset)
+    print(f"Makro seriler cekiliyor ({len(wanted)} seri)...", flush=True)
+    macro = {}
+    for name, symbol in wanted.items():
+        try:
+            frame = fetch_data.get_daily(symbol, years=years)
+            if not frame.empty:
+                macro[name] = frame
+        except Exception as exc:  # noqa: BLE001 -- one dead series must not kill the build
+            print(f"  WARNING: {name} ({symbol}) alinamadi: {exc}")
+    print(f"  {len(macro)}/{len(wanted)} seri geldi: {', '.join(macro)}", flush=True)
+
+    panel = fetch_data.align_on_gold(prices, macro)
+    print(f"Panel: {panel.shape[0]} satir x {panel.shape[1]} kolon "
+          f"({panel['time'].iloc[0].date()} -> {panel['time'].iloc[-1].date()})", flush=True)
+    return panel
+
+
+def save(panel: pd.DataFrame, asset_key: str) -> None:
+    path = panel_path(asset_key)
+    payload = panel.copy()
+    payload["time"] = payload["time"].dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+    path.write_text(json.dumps(payload.to_dict(orient="list")), encoding="utf-8")
+    print(f"Kaydedildi: {path.name} ({path.stat().st_size / 1e6:.1f} MB)")
+
+
+def load(asset_key: str = "gold", rebuild: bool = False) -> pd.DataFrame:
+    """Cached panel for `asset_key`, building it first if missing or stale."""
+    path = panel_path(asset_key)
+    if rebuild or not path.exists():
+        panel = build(asset_key)
+        save(panel, asset_key)
+        return panel
+    data = json.loads(path.read_text(encoding="utf-8"))
+    panel = pd.DataFrame(data)
+    panel["time"] = pd.to_datetime(panel["time"], utc=True, format="mixed")
+    return panel
+
+
+if __name__ == "__main__":
+    keys = [a for a in sys.argv[1:] if not a.startswith("--")] or list(assets_module.ASSETS)
+    rebuild = "--rebuild" in sys.argv
+    for key in keys:
+        print(f"\n{'=' * 70}\n### {key.upper()}\n{'=' * 70}")
+        load(key, rebuild=rebuild or not panel_path(key).exists())

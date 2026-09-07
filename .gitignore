@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Secrets -- never commit
+backend/.env
+
+# Local run logs
+backend/logs/
+
+# Research cache: ~2 MB, rebuilt in ~30s with `python research/panel.py --rebuild`.
+# Not committed because it is derived data with a timestamp, so it would churn
+# on every rebuild and make diffs unreadable.
+backend/research/panel_*.json
+# Walk-forward signal cache, rebuilt by research/tilt.py in ~40s. Derived
+# data with an embedded timestamp -- committing it would churn every run.
+backend/research/walkforward_h5.json
+
+# OS
+Thumbs.db
+.DS_Store

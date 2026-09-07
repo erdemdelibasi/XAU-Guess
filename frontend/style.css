@@ -1,0 +1,268 @@
+/* XAU-Guess. Dark, warm-neutral palette -- gold reads badly on the cold blue
+   XRP-Guess used, and a yellow accent on a blue ground fights itself. */
+
+:root {
+  --bg: #0b0906;
+  --card: #15120d;
+  --card-2: #1d1913;
+  --line: #2c2519;
+  --text: #f2ede4;
+  --muted: #9a8f7d;
+  --gold: #e0b34e;
+  --gold-dim: #8a6f2e;
+  --up: #4ec98a;
+  --down: #e2635c;
+  --benchmark: #7fa8d8;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 20px 16px 64px;
+}
+
+h1 { font-size: 1.5rem; margin: 0; letter-spacing: 0.02em; font-weight: 800; }
+h2 { font-size: 1.05rem; margin: 0 0 10px; font-weight: 700; }
+.muted { color: var(--muted); }
+.small { font-size: 0.82rem; }
+.center { text-align: center; }
+
+/* --- top bar ----------------------------------------------------------- */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+}
+.topbar-right { text-align: right; }
+.price {
+  font-size: 1.9rem;
+  font-weight: 800;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+/* --- cards ------------------------------------------------------------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.footnote { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* --- current prediction ------------------------------------------------ */
+.prediction-head { display: flex; justify-content: space-between; align-items: baseline; }
+.prediction-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.prediction-main { display: flex; align-items: baseline; gap: 14px; }
+.direction {
+  font-size: 1.8rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.direction.up { color: var(--up); }
+.direction.down { color: var(--down); }
+.prediction-price {
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.prediction-meta { display: flex; gap: 22px; flex-wrap: wrap; }
+.meta-item { display: flex; flex-direction: column; gap: 2px; }
+.meta-item strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+/* The one number that answers "did the model add anything today". */
+.meta-item.highlight strong { color: var(--gold); }
+
+/* --- market context ---------------------------------------------------- */
+.context-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.context-item {
+  background: var(--card-2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.context-item .label { display: block; color: var(--muted); font-size: 0.78rem; }
+.context-item .value { font-size: 1.05rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* --- tables ------------------------------------------------------------ */
+/* Wide content scrolls inside its own container; the page body must never
+   scroll horizontally. */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { width: 100%; border-collapse: collapse; font-size: 0.88rem; white-space: nowrap; }
+th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--line); }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+tbody tr:last-child td { border-bottom: none; }
+td.num { font-variant-numeric: tabular-nums; }
+.up-text { color: var(--up); }
+.down-text { color: var(--down); }
+.silenced { color: var(--muted); font-style: italic; }
+
+/* --- strategy panels --------------------------------------------------- */
+/* auto-fit grid, never a horizontal scroller: on a wide window every panel
+   is visible at once, on a phone they stack. */
+.strategy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.strategy-panel {
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+}
+/* The benchmark is marked, not hidden. */
+.strategy-panel.benchmark { border-color: var(--benchmark); }
+.strategy-panel .name { font-weight: 700; font-size: 0.95rem; }
+.strategy-panel .badge {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--benchmark);
+  border: 1px solid var(--benchmark);
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.strategy-panel .desc { color: var(--muted); font-size: 0.75rem; margin: 4px 0 10px; min-height: 2.6em; }
+.strategy-panel .value { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.strategy-panel .pnl { font-size: 0.9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.strategy-panel .row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.strategy-panel .row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
+/* Exposure bar: how much of this portfolio is currently in gold. */
+.exposure-bar { height: 5px; background: #241d13; border-radius: 999px; margin-top: 10px; overflow: hidden; }
+.exposure-bar > div { height: 100%; background: var(--gold-dim); border-radius: 999px; }
+
+footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
+footer p { margin: 0 0 8px; }
+
+.error {
+  background: #2a1512;
+  border: 1px solid var(--down);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+
+@media (max-width: 620px) {
+  .prediction-body { flex-direction: column; align-items: flex-start; }
+  .price { font-size: 1.55rem; }
+}
+
+/* --- asset switch ------------------------------------------------------- */
+/* Both metals run the full pipeline every day; this only chooses which one's
+   detail is on screen, so switching re-renders from cache and never refetches. */
+.asset-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.asset-tabs button {
+  flex: 0 0 auto;
+  padding: 8px 20px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.asset-tabs button.active { color: var(--bg); background: var(--gold); border-color: var(--gold); }
+
+h3.sub {
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 20px 0 6px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* --- Kanal Finans ------------------------------------------------------- */
+/* Visually distinct from the model's own output: this is a person's opinion
+   being reported, not a forecast this project stands behind. The Turkish
+   "Olumlu/Olumsuz" labels (vs the model's "YÜKSELİŞ/DÜŞÜŞ") do the same job
+   in words. */
+.kanal-finans { border-left: 3px solid var(--benchmark); }
+.summary-cell {
+  white-space: normal;
+  min-width: 260px;
+  max-width: 460px;
+  color: var(--muted);
+}
+.action {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.action-buy  { background: rgba(78, 201, 138, 0.16); color: var(--up); }
+.action-sell { background: rgba(226, 99, 92, 0.16); color: var(--down); }
+.action-hold { background: #241d13; color: var(--muted); }
+
+.theme {
+  border-left: 3px solid var(--line);
+  background: var(--card-2);
+  border-radius: 0 10px 10px 0;
+  padding: 9px 12px;
+  margin-bottom: 8px;
+}
+.theme-positive { border-left-color: var(--up); }
+.theme-negative { border-left-color: var(--down); }
+.theme-neutral  { border-left-color: var(--muted); }
+.theme-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.theme-name { font-weight: 600; font-size: 0.86rem; }
+.theme-impact { color: var(--muted); font-size: 0.76rem; }
+.theme-body { color: var(--muted); font-size: 0.84rem; margin-top: 3px; }
+
+/* The follower portfolio tracks a person's stated levels rather than a
+   computed exposure, so it is marked as a different kind of thing. */
+.strategy-panel.follower { border-color: var(--benchmark); }
+
+code {
+  background: var(--card-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}

@@ -1,0 +1,51 @@
+name: Daily Gold Prediction
+
+# COMEX gold settles at 17:00 New York, which is 21:00 UTC in summer and
+# 22:00 in winter. 23:00 UTC is safely after both, all year, without needing
+# a daylight-saving rule. Weekdays only -- there is no Saturday gold close to
+# predict against, and predict.py would skip the run anyway once it saw the
+# session had not advanced.
+on:
+  schedule:
+    - cron: "0 23 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run prediction
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # Optional. Without it the `claude` component stays neutral and
+          # everything else runs unchanged -- see claude_signal.py.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python predict.py
+
+      # predict.py bootstrap-trains a model when none exists or the feature
+      # set changed. Without this commit that model is discarded when the
+      # runner shuts down, and every single run pays to retrain from scratch.
+      - name: Commit bootstrap-trained model if it changed
+        run: |
+          if [[ -n "$(git status --porcelain backend/models/)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add backend/models/
+            git commit -m "chore: bootstrap-trained gold model"
+            git push
+          else
+            echo "No model change to commit."
+          fi
