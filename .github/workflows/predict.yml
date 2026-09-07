@@ -1,4 +1,4 @@
-name: Daily Gold Prediction
+name: Daily Prediction
 
 # COMEX gold settles at 17:00 New York, which is 21:00 UTC in summer and
 # 22:00 in winter. 23:00 UTC is safely after both, all year, without needing
