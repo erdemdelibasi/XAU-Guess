@@ -576,6 +576,25 @@ sayar ve dokuz portföyün `maybe_trade()`'i iki kez ateşlenirdi.
 - Git kimliği kullanıcının makinesinde ayarlı (`erdemdelibasi@gmail.com`) —
   Vercel bunu doğrulanmış GitHub e-postasıyla eşleştirip deploy'u
   bloklayabiliyor.
+- **Bu repoya bağlı Vercel projesi TEK olmalı: `xau-guess`, kök dizini
+  `frontend/`.** 2026-09-08'e kadar ikinci bir proje (`backend`) de bağlıydı
+  ve **her push'ta hata maili üretiyordu** — `backend/` saf Python, Vercel'in
+  orada sunacağı bir şey yok. Kurulum sırasında kök dizini yanlış seçilmiş
+  bir denemeden kalmıştı ve **hiç başarılı olmamıştı**; sonradan silindi.
+  Yanıltıcı yanı şu: `xau-guess` her seferinde başarılı olduğu ve site
+  güncellendiği için "deploy failed" maili gerçek bir arızayı işaret
+  ediyormuş gibi görünüyor, ama site tamamen sağlıklı.
+
+  Teşhisi tahmin ederek değil şuradan yap — Vercel her projenin sonucunu
+  GitHub'a commit status'ü olarak yazıyor:
+
+  ```bash
+  gh api repos/erdemdelibasi/XAU-Guess/commits/<sha>/status \
+    --jq '.statuses[] | "\(.context) | \(.state)"'
+  ```
+
+  İki satır dönüyorsa iki proje bağlı demektir. Sadece siteyi açıp "çalışıyor"
+  demek yetmez; çalışan projeyi görüp patlayanı kaçırırsın.
 
 ## Ton / dil
 
