@@ -38,6 +38,18 @@
     </div>
   </header>
 
+  <!-- Live prices. Deliberately NOT symmetric, because the data is not:
+       gold has a 24/7 browser-reachable source and silver has none (measured
+       2026-09-08 -- Binance lists no silver token, and Yahoo sends no CORS
+       header so the browser cannot call it at all). Showing silver's last
+       COMEX close under a "live" heading would be the exact substitution
+       fetch_data refuses to make on the backend. -->
+  <section class="card live-prices">
+    <h2>Anlık Fiyatlar</h2>
+    <div class="live-grid" id="live-prices"></div>
+    <p class="muted small footnote" id="live-note">-</p>
+  </section>
+
   <!-- Asset switch. Both metals run the full pipeline independently; the tab
        only chooses which one's detail is on screen. -->
   <div class="asset-tabs" id="asset-tabs">

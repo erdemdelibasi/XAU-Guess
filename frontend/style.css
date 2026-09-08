@@ -277,3 +277,62 @@ code {
   background: rgba(201, 162, 39, 0.08);
   border-radius: 0 4px 4px 0;
 }
+
+/* Live price panel. The "canlı" badge is a load-bearing label, not decoration:
+   gold has a 24/7 browser-reachable feed and silver does not, so the two cards
+   are showing different KINDS of number and the reader has to be able to see
+   which is which at a glance. */
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+.live-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  background: var(--card-2);
+}
+.live-card.is-live { border-color: rgba(78, 201, 138, 0.45); }
+.live-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+.live-badge {
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: lowercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.live-card.is-live .live-badge {
+  border-color: rgba(78, 201, 138, 0.5);
+  color: var(--up);
+}
+.live-usd {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.live-tl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 1rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0.15rem 0 0.4rem;
+}
+.live-usd .unit,
+.live-tl .unit {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 0.15rem;
+}
+.live-source { line-height: 1.45; }

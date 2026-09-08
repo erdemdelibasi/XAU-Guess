@@ -76,6 +76,26 @@ const GS_RATIO = {
       + "Bağlam için gösteriliyor — hiçbir strateji bu orana göre işlem yapmıyor.",
 };
 
+/* Live prices, fetched straight from the browser.
+
+   WHICH SOURCES ARE EVEN POSSIBLE HERE was measured, not assumed
+   (2026-09-08). Yahoo -- the backend's primary -- returns no
+   Access-Control-Allow-Origin header, so a browser simply cannot call it;
+   every price on this page therefore has to come from somewhere else or from
+   Supabase. Binance's public host does send `Access-Control-Allow-Origin: *`
+   and carries both PAXGUSDT and USDTTRY, so it can serve gold and the FX
+   rate 24/7.
+
+   It cannot serve SILVER. XAGUSDT, SLVUSDT and KAGUSDT all come back
+   "Invalid symbol" -- there is no silver token on that venue, which is the
+   same gap fetch_data.py documents on the backend. So silver's number here
+   is its last COMEX close, out of Supabase, LABELLED as such. Printing it
+   under a heading that says "anlık" would be exactly the substitution this
+   project refuses to make: a number whose provenance differs from its label
+   is worse than an honest gap. */
+const BINANCE = "https://data-api.binance.vision/api/v3/ticker/price";
+const TROY_OUNCE_GRAMS = 31.1034768;
+
 const KF_STANCE = { UP: "Olumlu", DOWN: "Olumsuz", NEUTRAL: "Nötr" };
 const KF_ACTION = { BUY: "AL", SELL: "SAT", HOLD: "TUT" };
 const KF_IMPACT = { POSITIVE: "olumlu", NEGATIVE: "olumsuz", NEUTRAL: "nötr" };
@@ -225,6 +245,98 @@ function renderRatio(goldRow, silverRow) {
   }
   document.getElementById("gs-ratio-context").textContent = parts.join(" · ");
   document.getElementById("gs-ratio-note").textContent = GS_RATIO.note;
+}
+
+async function fetchBinance(symbol) {
+  // One dead endpoint must not blank the whole panel, so this resolves to
+  // null rather than rejecting -- the renderer decides what to show instead.
+  try {
+    const response = await fetch(`${BINANCE}?symbol=${symbol}`);
+    if (!response.ok) return null;
+    const price = Number((await response.json()).price);
+    return Number.isFinite(price) && price > 0 ? price : null;
+  } catch {
+    return null;
+  }
+}
+
+function livePriceCard({ label, usd, usdtry, source, live, footnote }) {
+  if (usd === null || usd === undefined) {
+    return `<div class="live-card"><div class="live-label">${label}</div>
+            <div class="live-usd">-</div>
+            <div class="muted small">fiyat alınamadı</div></div>`;
+  }
+  const digits = label === "Gümüş" ? 3 : 2;
+  // TL is always DERIVED, never quoted: there is no lira-denominated feed
+  // here, so it is dollar price x USDTRY and nothing more.
+  const tlOunce = usdtry ? usd * usdtry : null;
+  const tlGram = tlOunce === null ? null : tlOunce / TROY_OUNCE_GRAMS;
+  return `
+    <div class="live-card${live ? " is-live" : ""}">
+      <div class="live-label">${label}
+        <span class="live-badge">${live ? "canlı" : "son kapanış"}</span>
+      </div>
+      <div class="live-usd">${fmtUsd(usd, digits)}<span class="unit">/ons</span></div>
+      <div class="live-tl">
+        <span>${tlOunce === null ? "-" : fmtNumber(tlOunce, 0) + " ₺"}<span class="unit">/ons</span></span>
+        <span>${tlGram === null ? "-" : fmtNumber(tlGram, 2) + " ₺"}<span class="unit">/gram</span></span>
+      </div>
+      <div class="muted small live-source">${source}</div>
+      ${footnote ? `<div class="muted small live-source">${footnote}</div>` : ""}
+    </div>`;
+}
+
+function renderLivePrices(spotGold, usdtry, goldRow, silverRow) {
+  const comexGold = goldRow ? Number(goldRow.price_at_prediction) : null;
+  const comexSilver = silverRow ? Number(silverRow.price_at_prediction) : null;
+  const asOf = (row) => (row?.created_at ? fmtDate(row.created_at) : "-");
+
+  // Gold's live quote is PAXG, which tracks SPOT; the model reads GC=F, a
+  // futures contract sitting above spot by its financing and storage cost
+  // (measured 1.9% on 2026-09-07 and 0.94% on 2026-09-08 -- not a constant).
+  // Both are shown because a reader comparing this panel against the
+  // prediction card would otherwise find a few-percent discrepancy with no
+  // explanation.
+  //
+  // The gap is NOT labelled "basis", which is what it was called first and
+  // is wrong: the stored close can be days old, so the difference is the
+  // futures-spot basis PLUS everything the market did since that close. Two
+  // effects share one number and the label has to say so, or the panel
+  // quietly reports a stale price move as a financing cost.
+  const gap = spotGold && comexGold ? spotGold / comexGold - 1 : null;
+
+  const cards = [
+    livePriceCard({
+      label: "Altın",
+      usd: spotGold ?? comexGold,
+      usdtry,
+      live: Boolean(spotGold),
+      source: spotGold
+        ? "PAXG spot &middot; Binance, 7/24"
+        : `COMEX GC=F kapanışı &middot; ${asOf(goldRow)}`,
+      footnote:
+        spotGold && comexGold
+          ? `Model <strong>COMEX vadeli</strong> kapanışını kullanıyor: ${fmtUsd(comexGold, 2)} `
+            + `(${asOf(goldRow)}). Aradaki %${fmtNumber(Math.abs(gap * 100), 1)} fark iki şeyi `
+            + `birden içerir: vadeli&ndash;spot bazı ve o kapanıştan bu yana olan hareket.`
+          : "",
+    }),
+    livePriceCard({
+      label: "Gümüş",
+      usd: comexSilver,
+      usdtry,
+      live: false,
+      source: `COMEX SI=F kapanışı &middot; ${asOf(silverRow)}`,
+      footnote: "Gümüşün tarayıcıdan çağrılabilen 7/24 kaynağı yok &mdash; bu fiyat anlık değil.",
+    }),
+  ];
+  document.getElementById("live-prices").innerHTML = cards.join("");
+
+  document.getElementById("live-note").innerHTML = usdtry
+    ? `TL değerleri <strong>paritedir</strong>: dolar fiyatı × USDTRY `
+      + `(${fmtNumber(usdtry, 4)}, Binance USDTTRY). Türkiye'de gram altın bu paritenin `
+      + `<em>üzerinde</em> bir primle işlem görür, dolayısıyla bu sayı kuyumcu fiyatı değildir.`
+    : "USDTRY alınamadı &mdash; TL karşılıkları gösterilemiyor.";
 }
 
 function renderComponents(row, asset) {
@@ -424,13 +536,19 @@ function renderAll() {
 
 async function load() {
   try {
-    const [gold, silver, portfolios, mentions, themes] = await Promise.all([
-      api("predictions?select=*&asset=eq.gold&order=target_date.desc&limit=30"),
-      api("predictions?select=*&asset=eq.silver&order=target_date.desc&limit=30"),
-      api("portfolios?select=*"),
-      api("kanal_finans_mentions?select=*&order=published_at.desc&limit=40"),
-      api("kanal_finans_themes?select=*&order=published_at.desc&limit=40"),
-    ]);
+    // The two Binance calls sit in the same Promise.all as the Supabase ones
+    // rather than in a second round trip: they resolve to null on failure,
+    // so they can never delay or break the rest of the page.
+    const [gold, silver, portfolios, mentions, themes, spotGold, usdtry] =
+      await Promise.all([
+        api("predictions?select=*&asset=eq.gold&order=target_date.desc&limit=30"),
+        api("predictions?select=*&asset=eq.silver&order=target_date.desc&limit=30"),
+        api("portfolios?select=*"),
+        api("kanal_finans_mentions?select=*&order=published_at.desc&limit=40"),
+        api("kanal_finans_themes?select=*&order=published_at.desc&limit=40"),
+        fetchBinance("PAXGUSDT"),
+        fetchBinance("USDTTRY"),
+      ]);
 
     cache = { predictions: { gold, silver }, portfolios, mentions, themes };
 
@@ -440,6 +558,7 @@ async function load() {
     // latest prices, which is right whenever both rows are from the same day
     // and quietly wrong when one metal's row is staler than the other's.
     renderRatio(gold[0], silver[0]);
+    renderLivePrices(spotGold, usdtry, gold[0], silver[0]);
 
     renderKanalFinans(mentions, themes);
     renderAll();
