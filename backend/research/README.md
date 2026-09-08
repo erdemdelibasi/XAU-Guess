@@ -41,6 +41,8 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 | `compare.py` | Gümüşü altına karşı ölçer; `assets.py`'deki her sayı buradan gelir |
 | `ratio.py` | Altın/gümüş oranı: ortalamaya dönüş, rotasyon, çift tutma, ve `gs_ratio_z`'nin modele katkısı |
 | `ablation.py` | ML bileşeni taban orana neden takılıyor — etiket mi, özellikler mi |
+| `fedcycle.py` | Fed faiz kararları: olay, rejim ve sürpriz — üçü ayrı ayrı |
+| `realrate.py` | Gerçek reel faiz (FRED DFII10) vs TIP/IEF vekili; merkez bankası alımının ölçülebilir izi |
 
 ```bash
 cd backend/research
@@ -55,11 +57,24 @@ python season.py
 python compare.py           # gumus eklendiginde/degistiginde
 python ratio.py             # ~4 dk (icinde 4 yuruyen-ileri kosusu var)
 python ablation.py          # ~12 dk (16 yuruyen-ileri kosusu)
+python fedcycle.py          # ~4 dk  (FRED gerekir)
+python realrate.py          # ~6 dk  (FRED gerekir)
 ```
 
 `panel.py` argümansız çalıştırılınca **her iki metal için de** panel kurar
 (`panel_gold.json`, `panel_silver.json`). Diğer dosyalar varsayılan olarak
 altını okur; `backtest.py silver` gibi bir argümanla gümüşe çevrilebilir.
+
+**FRED artık erişilebiliyor — ama güvenilir değil.** CLAUDE.md 2026-09-07'de
+`fred.stlouisfed.org`'u ulaşılamaz diye kaydetmişti (tekrarlanan 60 sn zaman
+aşımı, aynı anda her Yahoo çağrısı geçerken). 2026-09-08'de aynı makineden
+her seri 1,2 sn altında geldi ve arada kodda hiçbir şey değişmedi. Dürüst
+okuma "engel kalktı" değil, **"bu host burada aralıklı olarak engelli"**.
+Son iki dosya FRED'i serbestçe kullanıyor; **canlı tahmin yolu kullanmıyor
+ve kullanmamalı** — ağ havasına göre var olup yok olan bir özellik kolonu,
+kayıtlı modelin özellik listesini bir sonraki koşuyla uyumsuz hâle getirir
+(bkz. `predict.py`'nin isim kontrolü). 11. bölüm bunun bir bedeli olmadığını
+da ölçtü: vekil, gerçek seriden ayırt edilemiyor.
 
 ---
 
@@ -499,3 +514,203 @@ Doğru okuma: *"Bu ailede büyük bir etki yok; küçük bir etki varsa 25 yıll
 günlük veri onu kanıtlayamaz."* Yapılacak iş daha fazla özellik denemek
 değil, **daha çok bağımsız gözlem** — ki bu da canlı kayıt biriktirmek
 demektir, tam olarak sistemin şu an yaptığı şey.
+
+
+---
+
+## 10. Fed faiz kararları: üç ayrı iddia, üçü de geçemedi (`fedcycle.py`)
+
+"Fed indirince altın çıkar" bu varlık hakkında en çok tekrar edilen cümle ve
+**yanlışlanamayacak** bir biçimde tekrar ediliyor: ne zaman, ne kadar, neye
+karşı söylemiyor. Bu dosya onu üç ayrı, ayrı ayrı kanıt gerektiren iddiaya
+bölüyor.
+
+Olay listesi **hafızadan yazılmadı**: `fetch_data.get_fed_target_rate()`
+DFEDTAR'ı (tek hedef, 2008-12-15'e kadar) DFEDTARL/DFEDTARU'nun **orta
+noktasına** ekliyor. Orta nokta önemli — üst banda eklemek 2008-12-16'da
+FOMC'nin hiç yapmadığı 12,5 baz puanlık bir "indirim" basardı. Panelde
+**64 politika değişimi** var (27 indirim, 37 artış).
+
+### 1) Olay: indirimden sonra gerçekten yükseliyor
+
+| | Altın +1..+20 gün | Gümüş +1..+20 gün |
+|---|---|---|
+| İNDİRİM sonrası | **%+2,71** (n=26), sürükleme üzeri t=+1,19 | **%+5,60** (n=26), t=+1,91 |
+| ARTIŞ sonrası | %+0,90 (n=37), t=−0,14 | %+1,43 (n=37), t=+0,06 |
+
+Yön hikâyeyle uyumlu ve büyüklük küçük değil. Ama t değerleri eşiğin
+uzağında ve **kıyas sıfır değil sürüklemedir**: altının ortalama 20 günü
+zaten %+1,02, gümüşünki %+1,34. İndirim sonrası fazlalık bunun üstündeki
+kısımdır.
+
+### 2) Rejim: taban oran rejime göre değişiyor mu? — asıl soru
+
+Bu bölüm kod değiştirebilecek olandı, çünkü `ensemble.py` **her** bileşenin
+becerisini `base_rate_up`'ın tek bir sayısına karşı ölçüyor. Taban oran
+aslında iki farklı sayıysa, her bileşenin "becerisi" kısmen rejim
+artefaktıdır.
+
+Altın, 5 günlük ufuk, test yarısı (taban %55,7):
+
+| Rejim | P(yük.) eğitim | P(yük.) test | fark | z | görülebilir en küçük fark |
+|---|---|---|---|---|---|
+| GEVŞEME | 0,546 | 0,596 | +3,9p | +1,05 | 11,7p |
+| SIKILAŞTIRMA | 0,603 | 0,533 | −2,4p | −0,84 | 9,1p |
+| BEKLEME | 0,569 | 0,518 | −3,9p | −0,95 | 13,0p |
+
+**24 rejim hücresinin 0'ı geçti.** İşaretler tutarlı (gevşemede yukarı,
+beklemede aşağı, her iki metalde de) ama sıkılaştırma iki yarı arasında
+işaret değiştiriyor ve hiçbir hücre eşiğe yaklaşmıyor.
+
+**Son kolon bu tablonun en önemli kısmı.** 5 günlük ufukta örtüşme
+düzeltmesinden sonra bu alt örneklemlerin ayırt edebileceği en küçük sapma
+**9-13 puan**, 60 günlük ufukta **31-45 puan**. Ölçülen sapmalar 2-7 puan.
+Yani bu çalışma "rejim etkisi yok" **diyemiyor**; "varsa 10 puandan küçük"
+diyebiliyor. `ablation.py`'nin IC sınırıyla aynı cinsten bir sınır.
+
+### 3) Sürpriz: kararın kendisi değil, şaşırtma miktarı
+
+Kararın ne olacağı haftalar önce fiyatlı; alınabilir olan varsa sürprizdir.
+Vekil: 5 yıllık getirinin (^FVX) olay günündeki değişimi. Tepki **bir sonraki
+kapanıştan** ölçülüyor — olay günü kapanışı kararı zaten içerir.
+
+**8 hücrenin 0'ı geçti.** Eğitim yarısında beklenen negatif işaret var
+(altın 1g r=−0,32), test yarısında **işaret dönüyor** (+0,14). n=31 olay,
+yani bu test zaten çok zayıf ve öyle olduğu yazılı.
+
+### 4) Kolon kararı: `policy_tilt` eklenmedi
+
+Vekil önce doğrulandı: ^IRX'in (13 haftalık bono, anahtarsız) 126 günlük
+eğimi FRED'in gerçek Fed duruşuyla **%93,7 uyuşuyor**. Yani politika duruşunu
+FRED'siz taşımak mümkün — soru onu taşımaya değip değmediği.
+
+Eşleştirilmiş yürüyen-ileri A/B, tek değişen kolon:
+
+| | kolon | IC | doğruluk | p (eşli) |
+|---|---|---|---|---|
+| Altın, üretim | 27 | +0,0595 | 0,5197 | — |
+| Altın, + `policy_tilt` | 28 | +0,0590 | 0,5210 | **0,947** |
+| Gümüş, üretim | 25 | −0,0160 | 0,5088 | — |
+| Gümüş, + `policy_tilt` | 26 | −0,0270 | 0,5047 | **0,377** |
+
+**Eklenmedi.** p=0,95 ve p=0,38 ile bir kolon eklemek, `ratio.py`'nin
+p=0,49'la kolon çıkarmayı reddetmesiyle tam olarak aynı karardır.
+
+### Bu bölümün doğru okunuşu
+
+"Faiz önemsiz" **değil**. Faizin metallere etkisi eşzamanlı olarak devasa
+(`drivers.py`: tip t=+6,63; 11. bölümde reel faizin aynı gün r=−0,30).
+Bu çalışmanın söylediği, o etkinin **günlük karar penceresinde ayrıca
+alınabilir bir şey bırakmadığı**: politika yönü zaten fiyatlanmış hâlde
+tahvil serilerinin içinde geliyor ve model `tip_chg`, `ief_chg`, `us10y_chg`
+üzerinden onu zaten okuyor.
+
+---
+
+## 11. Reel faiz vekili ve merkez bankası izi (`realrate.py`)
+
+### Vekil ne kadar iyi? — iddiaydı, artık ölçüm
+
+`indicators.py` reel faizi iki ETF'ten yeniden kuruyor ve kodda "şeklini
+yakalar, seviyesini değil" yazıyordu. Bu bir **varsayımdı**. FRED'in DFII10'u
+elimizdeyken ölçüldü:
+
+| Karşılaştırma | r |
+|---|---|
+| SEVİYE: DFII10 vs TIP/IEF oranı | +0,592 |
+| 5 günlük DEĞİŞİM: DFII10 vs `real_yield_chg` | **+0,929** |
+
+Ölçek de tutuyor: 5 günlük değişimin std sapması gerçek seride 0,1136 puan,
+vekilde 0,1158 — **1,02x**. Kodda yazan iddia doğruymuş.
+
+**Ve gerçek seri modele bir şey katmıyor**: `real_yield_chg`'i DFII10'un
+kendisiyle değiştiren eşleştirilmiş A/B altında IC +0,0646 → +0,0643,
+**p=0,984**. Vekil bedava — bu, FRED'e bağımlı olmamayı bir eksiklik olmaktan
+çıkarıyor.
+
+### Asıl bulgu vekilde değil, PENCEREDE
+
+İlk sürüm bu bölümü yanlış kurdu ve kayıt önemli: gerçek seri **1 günlük**
+farkla, vekil ise üretimdeki **5 günlük** hâliyle karşılaştırıldı. 1 günlük
+fark dünkü habere çok daha duyarlıdır, dolayısıyla ertesi gün korelasyonu
+doğal olarak yüksek çıkar — ölçülen şey serinin kalitesi değil, pencere
+uzunluğu olurdu. Pencereler eşitlendiğinde:
+
+| Seri | ertesi gün r (test) | t | eşik 2,96 |
+|---|---|---|---|
+| Altın, DFII10 **1 gün** | −0,1035 | −5,67 | **geçti** |
+| Altın, TIP/IEF vekili **1 gün** | −0,0866 | −4,74 | **geçti** |
+| Altın, DFII10 5 gün | −0,0300 | −1,63 | geçemedi |
+| Altın, TIP/IEF vekili **5 gün (üretim)** | −0,0377 | −2,06 | geçemedi |
+| Gümüş, TIP/IEF vekili **1 gün** | −0,0668 | −3,65 | **geçti** |
+| Gümüş, TIP/IEF vekili **5 gün (üretim)** | −0,0501 | −2,74 | geçemedi |
+
+**Üretimdeki pencere yanlıştı.** Bu projedeki ölçülmüş her öncü sürücü
+1 günlük değişimdir (`tip_chg`, `ief_chg`, `vix_chg` — `drivers.py`);
+`real_yield_chg` 5 gün üzerine kurulu **tek** terimdi ve kimse kontrol
+etmemişti.
+
+**Model tarafında değişiklik YOK, skorlayıcı tarafında VAR:**
+
+- ML: eşleştirilmiş A/B'de fark ölçülemedi (altın p=0,875, gümüş p=0,529).
+  Beklenen sonuç — model zaten `us10y_chg`, `tip_chg`, `ief_chg` taşıyor ve
+  1 günlük reel faiz değişimi bunların neredeyse doğrusal bileşkesi.
+  `ml_model.FEATURE_COLUMNS` **değişmedi**. Kolonun adını koruyup değerini
+  değiştirmek, `predict.py`'nin isim kontrolünün göremeyeceği tek özellik
+  değişikliği türüdür — her kayıtlı model farklı dağılımlı bir kolonu
+  hatasız şekilde puanlamaya devam ederdi.
+- `indicators._score_real_yield` artık `real_yield_chg1`'i okuyor ve
+  `REAL_YIELD_SCALE` 0,17 → **0,078** (p90 eşleşmeli). Ölçek pencereyle
+  **birlikte** değişmek zorundaydı: 0,17 ile 1 günlük değişim seansların
+  %1,1'inde doyuyor, medyan |skor| 0,161 — yani terim yeniden sessizleşirdi.
+  Bu, projenin daha önce bir kez düştüğü tuzağın aynısı.
+
+**Bedeli ölçüldü ve gizlenmiyor.** Backtest, tam maliyet merdiveni, iki metal:
+Calmar ortalama **−0,003** (`technical`) ve **−0,002** (`ensemble`) — yani
+hiçbir şey, ±0,02 bandında. Ama **işlem sayısı neredeyse ikiye katlandı**
+(altın `technical` 377 → 659, gümüş 379 → 718), çünkü 1 günlük değişim çok
+daha sık işaret değiştiriyor. 150 bp banka basamağında bu gerçek hasar:
+altın `technical` Calmar 0,20 → 0,18.
+
+Yine de değiştirildi ve gerekçe denetlenebilir olmalı: 5 günlük terimin
+**hiçbir metalde ölçülmüş öncülüğü yok**. Geri almak, ölçülmüş içeriği
+olmayan ağırlıklı bir terimi sırf sessiz olduğu için tutmak olurdu. Özet yine
+bu projenin defalarca vardığı yer: **gerçek ama üzerine para koymanın pahalı
+olduğu bir sinyal.**
+
+### Merkez bankası alımı: ölçemediğimiz şey ve ölçebildiğimiz şey
+
+**Ölçemediğimiz**: gerçek rezerv tonajı. Dünya Altın Konseyi verisi üç aylık,
+haftalarca gecikmeli ve kayıt duvarının arkasında; günlük, anahtarsız bir
+serisi **yok** ve bu proje piyasa verisi için anahtar kullanmıyor. FRED'de de
+aranıp bulunamadı. Bunu "izliyoruz" demek yanlış olurdu.
+
+**Ölçebildiğimiz**: böyle bir alıcının bırakacağı **iz**. Fiyata duyarsız,
+büyük ve ısrarlı bir alıcı varsa altın kendi makro sürücülerinin
+açıkladığından fazla yükselir — ve bu bir artıktır. Her gün 250 seanslık
+pencerede `getiri ~ a + b1·reel faiz değişimi + b2·dolar getirisi` fit
+ediliyor.
+
+| Yıl | Yıllık artık | Reel faiz betası | Gerçekleşen |
+|---|---|---|---|
+| 2017 | %3,1 | −0,081 | %13,3 |
+| 2020 | %17,9 | **−0,073** | %24,3 |
+| 2022 | %14,3 | −0,055 | %0,8 |
+| 2023 | %12,8 | −0,034 | %13,4 |
+| 2024 | %22,8 | −0,034 | %25,4 |
+| 2025 | %34,3 | −0,010 | %51,9 |
+| 2026 | %37,8 | **+0,001** | %5,7 |
+
+Beta 2020'de −0,073 iken 2026'da **+0,001**: "altın reel faizden koptu"
+iddiasının ölçülmüş hâli budur. Aynı dönemde açıklanamayan sürükleme
+%12,8'den %37,8'e çıkıyor.
+
+**Ama kopma ile alım aynı şey değildir**, ve bu bölümün en önemli cümlesi
+şu: **artık, modelin açıklamadığı HER ŞEYdir** — ETF akışları, eksik bir
+değişken, ya da iki faktörlü modelin kendisinin yanlış olması dahil. Merkez
+bankası alımıyla **uyumludur**; onu **kanıtlamaz**.
+
+**Ve alınabilir değil.** Artığın ileri getiriyi öncüleyip öncülemediği ayrıca
+soruldu: 8 hücrenin **0'ı** geçti (en yükseği altın 60g: r=+0,145, t=+1,00).
+"Artık büyümüş" bilgisi bir sonraki hafta için bir şey söylemiyor. Yine aynı
+şekil: gerçek, açıklayıcı, alınamaz.

@@ -120,12 +120,12 @@ def load_panel(asset) -> pd.DataFrame:
     if prices.empty:
         raise RuntimeError(f"No history returned for {asset.symbol} -- cannot predict.")
 
-    # Drop the still-forming session. Yahoo stamps a completed daily bar at
-    # the session open (04:00 UTC) and the in-progress one with the wall
-    # clock; predicting off a half-formed bar is a silent leak.
-    last = prices["time"].iloc[-1]
-    if not (last.minute == 0 and last.second == 0):
-        prices = prices.iloc[:-1].reset_index(drop=True)
+    # Drop the still-forming session. The rule lives in fetch_data so the
+    # research bench applies the identical one -- this file and
+    # research/panel.py each used to carry their own copy of a stamp-shape
+    # heuristic that turned out to keep every partial bar it existed to
+    # remove (see fetch_data.bar_is_complete).
+    prices = fetch_data.drop_forming_bar(prices)
 
     wanted = assets_module.macro_symbols_for(asset)
     macro = {}
@@ -225,6 +225,46 @@ def resolve_due_predictions(db, asset, panel: pd.DataFrame) -> int:
     return resolved
 
 
+# Columns added by a migration that has to be applied by hand in the Supabase
+# SQL editor (see supabase/schema.sql). PostgREST rejects the WHOLE insert if
+# a key has no column, so shipping these without the migration would mean no
+# prediction is written at all until someone notices.
+PENDING_MIGRATION_COLUMNS = ("tech_confidence_raw", "ml_confidence_raw",
+                             "macro_confidence_raw", "cold_start")
+
+
+def insert_prediction(db, row: dict):
+    """Insert the row, degrading loudly if the newest migration is not applied.
+
+    The repo cannot apply its own migrations -- schema.sql is the source of
+    truth and Supabase does not run it. That is fine for a new column that
+    only stores something, and NOT fine if the missing column takes the whole
+    prediction down with it: losing a day of rows to a pending ALTER TABLE
+    would be a self-inflicted outage, and the day would be gone for good
+    because `unique (asset, target_date)` means the row can never be
+    backfilled from a later run.
+
+    So: try the full row, and on a schema-cache miss retry without the new
+    columns and say so in a line nobody can miss. The system keeps running
+    with one feature dormant instead of stopping.
+    """
+    try:
+        return db.table("predictions").insert(row).execute()
+    except Exception as exc:  # noqa: BLE001 -- narrowed by the message check
+        message = str(exc)
+        if not any(column in message for column in PENDING_MIGRATION_COLUMNS):
+            raise
+        print("=" * 72)
+        print("DIKKAT: supabase/schema.sql'deki 2026-09-08 migration'i UYGULANMAMIS.")
+        print("  Eksik kolon(lar): " + ", ".join(PENDING_MIGRATION_COLUMNS))
+        print("  Tahmin bunlarsiz yazilacak -- sistem calisiyor, ama kalibrasyon")
+        print("  egrileri o kolonlar gelene kadar fit EDILEMEZ (retrain.py ham")
+        print("  guveni orada ariyor). Supabase SQL Editor'de calistir.")
+        print("=" * 72)
+        trimmed = {k: v for k, v in row.items() if k not in PENDING_MIGRATION_COLUMNS}
+        return db.table("predictions").insert(trimmed).execute()
+
+
 def run_asset(db, asset) -> int:
     """One metal's full cycle. Returns 1 if a prediction was written."""
     print(f"\n{'=' * 72}\n### {asset.label} ({asset.symbol})\n{'=' * 72}")
@@ -288,6 +328,18 @@ def run_asset(db, asset) -> int:
     macro = safe_signal(macro_module.macro_signal, features, asset.leading_drivers, label="macro")
 
     calibrators = calibration.load(asset.key)
+    # The RAW confidence of every calibrated component is kept and stored
+    # alongside the calibrated one. Without it the nightly refit is fed its
+    # own output: retrain.py reads `<c>_confidence` back out of this table,
+    # and once a calibrator exists that column holds a CALIBRATED number, so
+    # each night would fit a curve on the previous curve's output and apply
+    # the result to raw input. The two live on different scales, and nothing
+    # about the compounding would raise -- it would just quietly bend
+    # position sizing further every night. Calibration cannot bite for
+    # another MIN_RECORDS_TO_FIT (180) resolved rows, which is exactly why
+    # this had to be fixed before the first fit rather than after.
+    raw_confidence = {"technical": tech["confidence"], "ml": ml["confidence"],
+                      "macro": macro["confidence"]}
     tech = calibration.apply(calibrators.get("technical"), tech, asset.base_rate_up)
     ml = calibration.apply(calibrators.get("ml"), ml, asset.base_rate_up)
     macro = calibration.apply(calibrators.get("macro"), macro, asset.base_rate_up)
@@ -342,6 +394,12 @@ def run_asset(db, asset) -> int:
         "gs_ratio": _number(features["gs_ratio"].iloc[-1]),
         "gs_ratio_z": _number(features["gs_ratio_z"].iloc[-1]),
         "model_version": model_version,
+        # Whether the blend had any component record to pool at all. Stored
+        # because the weight_* columns mean different things either way: with
+        # records they are measured influence, without them they are the
+        # default vote weights, and a UI that renders both as "Etki %25"
+        # claims a track record that does not exist.
+        "cold_start": bool(final.get("cold_start")),
     }
     for component, signal in signals.items():
         prefix = ensemble.COLUMN_PREFIX[component]
@@ -351,6 +409,8 @@ def run_asset(db, asset) -> int:
         row[f"{prefix}_pct_change"] = pct
         row[f"{prefix}_price"] = current_price * (1 + pct)
         row[f"weight_{component}"] = weights.get(component)
+        if component in raw_confidence:
+            row[f"{prefix}_confidence_raw"] = raw_confidence[component]
     if claude.get("reasoning"):
         row["claude_reasoning"] = claude["reasoning"]
 
@@ -358,7 +418,7 @@ def run_asset(db, asset) -> int:
         "ensemble", current_price, trend_average, volatility,
         final["direction"], final["confidence"], asset.target_volatility)
 
-    inserted = db.table("predictions").insert(row).execute()
+    inserted = insert_prediction(db, row)
     prediction_id = inserted.data[0]["id"] if inserted.data else None
 
     print(f"\n{target_date}: {final['direction']} "

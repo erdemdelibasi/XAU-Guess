@@ -266,3 +266,14 @@ code {
   border-radius: 4px;
   font-size: 0.85em;
 }
+
+/* Cold-start disclosure above the components table. Deliberately styled as a
+   caution rather than as chrome: it is saying the numbers below it are not
+   yet measurements, which is the kind of thing this UI must not bury. */
+.cold-start-note {
+  border-left: 3px solid var(--warn, #c9a227);
+  padding: 0.5rem 0.75rem;
+  margin: 0 0 0.75rem;
+  background: rgba(201, 162, 39, 0.08);
+  border-radius: 0 4px 4px 0;
+}

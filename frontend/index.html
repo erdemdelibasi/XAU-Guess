@@ -85,10 +85,16 @@
   <section class="card">
     <h2>Sinyal Bileşenleri</h2>
     <p class="muted small">
-      Her bileşen bağımsız bir görüş üretir. Harman, bileşenlerin <em>ölçülmüş</em>
-      sicillerini log-odds uzayında havuzlar; beyan ettikleri güveni değil. Taban orandan
-      daha iyisini yapamamış bir bileşen otomatik olarak susturulur ve %0 görünür.
+      Her bileşen bağımsız bir görüş üretir. Sicil biriktikten sonra harman, bileşenlerin
+      <em>ölçülmüş</em> sicillerini log-odds uzayında havuzlar &mdash; beyan ettikleri
+      güveni değil. Taban orandan daha iyisini yapamamış bir bileşen otomatik olarak
+      susturulur ve %0 görünür.
     </p>
+    <!-- Filled in only while the blend is still on its cold-start path, i.e.
+         before any component has a measured record. Without it the "Etki"
+         column reads as measured influence on rows where it is just the
+         default vote weight. -->
+    <p class="muted small cold-start-note" id="components-note" hidden></p>
     <div class="table-wrap">
       <table id="components-table">
         <thead>

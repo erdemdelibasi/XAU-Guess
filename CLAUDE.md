@@ -62,6 +62,14 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
 7. **Sorun etikette değil.** Sürüklemesi çıkarılmış bir etiket denendi ve
    IC +0,055'ten −0,004'e düştü (`research/ablation.py`): taban oranın
    kendisi öğrenilebilir olan tek şey.
+8. **Fed faiz kararları da ayrıca alınabilir bir şey bırakmıyor.**
+   `research/fedcycle.py` "Fed indirince altın çıkar" iddiasını üç ayrı
+   sınanabilir parçaya böldü (olay / rejim / sürpriz) ve **32 testin 0'ı**
+   eşiği geçti. Taban oran gevşeme rejiminde daha yüksek görünüyor
+   (altın 0,596 vs 0,557) ama bu örneklemin ayırt edebileceği en küçük
+   fark 9-13 puan, ölçülen ise 3,9 puan — yani "etki yok" değil, "varsa
+   göremiyoruz". Politika duruşunu kolon olarak eklemek de reddedildi
+   (p=0,947 ve p=0,377).
 
 Madde 5'in madde 3'ü **kurtarmadığını** anlamak kritik: oynaklık hedefleme
 hiçbir şey tahmin etmiyor, gerçekleşen oynaklığa tepki veriyor ve oynaklık
@@ -89,13 +97,26 @@ diğerlerinin yanında, kıyas rozetiyle duruyor.
   **etiketler**. Dürüst bir boşluk, kaynağı eğitim verisinden farklı bir
   sayıdan iyidir. `ANTHROPIC_API_KEY` isteğe bağlı — yoksa `claude` bileşeni
   sürekli nötr kalır, sistem çökmez.
-- **FRED bu makineden erişilemiyor** (2026-09-07'de tekrarlanan 60 sn
-  zaman aşımı, aynı anda her Yahoo çağrısı geçiyordu). Kurumsal ağ engeli
-  olabilir ve GitHub Actions'tan çalışabilir. Gerçek 10Y reel faiz serisi
-  (DFII10) altının en iyi tek sürücüsüdür, ama `fetch_data.get_fred_series`
-  bilerek `None` dönebilir ve `indicators.py` TIP/IEF vekiline düşer.
-  **Bu vekile asla "reel faiz" gibi kesin bir sayı muamelesi yapma** —
-  şeklini yakalar, seviyesini değil.
+- **FRED aralıklı erişilebiliyor — canlı yol ona bağlanamaz.** 2026-09-07'de
+  tekrarlanan 60 sn zaman aşımı verdi (aynı anda her Yahoo çağrısı geçerken);
+  2026-09-08'de aynı makineden her seri 1,2 sn altında geldi ve arada kodda
+  hiçbir şey değişmedi. Doğru okuma "engel kalktı" değil, **"bu host burada
+  aralıklı olarak engelli"**. `fetch_data.get_fred_series` bilerek `None`
+  dönebilir ve `indicators.py` TIP/IEF vekiline düşer.
+
+  **Hiçbir model özelliği bir FRED serisine bağlanmamalı.** Ağ havasına göre
+  var olup yok olan bir kolon, kayıtlı modelin özellik listesini bir sonraki
+  koşuyla uyumsuz hâle getirir — `predict.py` bunu yakalayıp yeniden eğitir,
+  ama her gün bunu yapmak sessiz bir israftır. Araştırma tezgâhı FRED'i
+  serbestçe kullanır (`research/fedcycle.py`, `research/realrate.py`).
+
+  **Ve vekilin bir bedeli olmadığı artık ölçüldü** (`research/realrate.py`):
+  5 günlük değişimde DFII10 ile vekil r=+0,929 ve ölçek oranı 1,02x;
+  `real_yield_chg`'i gerçek seriyle değiştiren eşleştirilmiş A/B'de IC
+  +0,0646 → +0,0643, **p=0,984**. Vekil bedava. Buna karşılık **seviye**
+  korelasyonu sadece +0,592 — yani eski uyarı hâlâ geçerli: **vekile asla
+  "reel faiz" gibi kesin bir sayı muamelesi yapma**, şeklini yakalar,
+  seviyesini değil.
 
 ### Ufuk bir seçimdir, cron'un yan etkisi değil
 
@@ -253,6 +274,53 @@ Bu yüzden `panel.py` işaretliyor (`flat_bar`) ve `indicators.py` yüksek/düş
 tabanlı ölçüler yerine **kapanıştan kapanışa** ölçüleri tercih ediyor
 (ATR yerine getiri std sapması, yüksek yerine kapanış Donchian'ı).
 
+### Seansın bitip bitmediğini Yahoo'nun damgası söylemez
+
+`fetch_data.bar_is_complete` / `drop_forming_bar` — **tek** uygulama,
+`predict.load_panel` ve `research/panel.py` ikisi de onu çağırır.
+
+Eski kural mumun damga **şeklini** okuyordu: "04:00 UTC'de temiz bir açılış
+damgası varsa seans bitmiştir". Yanlıştı ve **iki yönde birden** yanlıştı.
+2026-09-08 07:58 UTC'de ölçüldü: yarısı işlenmiş 2026-09-08 seansı tam da
+04:00:00 damgasıyla geliyordu — yani kapanmış bir mumdan ayırt edilemez.
+Guard var olduğu şeyi hiç yapmıyordu. Ters yönde de: Yahoo bazen gerçekten
+bitmiş bir yarım seansı duvar saatiyle damgalıyor (2025-11-28, Şükran Günü
+ertesi, 14:30 UTC) ve eski kural o **gerçek** seansı atıyordu.
+
+Doğru kural mumun kendi takvim gününü borsanın saatine karşı okur: D günlük
+mum, New York saatiyle D 17:00'ı geçince kesindir. Bu DST'yi kendiliğinden
+halleder — kapanış yazın 21:00 UTC, kışın 22:00 UTC.
+
+Neden önemli: yarım mumdan tahmin üretmek iki yerden birden sızdırır —
+özellikler henüz olmamış bir seansı anlatır, **ve** `target_date` kapanmamış
+bir seanstan hesaplanır, yani satır bir gün erken düşer; ertesi günün cron'u
+da onu `unique(asset, target_date)` yüzünden çift sanıp atlar. `predict.py`
+23:00 UTC'de (19:00 New York) çalıştığı için cron yolu zaten doğruydu; kural
+elle tetiklenen her koşuyu düzeltiyor. `tests/test_data_hygiene.py` kilitliyor.
+
+### Kalibratör kendi çıktısına fit edilemez
+
+`predictions` tablosunda `tech_confidence_raw` / `ml_confidence_raw` /
+`macro_confidence_raw` var ve `retrain.refit_calibrators` **yalnızca**
+onları okur.
+
+Hata şuydu: `predict.py` güveni kalibre ettikten **sonra** yazıyordu,
+`retrain.py` ise aynı kolonu geri okuyup ona yeni bir eğri fit ediyordu.
+İlk eğri oluştuktan sonra her gece bir önceki gecenin **çıktısına** fit
+edilmiş bir eğri üretilecek, sonra o eğri **ham** girdiye uygulanacaktı.
+İki farklı ölçek, hiçbir hata mesajı, her gece biraz daha bükülen pozisyon
+boyutu. Henüz patlamamış olmasının tek sebebi
+`calibration.MIN_RECORDS_TO_FIT`'in (180 çözülmüş satır) daha dolmamış
+olmasıydı — yani ilk fit'ten **önce** düzeltilmesi gereken cinsten bir hata.
+
+Eski satırlar (ham kolon yokken yazılanlar) fit'e **katılmıyor**, ikame
+edilmiyor: karışık ölçekli bir örneklem, küçük bir örneklemden kötüdür.
+
+`predict.insert_prediction` bu migration uygulanmamışsa satırı kolonsuz
+yazıp yüksek sesle uyarır. Sebebi: PostgREST bilinmeyen bir anahtar için
+**tüm** insert'i reddeder, ve `unique(asset, target_date)` yüzünden kaçan
+gün bir daha geri gelmez.
+
 ### Öncü sürücüler gerçek, ama kontrol serisi olmadan kanıtlanamaz
 
 `research/drivers.py` 16 seriyi iki kez ölçtü: aynı gün (açıklar, alınamaz)
@@ -299,6 +367,27 @@ değişimiydi. `BOND_ETF_DURATION_YEARS` bunun için var.
 0,009. Ağırlıklı bir bileşen sessizce hiçbir şey yapmıyordu. Bir ölçeği
 değiştirdiğinde **doyma oranını VE medyan skoru birlikte** kontrol et; biri
 tek başına yanıltıcı.
+
+**Aynı terim üçüncü kez düzeltildi ve bu sefer pencere yanlıştı.**
+`research/realrate.py`: reel faizin **1 günlük** değişimi ertesi gün
+Bonferroni eşiğini her iki metalde de geçiyor (altın t=−4,74, gümüş
+t=−3,65), üretimdeki **5 günlük** hâli hiçbirinde geçmiyor (t=−2,06,
+t=−2,74). Bu projedeki ölçülmüş her öncü sürücü 1 günlük değişimdir
+(`tip_chg`, `ief_chg`, `vix_chg`); `real_yield_chg` 5 gün üzerine kurulu
+**tek** terimdi. `_score_real_yield` artık `real_yield_chg1`'i okuyor ve
+`REAL_YIELD_SCALE` 0,17 → **0,078**.
+
+İki incelik:
+- **Kolonun adı korunup değeri değiştirilmedi.** `real_yield_chg` (5 gün)
+  `ml_model.FEATURE_COLUMNS` içinde aynen duruyor; yeni pencere ayrı bir
+  kolon. Adı koruyup değeri değiştirmek, `predict.py`'nin isim kontrolünün
+  göremeyeceği **tek** özellik değişikliği türüdür — her kayıtlı model
+  farklı dağılımlı bir kolonu hatasız puanlamaya devam ederdi.
+- **Bedeli backtest'le ölçüldü ve gizlenmiyor:** Calmar farkı gürültü içinde
+  (`technical` ortalama −0,003), ama **işlem sayısı neredeyse ikiye katlandı**
+  (altın 377 → 659). 150 bp'de altın `technical` Calmar 0,20 → 0,18. Yine de
+  değiştirildi, çünkü alternatif ölçülmüş içeriği olmayan bir terimi sırf
+  sessiz olduğu için tutmaktı.
 
 ### Sinyal eğimi iki yönlü olmalı
 
@@ -459,8 +548,14 @@ sayar ve dokuz portföyün `maybe_trade()`'i iki kez ateşlenirdi.
   Canlı sinyal üreten kodun testi yok; o `backtest.py` + canlı izlemeyle
   doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
-  oku.** Orada ölçülüp elenmiş sekiz hipotez duruyor — oranla ilgili bir
-  fikir aklına geldiyse büyük ihtimalle 8. bölümde zaten var.
+  oku.** Orada ölçülüp elenmiş **on bir** hipotez duruyor — oranla ilgili
+  bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve
+  merkez bankası alımıyla ilgili olan 11. bölümde büyük ihtimalle zaten var.
+- **`supabase/schema.sql` değiştiysen migration'ı kullanıcıya ver.** Repo
+  kendi migration'ını uygulayamaz. Yeni bir kolon ekliyorsan
+  `predict.PENDING_MIGRATION_COLUMNS`'a da ekle: PostgREST bilinmeyen bir
+  anahtar için **tüm** insert'i reddeder ve `unique(asset, target_date)`
+  yüzünden kaçırılan gün bir daha yazılamaz.
 - **Bir özelliği/kolonu çıkarmadan önce eşleştirilmiş test yap.**
   `research/ablation.py` ve `research/ratio.py` bunun nasıl yapıldığını
   gösteriyor: `edge.walk_forward(..., features=..., label_values=...)` tek

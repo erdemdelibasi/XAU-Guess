@@ -26,6 +26,8 @@ Az şey — ve bunu açıkça söylemek projenin ana tasarım ilkesidir.
 | Gümüş daha mı iyi? | **Hayır.** Aynı getiri, 1,86 kat oynaklık, %75,8 düşüş |
 | Altın/gümüş oranı yön söyler mi? | **Hayır.** 60 testin 0'ı geçti |
 | İkisini birden tutmak? | Daha çok getiri, orantısız daha çok risk |
+| Fed faiz kararları alınabilir bir şey veriyor mu? | **Hayır.** 32 testin 0'ı geçti |
+| Merkez bankası alımı izlenebilir mi? | Tonaj **hayır** (günlük anahtarsız veri yok); **izi** evet |
 
 Yani: **yön tahmini al-ve-tut'u yenmiyor.** Ölçülebilir katkı yalnızca riski
 yönetmekte ve orada bile mütevazı — 19,9 yıllık örneklem dışı testte Sharpe
@@ -213,6 +215,8 @@ python edge.py              # ~3 dk
 python defense.py
 python ratio.py             # altin/gumus orani -- 60 test, 0 gecti
 python ablation.py          # ~12 dk: etiket mi ozellikler mi
+python fedcycle.py          # Fed faiz kararlari -- 32 test, 0 gecti
+python realrate.py          # gercek reel faiz vs vekil; merkez bankasi izi
 ```
 
 ### 5. Kanal Finans (isteğe bağlı, yerel)
@@ -245,8 +249,23 @@ GitHub Actions'ta çalışmaz (YouTube bulut IP'lerini engelliyor). Windows'ta:
   konumuyla gösteriliyor ama hiçbir strateji ona göre işlem yapmıyor —
   artık "test edilmedi" diye değil, **test edildi diye**
   (`backend/research/ratio.py`).
+- **Fed faiz kararları ölçüldü ve ayrıca alınabilir bir şey bırakmıyor.**
+  Olay, rejim ve sürpriz olarak üç ayrı sınanabilir parçaya bölündü; 32
+  testin **sıfırı** eşiği geçti. İndirim sonrası 20 gün altında %+2,71,
+  gümüşte %+5,60 — yön hikâyeyle uyumlu, ama sürükleme çıkarıldığında
+  eşiğin uzağında ve bu örneklemin görebileceği en küçük fark 9-13 puan
+  (`backend/research/fedcycle.py`).
+- **Merkez bankası altın alımı doğrudan izlenmiyor ve izleniyormuş gibi
+  yapılmıyor.** Dünya Altın Konseyi tonaj verisi üç aylık, gecikmeli ve
+  kayıt duvarının arkasında; günlük anahtarsız serisi yok. Ölçülen şey
+  **izi**: altının makro modelinden artan kısmı. Reel faiz betası 2020'de
+  −0,073 iken 2026'da +0,001 — "altın reel faizden koptu" iddiasının
+  ölçülmüş hâli. Ama artık modelin açıklamadığı her şeydir, alımın kanıtı
+  değildir; ve ileri getiriyi de öncülemiyor (`backend/research/realrate.py`).
 - **FRED erişilemezse** reel faiz, TIP/IEF vekiliyle yaklaşık hesaplanır.
-  Vekil şekli yakalar, seviyeyi değil.
+  Vekil **seviyeyi** yakalamıyor (r=+0,59) ama **değişimi** neredeyse birebir
+  yakalıyor (r=+0,93, ölçek 1,02x) ve modelde gerçek seriden ayırt
+  edilemiyor (p=0,984). Yani bu bir eksiklik değil, ölçülmüş bir denklik.
 - **Backtest gelecek değildir.** Buradaki hiçbir sayı "böyle olacak" demek
   değil; "geçmişte böyle olmuş" demek.
 

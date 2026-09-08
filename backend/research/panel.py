@@ -6,10 +6,12 @@ across a session. `panel.json` is gitignored and rebuilt in ~30 seconds.
 
 Data hygiene applied here, once, so every downstream study inherits it:
 
-  * The final bar is dropped when it is still forming. Yahoo happily serves
-    today's partial session as if it were a closed bar (measured 2026-09-07:
-    a row timestamped 11:03:23 with the day only half traded). Training a
-    next-day label against a half-formed bar is a slow, invisible leak.
+  * The final bar is dropped when it is still forming, by
+    fetch_data.drop_forming_bar -- the SAME function predict.py uses, so the
+    live path and the bench can never disagree about what a closed session
+    is. Yahoo happily serves today's partial session as if it were a closed
+    bar and gives no usable tell in the timestamp, so completeness is decided
+    against the exchange clock instead (see fetch_data.bar_is_complete).
 
   * Flat bars (open == high == low == close) are FLAGGED, not dropped. Yahoo
     emits these where it has a settlement print but no intraday series --
@@ -62,21 +64,6 @@ def panel_path(asset_key: str) -> Path:
     return Path(__file__).parent / f"panel_{asset_key}.json"
 
 
-def _drop_forming_bar(gold: pd.DataFrame) -> pd.DataFrame:
-    """Remove the last row if its timestamp is not a clean session open.
-
-    Yahoo stamps completed daily bars at the session open (04:00 UTC for
-    COMEX) and stamps the in-progress bar with the wall clock instead. That
-    difference is the only reliable tell available without a market calendar.
-    """
-    if gold.empty:
-        return gold
-    last = gold["time"].iloc[-1]
-    if not (last.minute == 0 and last.second == 0):
-        return gold.iloc[:-1].reset_index(drop=True)
-    return gold
-
-
 def flag_flat_bars(gold: pd.DataFrame) -> pd.DataFrame:
     """Adds `flat_bar`: True where open==high==low==close (see module docstring).
 
@@ -95,7 +82,7 @@ def build(asset_key: str = "gold", years: int = YEARS) -> pd.DataFrame:
     prices = fetch_data.get_daily(asset.symbol, years=years)
     raw_rows = len(prices)
 
-    prices = _drop_forming_bar(prices)
+    prices = fetch_data.drop_forming_bar(prices)
     prices = flag_flat_bars(prices)
     flat_count = int(prices["flat_bar"].sum())
     print(f"  {raw_rows} ham satir -> {len(prices)} satir "

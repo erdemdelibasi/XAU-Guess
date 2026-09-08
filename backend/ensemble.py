@@ -278,6 +278,13 @@ def influence_weights(records: dict[str, dict], base_rate: float = BASE_RATE_UP)
 
     A component that has not beaten the base rate shows 0%, which is the
     honest reading: it is not influencing the call.
+
+    The exception is a total cold start. When NO component has evidence there
+    is no share to compute, so DEFAULT_WEIGHTS comes back -- and those are
+    genuinely what _cold_start() weights its direction vote by, so the number
+    is true. It is just not a measurement, which is why predict.py stores
+    `cold_start` alongside it and the UI says so instead of printing "25%"
+    under a caption about measured skill.
     """
     signed: dict[str, float] = {}
     for component in COMPONENTS:

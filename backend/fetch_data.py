@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import datetime as dt
 import time
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -75,15 +76,35 @@ MACRO_SYMBOLS = {
                             # reachable from every network (see below).
 }
 
-# FRED publishes the actual 10Y TIPS real yield (DFII10) and 10Y breakeven
-# (T10YIE) as keyless CSV. It is the single best gold driver there is -- but
-# fred.stlouisfed.org was unreachable from the development machine's network
-# (repeated 60s read timeouts, 2026-09-07) while every Yahoo call went
-# through. It may well work from GitHub Actions. So: try it, and fall back to
-# the TIP/IEF proxy rather than making the whole macro component depend on a
-# host we've seen hang. Never let this block a prediction run.
+# FRED publishes the actual 10Y TIPS real yield (DFII10), the 10Y breakeven
+# (T10YIE) and the Fed's own target rate as keyless CSV.
+#
+# REACHABILITY IS NOT SETTLED, AND THAT IS THE WHOLE DESIGN CONSTRAINT.
+# fred.stlouisfed.org was completely unreachable from the development
+# machine on 2026-09-07 (repeated 60s read timeouts, while every Yahoo call
+# in the same process went through). On 2026-09-08 the same machine got
+# every series in under 1.2s. Nothing in this repo changed in between, so
+# the honest reading is that this host is intermittently blocked here, not
+# that the block is gone.
+#
+# Everything downstream is therefore built to treat FRED as an ENRICHMENT
+# that may vanish: get_fred_series returns None instead of raising, callers
+# have a proxy path rather than an error path, and no model feature is ever
+# conditioned on a FRED series being present (a feature set that changes
+# shape with network weather produces models that cannot be loaded by the
+# run that follows -- see predict.py's feature-name guard for what that
+# costs). Research may use it freely; the live prediction path may not
+# depend on it.
 FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 FRED_TIMEOUT = 12  # deliberately short -- this is an optional enrichment
+
+# The Fed's target rate is published as two different series either side of
+# 2008-12-16, when the FOMC switched from a single target to a range. Reading
+# only one of them silently truncates the history at exactly the point the
+# most interesting easing cycle starts.
+FED_TARGET_SINGLE = "DFEDTAR"    # single target,  1982-09-27 .. 2008-12-15
+FED_TARGET_LOWER = "DFEDTARL"    # range lower,    2008-12-16 ..
+FED_TARGET_UPPER = "DFEDTARU"    # range upper,    2008-12-16 ..
 
 
 def _yahoo_chart(symbol: str, params: dict, timeout: int = 30) -> dict | None:
@@ -128,6 +149,58 @@ def _result_to_frame(result: dict) -> pd.DataFrame:
     # Indices and FX carry no meaningful volume on Yahoo; 0 is the honest fill.
     df["volume"] = df["volume"].fillna(0).astype(float)
     return df
+
+
+# COMEX metals settle at 13:30 and the electronic session closes at 17:00
+# America/New_York. A daily bar dated D is therefore final once the clock in
+# New York has passed D 17:00 -- which is the ONLY rule here that does not
+# depend on how Yahoo happens to stamp a row.
+EXCHANGE_TZ = ZoneInfo("America/New_York")
+SESSION_CLOSE_HOUR = 17
+
+
+def bar_is_complete(bar_time: pd.Timestamp, now: dt.datetime | None = None) -> bool:
+    """Has the session this daily bar belongs to actually closed?
+
+    Yahoo's own timestamp cannot answer this. It stamps completed daily bars
+    at 00:00 New York -- 04:00 UTC in EDT, 05:00 UTC in EST -- and stamps the
+    STILL-FORMING bar exactly the same way (measured 2026-09-08 07:58 UTC:
+    the half-traded 2026-09-08 session was served stamped 04:00:00, mid-session
+    and indistinguishable from a closed one). It also sometimes stamps a
+    genuinely finished half-day session with a wall clock instead
+    (2025-11-28, the day after Thanksgiving, came back at 14:30 UTC).
+
+    So the previous rule here -- "a clean 00:00 stamp means the bar is done" --
+    was wrong in BOTH directions: it kept every partial bar it was written to
+    remove, and it threw away a real early-close session. Reading the bar's
+    own calendar date in exchange time and comparing it against the exchange
+    clock is what the rule was trying to express in the first place.
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
+    bar_date = bar_time.tz_convert(EXCHANGE_TZ).date()
+    close = dt.datetime.combine(
+        bar_date, dt.time(SESSION_CLOSE_HOUR), tzinfo=EXCHANGE_TZ)
+    return now.astimezone(EXCHANGE_TZ) >= close
+
+
+def drop_forming_bar(frame: pd.DataFrame, now: dt.datetime | None = None) -> pd.DataFrame:
+    """Remove the trailing bar while its session is still open.
+
+    ONE implementation, shared by the live path (predict.load_panel) and the
+    research bench (research/panel.py). Those two carried a copy each of the
+    broken stamp heuristic above, which is exactly how a data-hygiene rule
+    gets fixed in one place and left rotting in the other.
+
+    Predicting from a half-formed bar is a quiet leak on both sides: the
+    features describe a session that has not happened yet, and `target_date`
+    is computed from a session that has not closed, so the row lands a day
+    early and the next day's cron then skips it as a duplicate.
+    """
+    if frame.empty:
+        return frame
+    if bar_is_complete(frame["time"].iloc[-1], now):
+        return frame
+    return frame.iloc[:-1].reset_index(drop=True)
 
 
 def get_daily(symbol: str, years: int = 25) -> pd.DataFrame:
@@ -198,6 +271,41 @@ def get_fred_series(series_id: str) -> pd.DataFrame | None:
     # FRED writes "." for a no-print day (market holidays); coerce drops them.
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     return df.dropna().reset_index(drop=True)
+
+
+def get_fed_target_rate() -> pd.DataFrame | None:
+    """The Fed's target policy rate as one continuous daily step series.
+
+    Splices DFEDTAR (a single target, to 2008-12-15) onto the midpoint of
+    DFEDTARL/DFEDTARU (a range, from 2008-12-16). Both are CALENDAR-daily, so
+    the date a value changes is the date the FOMC actually moved -- which is
+    what makes an exact hike/cut event list possible without hardcoding an
+    FOMC calendar from memory.
+
+    Using the range MIDPOINT rather than the upper bound is deliberate: the
+    upper bound alone is a different level from the pre-2008 single target,
+    so splicing on it would print a 12.5 bp "cut" on 2008-12-16 that the FOMC
+    never made. The midpoint is the closest continuous reading of the same
+    quantity.
+
+    None when FRED is unreachable -- see FRED_CSV. Every caller is research;
+    nothing in the live prediction path may require this.
+    """
+    single = get_fred_series(FED_TARGET_SINGLE)
+    lower = get_fred_series(FED_TARGET_LOWER)
+    upper = get_fred_series(FED_TARGET_UPPER)
+    if lower is None or upper is None:
+        return single
+
+    band = lower.merge(upper, on="time", suffixes=("_lo", "_hi"))
+    band["value"] = (band["value_lo"] + band["value_hi"]) / 2.0
+    band = band[["time", "value"]]
+    if single is None:
+        return band.reset_index(drop=True)
+
+    single = single[single["time"] < band["time"].iloc[0]]
+    return (pd.concat([single, band], ignore_index=True)
+            .sort_values("time").reset_index(drop=True))
 
 
 # --------------------------------------------------------------------------

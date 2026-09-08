@@ -55,9 +55,21 @@ create table if not exists predictions (
     tech_direction          text, tech_confidence   numeric, tech_pct_change   numeric, tech_price   numeric, tech_correct   boolean,
     ml_direction            text, ml_confidence     numeric, ml_pct_change     numeric, ml_price     numeric, ml_correct     boolean,
     macro_direction         text, macro_confidence  numeric, macro_pct_change  numeric, macro_price  numeric, macro_correct  boolean,
+
     news_direction          text, news_confidence   numeric, news_pct_change   numeric, news_price   numeric, news_correct   boolean,
     claude_direction        text, claude_confidence numeric, claude_pct_change numeric, claude_price numeric, claude_correct boolean,
     claude_reasoning        text,
+
+    -- The confidence BEFORE calibration, for the three calibrated components.
+    -- retrain.py fits each night's isotonic curve on THESE, never on the
+    -- calibrated column beside them: a curve maps raw -> P(correct), so
+    -- fitting the next curve on the previous curve's output and then applying
+    -- it to raw input compounds a scale error every night with nothing
+    -- raising. The calibrated columns stay -- they are what sized the position
+    -- and what the UI shows.
+    tech_confidence_raw     numeric,
+    ml_confidence_raw       numeric,
+    macro_confidence_raw    numeric,
 
     -- Display weights at prediction time (ensemble.influence_weights).
     weight_technical        numeric, weight_ml    numeric, weight_macro numeric,
@@ -79,6 +91,12 @@ create table if not exists predictions (
     gs_ratio_z              numeric,
 
     model_version           text,
+    -- True when the blend had NO component track record yet and fell back to
+    -- ensemble._cold_start's direction vote. The UI needs it: on such a row
+    -- the weight_* columns are DEFAULT_WEIGHTS, which is what the vote
+    -- actually used but is NOT measured influence, and showing "25%" beside
+    -- a caption about measured skill overstates the system.
+    cold_start              boolean,
 
     -- Resolution.
     resolved_at             timestamptz,
@@ -328,4 +346,22 @@ end $$;
 --
 --   -- alter table predictions add column if not exists gs_ratio numeric;
 --   -- alter table predictions add column if not exists gs_ratio_z numeric;
+--
+-- 2026-09-08  Pre-calibration confidences. RUN THIS ONE. Without it
+--             predict.py's insert fails on the new keys and no prediction is
+--             written at all. Safe to run twice.
+--
+--             Why it exists: retrain.py used to refit each component's
+--             calibration curve on `<c>_confidence`, which predict.py writes
+--             AFTER applying the previous curve. Once the first curve was
+--             fitted every later fit would have been trained on its own
+--             output and then applied to raw input -- a compounding scale
+--             error with no error message. Nothing had gone wrong yet only
+--             because calibration.MIN_RECORDS_TO_FIT (180 resolved rows) had
+--             not been reached.
+--
+--   alter table predictions add column if not exists tech_confidence_raw numeric;
+--   alter table predictions add column if not exists ml_confidence_raw numeric;
+--   alter table predictions add column if not exists macro_confidence_raw numeric;
+--   alter table predictions add column if not exists cold_start boolean;
 --

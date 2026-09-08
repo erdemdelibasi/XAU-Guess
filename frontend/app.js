@@ -255,6 +255,26 @@ function renderComponents(row, asset) {
       </tr>`;
   }).join("");
 
+  // The "Etki" column means two different things and the caption above it
+  // only describes one of them. With component records, it is measured
+  // influence and a component that never beat the base rate shows 0%. With
+  // NO records -- every prediction until roughly a trading year of history
+  // exists -- the blend runs ensemble._cold_start(), those numbers are the
+  // DEFAULT weights its direction vote used, and rendering "25%" under a
+  // caption about measured skill would claim a track record that does not
+  // exist. `cold_start` is stored per row precisely so this can be said out
+  // loud instead of inferred.
+  const note = document.getElementById("components-note");
+  if (row.cold_start) {
+    note.textContent =
+      "Bileşenlerin henüz ölçülmüş sicili yok. Harman bu satırda taban orandan " +
+      "başlayan bir yön oylaması kullandı; aşağıdaki “Etki” payları o oylamanın " +
+      "varsayılan ağırlıkları, ölçülmüş katkı değil.";
+    note.hidden = false;
+  } else {
+    note.hidden = true;
+  }
+
   const reasoning = document.getElementById("claude-reasoning");
   reasoning.textContent = row.claude_reasoning ? `Claude: "${row.claude_reasoning}"` : "";
 }

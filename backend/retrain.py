@@ -189,13 +189,28 @@ def refit_calibrators(asset, resolved: list[dict]) -> None:
     for component in ("technical", "ml", "macro"):
         prefix = ensemble.COLUMN_PREFIX[component]
         confidences, corrects = [], []
+        skipped_legacy = 0
         for row in resolved:
-            confidence = row.get(f"{prefix}_confidence")
+            # The RAW confidence, never the stored calibrated one. A curve
+            # maps raw -> P(correct); fitting the next curve on the previous
+            # curve's OUTPUT and then applying it to raw input compounds a
+            # scale error every night, silently. Rows written before
+            # `<c>_confidence_raw` existed are skipped rather than
+            # substituted -- a mixed-scale sample is worse than a smaller one,
+            # and MIN_RECORDS_TO_FIT will simply be reached a little later.
+            confidence = row.get(f"{prefix}_confidence_raw")
             was_correct = row.get(f"{prefix}_correct")
-            if confidence is None or was_correct is None or float(confidence) <= 0:
+            if confidence is None:
+                if row.get(f"{prefix}_confidence") is not None:
+                    skipped_legacy += 1
+                continue
+            if was_correct is None or float(confidence) <= 0:
                 continue
             confidences.append(float(confidence))
             corrects.append(bool(was_correct))
+        if skipped_legacy:
+            print(f"  {component:<12} {skipped_legacy} eski satir atlandi "
+                  f"(ham guven kolonu yoktu)")
 
         curve = calibration.fit(confidences, corrects, asset.base_rate_up)
         if curve is None:

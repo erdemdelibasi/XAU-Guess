@@ -74,13 +74,43 @@ EMA_CROSS_SCALE = 52.0    # of ema9 / ema21 - 1
 SMA200_SCALE = 6.5        # of close / sma200 - 1
 BOND_SCALE = 166.0        # of the tip/ief daily return
 VIX_SCALE = 2.4           # divisor on the daily VIX point change
-# Divisor on the 5-day real-yield-proxy change, in percentage points. Small
-# because the duration fix above shrank that quantity ~7.5x: its p90 is
-# 0.169pp, so dividing by 0.17 is what puts a p90 move at a full score. Set
-# to 6.0 at first -- the pre-fix figure -- which left this term contributing a
-# median |score| of 0.009, i.e. a weighted component that was silently doing
-# nothing at all.
-REAL_YIELD_SCALE = 0.17
+# Divisor on the ONE-DAY real-yield-proxy change, in percentage points. Its
+# p90 is 0.078pp, so dividing by 0.078 puts a p90 move at a full score
+# (saturation ~10%, median |score| ~0.36 -- in line with every other scorer
+# here).
+#
+# TWO corrections are baked into this one number and both were measured.
+# First the divisor was 6.0, a pre-duration-fix figure that left the term
+# contributing a median |score| of 0.009 -- a weighted component silently
+# doing nothing. Then it became 0.17, correct for a FIVE-day change.
+# research/realrate.py measured that the five-day window is the wrong window:
+# against the next day's return the one-day change clears the Bonferroni bar
+# in both metals (gold t=-4.74, silver t=-3.65) and the five-day change
+# clears it in neither (t=-2.06, t=-2.74). Every other measured lead in this
+# project is a one-day change -- tip_chg, ief_chg, vix_chg (research/
+# drivers.py) -- and this term was the only one built on five days.
+#
+# The scale had to move WITH the window: at 0.17 the one-day change would
+# have saturated on 1.1% of sessions with a median |score| of 0.161, i.e.
+# the same silent-term failure in a new place. Changing a window without
+# re-measuring its divisor is how that bug happens.
+#
+# WHAT THE CHANGE COSTS, because it is not free and the backtest said so.
+# Replaying both windows through backtest.py across the full cost ladder and
+# both metals: Calmar moved by an average of -0.003 for `technical` and
+# -0.002 for `ensemble`, i.e. nothing, in a band of +-0.02 -- but TURNOVER
+# nearly doubled (gold `technical` 377 -> 659 trades, silver 379 -> 718),
+# because a one-day change flips sign far more often than a five-day one.
+# At the 150 bp bank rung that shows up as real damage: gold `technical`
+# Calmar 0.20 -> 0.18.
+#
+# It is kept anyway, and the reasoning should be checkable rather than taken
+# on trust: the five-day term was measured to carry NO next-day lead in
+# either metal, so reverting would mean keeping a weighted term with no
+# measured content purely because acting on it is quieter. The honest
+# summary is the one this project keeps arriving at -- a real signal that is
+# expensive to act on (compare macro_signal.py's own docstring).
+REAL_YIELD_SCALE = 0.078
 
 # Kept as features even though they don't lead on their own: they describe the
 # regime a prediction is being made in, which a tree model can condition on
@@ -225,6 +255,20 @@ def add_macro_columns(df: pd.DataFrame, drivers: tuple[str, ...] = LEADING_DRIVE
             out["real_yield_chg"] = (
                 out["us10y"].diff(5) - (100.0 / BOND_ETF_DURATION_YEARS) * out["breakeven_chg"]
             )
+            # The one-day version, which is what the technical scorer reads.
+            # Both windows are kept deliberately: research/realrate.py's
+            # paired walk-forward found the ML model cannot tell them apart
+            # (gold p=0.875, silver p=0.529 -- it already carries us10y_chg,
+            # tip_chg and ief_chg and reconstructs the combination itself),
+            # so `real_yield_chg` stays in FEATURE_COLUMNS untouched. Swapping
+            # it would have changed a column's VALUES while keeping its NAME,
+            # which is the one kind of feature change predict.py's guard
+            # cannot see -- every saved model would have gone on scoring a
+            # differently-distributed column with no error anywhere.
+            out["real_yield_chg1"] = (
+                out["us10y"].diff() - (100.0 / BOND_ETF_DURATION_YEARS)
+                * out["breakeven_proxy"].pct_change()
+            )
 
     return out
 
@@ -291,7 +335,12 @@ def _score_vix(vix_chg: float) -> float:
 
 def _score_real_yield(real_yield_chg: float) -> float:
     """Rising real yields raise the opportunity cost of holding a zero-yield
-    asset, so gold should fall. Sign is negative by construction."""
+    asset, so gold should fall. Sign is negative by construction.
+
+    Reads the ONE-day change (see REAL_YIELD_SCALE): the five-day change this
+    used to take has no measured next-day lead in either metal, and the
+    one-day change has one in both.
+    """
     if pd.isna(real_yield_chg):
         return 0.0
     return float(np.clip(-real_yield_chg / REAL_YIELD_SCALE, -1, 1))
@@ -335,7 +384,7 @@ def technical_signal(features: pd.DataFrame) -> dict:
         "trend": _score_trend(last.get("ema9_21"), last.get("px_sma200")),
         "bollinger": _score_bollinger(last.get("bb_pct")),
         "vix": _score_vix(last.get("vix_chg")),
-        "real_yield": _score_real_yield(last.get("real_yield_chg")),
+        "real_yield": _score_real_yield(last.get("real_yield_chg1")),
         "bonds": _score_bonds(last.get("tip_chg"), last.get("ief_chg")),
     }
     combined = float(np.clip(sum(scores[k] * WEIGHTS[k] for k in WEIGHTS), -1, 1))
