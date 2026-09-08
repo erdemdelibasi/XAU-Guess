@@ -38,12 +38,15 @@
     </div>
   </header>
 
-  <!-- Live prices. Deliberately NOT symmetric, because the data is not:
-       gold has a 24/7 browser-reachable source and silver has none (measured
-       2026-09-08 -- Binance lists no silver token, and Yahoo sends no CORS
-       header so the browser cannot call it at all). Showing silver's last
-       COMEX close under a "live" heading would be the exact substitution
-       fetch_data refuses to make on the backend. -->
+  <!-- Live prices for both metals plus their TL parity. Which sources a
+       browser can reach at all was measured rather than assumed -- Yahoo,
+       goldprice.org and Investing.com are all unusable here (no CORS / 403),
+       Binance has gold but no silver, and TradingView has both. See app.js.
+
+       Each card states its own provenance because they can differ: a card
+       falls back from a live spot quote to the last COMEX close whenever its
+       source is unreachable, and it says so rather than passing one off as
+       the other. -->
   <section class="card live-prices">
     <h2>Anlık Fiyatlar</h2>
     <div class="live-grid" id="live-prices"></div>

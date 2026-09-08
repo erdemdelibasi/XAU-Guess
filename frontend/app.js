@@ -79,21 +79,44 @@ const GS_RATIO = {
 /* Live prices, fetched straight from the browser.
 
    WHICH SOURCES ARE EVEN POSSIBLE HERE was measured, not assumed
-   (2026-09-08). Yahoo -- the backend's primary -- returns no
-   Access-Control-Allow-Origin header, so a browser simply cannot call it;
-   every price on this page therefore has to come from somewhere else or from
-   Supabase. Binance's public host does send `Access-Control-Allow-Origin: *`
-   and carries both PAXGUSDT and USDTTRY, so it can serve gold and the FX
-   rate 24/7.
+   (2026-09-08), and the constraint is CORS rather than data availability:
 
-   It cannot serve SILVER. XAGUSDT, SLVUSDT and KAGUSDT all come back
-   "Invalid symbol" -- there is no silver token on that venue, which is the
-   same gap fetch_data.py documents on the backend. So silver's number here
-   is its last COMEX close, out of Supabase, LABELLED as such. Printing it
-   under a heading that says "anlık" would be exactly the substitution this
-   project refuses to make: a number whose provenance differs from its label
-   is worse than an honest gap. */
+     Yahoo          the backend's own primary feed. Sends NO
+                    Access-Control-Allow-Origin, so the browser cannot call
+                    it at all. Unusable here regardless of what it holds.
+     goldprice.org  403 Forbidden, no CORS header. Unusable.
+     Investing.com  403 Forbidden, no CORS header. Unusable.
+     Binance        CORS `*`. Carries PAXGUSDT and USDTTRY -- gold and FX,
+                    24/7 -- but NO silver: XAGUSDT / SLVUSDT / KAGUSDT all
+                    return "Invalid symbol", the same gap fetch_data.py
+                    documents server-side.
+     TradingView    CORS, and it has BOTH metals plus the FX rate in one
+                    call. This is the only source found that closes the
+                    silver gap.
+
+   THE TRADINGVIEW REQUEST HAS TO BE SHAPED A SPECIFIC WAY. Its preflight
+   replies `Access-Control-Allow-Headers: Referer,Accept` -- `content-type`
+   is absent -- so a normal `application/json` POST is rejected by the
+   browser before it is ever sent. Posting the same JSON body under
+   `text/plain;charset=UTF-8` makes it a CORS "simple request", which needs
+   no preflight, and the response then carries the allow-origin header.
+   Changing that content type back to JSON silently breaks this in browsers
+   while continuing to work in curl.
+
+   IT IS ALSO AN UNDOCUMENTED ENDPOINT and is treated as one: TradingView is
+   tried first, Binance is the fallback for gold and FX, and silver falls
+   back to its last COMEX close labelled as such. Nothing here throws.
+
+   THE NUMBERS WERE CROSS-CHECKED before this was wired in, because a single
+   unverified feed is just a second guess: TVC:GOLD sat 0.057% from Binance
+   PAXG and FX_IDC:USDTRY 0.004% from Yahoo's USDTRY. Silver has no
+   independent live source to check against, so the consistency test was
+   internal -- TVC spot ran 0.99% under GC=F and 0.96% under SI=F, i.e. the
+   same futures basis on both metals, which is what a genuine spot quote
+   looks like. */
 const BINANCE = "https://data-api.binance.vision/api/v3/ticker/price";
+const TRADINGVIEW = "https://scanner.tradingview.com/global/scan";
+const TV_TICKERS = { gold: "TVC:GOLD", silver: "TVC:SILVER", usdtry: "FX_IDC:USDTRY" };
 const TROY_OUNCE_GRAMS = 31.1034768;
 
 const KF_STANCE = { UP: "Olumlu", DOWN: "Olumsuz", NEUTRAL: "Nötr" };
@@ -247,6 +270,49 @@ function renderRatio(goldRow, silverRow) {
   document.getElementById("gs-ratio-note").textContent = GS_RATIO.note;
 }
 
+async function fetchTradingView() {
+  // Both metals and the FX rate in one request. Returns null on any problem,
+  // so the caller simply falls through to Binance.
+  try {
+    const response = await fetch(TRADINGVIEW, {
+      method: "POST",
+      // NOT application/json -- see the block comment above. This content
+      // type is what keeps the request preflight-free and therefore allowed.
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body: JSON.stringify({
+        symbols: { tickers: Object.values(TV_TICKERS) },
+        columns: ["close", "update_mode"],
+      }),
+    });
+    if (!response.ok) return null;
+    const rows = (await response.json()).data ?? [];
+    const bySymbol = new Map(rows.map((r) => [r.s, r.d]));
+    const read = (ticker) => {
+      const cell = bySymbol.get(ticker);
+      const value = cell ? Number(cell[0]) : NaN;
+      return Number.isFinite(value) && value > 0 ? value : null;
+    };
+    const gold = read(TV_TICKERS.gold);
+    const silver = read(TV_TICKERS.silver);
+    if (gold === null && silver === null) return null;
+    // The feed says whether it is real-time or delayed. Reading it means the
+    // "canlı" badge stops being a hardcoded claim: if TradingView ever serves
+    // this account a delayed quote, the card says "gecikmeli" instead of
+    // asserting something that is no longer true.
+    const modes = Object.values(TV_TICKERS)
+      .map((t) => bySymbol.get(t)?.[1])
+      .filter(Boolean);
+    return {
+      gold, silver,
+      usdtry: read(TV_TICKERS.usdtry),
+      delayed: modes.length > 0 && modes.some((m) => m !== "streaming"),
+      source: "TradingView",
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchBinance(symbol) {
   // One dead endpoint must not blank the whole panel, so this resolves to
   // null rather than rejecting -- the renderer decides what to show instead.
@@ -260,7 +326,7 @@ async function fetchBinance(symbol) {
   }
 }
 
-function livePriceCard({ label, usd, usdtry, source, live, footnote }) {
+function livePriceCard({ label, usd, usdtry, source, live, badge, footnote }) {
   if (usd === null || usd === undefined) {
     return `<div class="live-card"><div class="live-label">${label}</div>
             <div class="live-usd">-</div>
@@ -274,7 +340,7 @@ function livePriceCard({ label, usd, usdtry, source, live, footnote }) {
   return `
     <div class="live-card${live ? " is-live" : ""}">
       <div class="live-label">${label}
-        <span class="live-badge">${live ? "canlı" : "son kapanış"}</span>
+        <span class="live-badge">${badge ?? (live ? "canlı" : "son kapanış")}</span>
       </div>
       <div class="live-usd">${fmtUsd(usd, digits)}<span class="unit">/ons</span></div>
       <div class="live-tl">
@@ -286,55 +352,54 @@ function livePriceCard({ label, usd, usdtry, source, live, footnote }) {
     </div>`;
 }
 
-function renderLivePrices(spotGold, usdtry, goldRow, silverRow) {
-  const comexGold = goldRow ? Number(goldRow.price_at_prediction) : null;
-  const comexSilver = silverRow ? Number(silverRow.price_at_prediction) : null;
+function renderLivePrices(live, goldRow, silverRow) {
+  const comex = {
+    gold: goldRow ? Number(goldRow.price_at_prediction) : null,
+    silver: silverRow ? Number(silverRow.price_at_prediction) : null,
+  };
+  const rows = { gold: goldRow, silver: silverRow };
   const asOf = (row) => (row?.created_at ? fmtDate(row.created_at) : "-");
+  const usdtry = live.usdtry;
+  const badge = live.delayed ? "gecikmeli" : "canlı";
 
-  // Gold's live quote is PAXG, which tracks SPOT; the model reads GC=F, a
-  // futures contract sitting above spot by its financing and storage cost
-  // (measured 1.9% on 2026-09-07 and 0.94% on 2026-09-08 -- not a constant).
-  // Both are shown because a reader comparing this panel against the
-  // prediction card would otherwise find a few-percent discrepancy with no
-  // explanation.
-  //
-  // The gap is NOT labelled "basis", which is what it was called first and
-  // is wrong: the stored close can be days old, so the difference is the
-  // futures-spot basis PLUS everything the market did since that close. Two
-  // effects share one number and the label has to say so, or the panel
-  // quietly reports a stale price move as a financing cost.
-  const gap = spotGold && comexGold ? spotGold / comexGold - 1 : null;
-
-  const cards = [
-    livePriceCard({
-      label: "Altın",
-      usd: spotGold ?? comexGold,
+  const cards = ["gold", "silver"].map((key) => {
+    const label = ASSETS[key].label;
+    const spot = live[key];
+    const close = comex[key];
+    // Spot and the model's futures close differ by TWO things at once, and
+    // the label has to say so: the futures-spot basis (financing + storage,
+    // measured ~1% on both metals) AND whatever the market did since that
+    // close, which can be days old. Calling the gap "basis" -- as an earlier
+    // version did -- reports a stale price move as a financing cost.
+    const gap = spot && close ? spot / close - 1 : null;
+    return livePriceCard({
+      label,
+      usd: spot ?? close,
       usdtry,
-      live: Boolean(spotGold),
-      source: spotGold
-        ? "PAXG spot &middot; Binance, 7/24"
-        : `COMEX GC=F kapanışı &middot; ${asOf(goldRow)}`,
+      // The green "is-live" treatment tracks a REAL-TIME quote, not merely a
+      // present one: a delayed feed still gets its number shown, but it must
+      // not wear the styling that says "this is the price right now".
+      live: Boolean(spot) && !live.delayed,
+      badge: spot ? badge : "son kapanış",
+      source: spot
+        ? `Spot &middot; ${live.source}, 7/24`
+        : `COMEX ${key === "gold" ? "GC=F" : "SI=F"} kapanışı &middot; ${asOf(rows[key])}`,
       footnote:
-        spotGold && comexGold
-          ? `Model <strong>COMEX vadeli</strong> kapanışını kullanıyor: ${fmtUsd(comexGold, 2)} `
-            + `(${asOf(goldRow)}). Aradaki %${fmtNumber(Math.abs(gap * 100), 1)} fark iki şeyi `
-            + `birden içerir: vadeli&ndash;spot bazı ve o kapanıştan bu yana olan hareket.`
-          : "",
-    }),
-    livePriceCard({
-      label: "Gümüş",
-      usd: comexSilver,
-      usdtry,
-      live: false,
-      source: `COMEX SI=F kapanışı &middot; ${asOf(silverRow)}`,
-      footnote: "Gümüşün tarayıcıdan çağrılabilen 7/24 kaynağı yok &mdash; bu fiyat anlık değil.",
-    }),
-  ];
+        spot && close
+          ? `Model <strong>COMEX vadeli</strong> kapanışını kullanıyor: `
+            + `${fmtUsd(close, key === "silver" ? 3 : 2)} (${asOf(rows[key])}). `
+            + `Aradaki %${fmtNumber(Math.abs(gap * 100), 1)} fark iki şeyi birden içerir: `
+            + `vadeli&ndash;spot bazı ve o kapanıştan bu yana olan hareket.`
+          : spot
+            ? ""
+            : "Bu kaynaktan anlık fiyat alınamadı &mdash; gösterilen son kapanıştır.",
+    });
+  });
   document.getElementById("live-prices").innerHTML = cards.join("");
 
   document.getElementById("live-note").innerHTML = usdtry
     ? `TL değerleri <strong>paritedir</strong>: dolar fiyatı × USDTRY `
-      + `(${fmtNumber(usdtry, 4)}, Binance USDTTRY). Türkiye'de gram altın bu paritenin `
+      + `(${fmtNumber(usdtry, 4)}). Türkiye'de gram altın bu paritenin `
       + `<em>üzerinde</em> bir primle işlem görür, dolayısıyla bu sayı kuyumcu fiyatı değildir.`
     : "USDTRY alınamadı &mdash; TL karşılıkları gösterilemiyor.";
 }
@@ -536,19 +601,36 @@ function renderAll() {
 
 async function load() {
   try {
-    // The two Binance calls sit in the same Promise.all as the Supabase ones
-    // rather than in a second round trip: they resolve to null on failure,
-    // so they can never delay or break the rest of the page.
-    const [gold, silver, portfolios, mentions, themes, spotGold, usdtry] =
+    // Every price call rides in the same Promise.all as the Supabase ones
+    // rather than in a second round trip, and each resolves to null on
+    // failure, so none of them can delay or break the rest of the page.
+    // Binance is fetched unconditionally rather than only when TradingView
+    // fails: it costs one small request and it means the fallback is already
+    // in hand instead of adding a second serial round trip at the worst
+    // possible moment.
+    const [gold, silver, portfolios, mentions, themes, tv, paxg, binanceFx] =
       await Promise.all([
         api("predictions?select=*&asset=eq.gold&order=target_date.desc&limit=30"),
         api("predictions?select=*&asset=eq.silver&order=target_date.desc&limit=30"),
         api("portfolios?select=*"),
         api("kanal_finans_mentions?select=*&order=published_at.desc&limit=40"),
         api("kanal_finans_themes?select=*&order=published_at.desc&limit=40"),
+        fetchTradingView(),
         fetchBinance("PAXGUSDT"),
         fetchBinance("USDTTRY"),
       ]);
+
+    // TradingView first because it is the only source that carries silver.
+    // Binance fills whatever it left null -- gold and FX only, since it has
+    // no silver at all -- and silver then falls through to its last COMEX
+    // close, labelled as such by the renderer.
+    const live = {
+      gold: tv?.gold ?? paxg,
+      silver: tv?.silver ?? null,
+      usdtry: tv?.usdtry ?? binanceFx,
+      delayed: tv?.delayed ?? false,
+      source: tv?.gold ? tv.source : "Binance",
+    };
 
     cache = { predictions: { gold, silver }, portfolios, mentions, themes };
 
@@ -558,7 +640,7 @@ async function load() {
     // latest prices, which is right whenever both rows are from the same day
     // and quietly wrong when one metal's row is staler than the other's.
     renderRatio(gold[0], silver[0]);
-    renderLivePrices(spotGold, usdtry, gold[0], silver[0]);
+    renderLivePrices(live, gold[0], silver[0]);
 
     renderKanalFinans(mentions, themes);
     renderAll();
