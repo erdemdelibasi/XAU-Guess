@@ -688,6 +688,45 @@ ikisini karıştırır.
 Supabase ~1000 satırda sessizce keser; kesilmiş bir işlem defterinden hesaplanan
 ortalama maliyet eksik değil, **yanlış** olurdu.
 
+### Anlık fiyat kartları: gün oku KALICI, tik parlaması ANLIK
+
+İkisi aynı görsel dilin (yeşil/kırmızı) iki ayrı iddiasıdır ve karıştırılmamalı:
+
+- **Ok** = bugünkü fiyat, **TradingView'ün kendi günlük mumunun açılışına**
+  göre yukarıda mı aşağıda mı. Bilerek önceki kapanışa göre değil — daha
+  yaygın kural o olsa da istenen bu değildi, ve sessizce değiştirmedim.
+  `columns` isteğine üçüncü alan olarak `"open"` eklendi (`readOpen`, hücre
+  indeksi 2); gerçek veriyle doğrulandı: `TVC:GOLD` `[4398.66, "streaming",
+  4409.76]` gibi dönüyor.
+- **Parlama** = ekrandaki sayı **bir önceki tike göre** değişti mi, hangi
+  yöne. Güne göre yukarıda olan bir metal tek bir tikte aşağı gidebilir —
+  ikisi bağımsız ölçülüyor ve test edilirken de gerçekten ayrıştılar.
+
+**Hiçbir yedek kaynağın (Binance) güvenilir bir "bugünkü açılışı" yok** —
+Binance'in 24 saatlik ticker'ı kayan bir pencere, takvim günü değil, farklı
+bir şeye aynı adı takmak olurdu. Bu yüzden TradingView düştüğünde ok da
+kayboluyor, sessizce yanlış bir sayıya geçmiyor. Aynı şekilde günlük değişim
+ekranda görünecek hassasiyette değilse (±%0,005 altı) ok basılmıyor — göremediği
+bir büyüklüğü iddia eden bir okun kendisi abartıdır.
+
+**Parlama, ham float değil GÖRÜNEN (yuvarlanmış) değere göre tetikleniyor.**
+Besleme bazen ekranda hiç görünmeyen bir ondalıkta titrer; ham değere göre
+tetiklemek okuyucunun göremediği bir "değişikliği" parlatırdı. `lastPaintedPrice`
+son basılan yuvarlanmış string'i tutuyor, ilk boyamada `null` olduğu için ilk
+tik hiç parlamıyor.
+
+**CSS animasyonu yeniden tetiklemek için hile gerekmedi.** `renderLivePrices`
+tüm `#live-prices` innerHTML'ini her 2 saniyede baştan kuruyor — yani değişen
+ya da değişmeyen fark etmeksizin her kart zaten yepyeni bir DOM düğümü. Fark
+sadece şurada: sınıf (`flash-up`/`flash-down`) yalnızca değişim varsa markup'a
+giriyor. Değişmeyen tikte kart yine yeniden yaratılıyor ama sınıfsız, o yüzden
+animasyon oynamıyor — ayrı bir "reflow zorla" veya benzersiz anahtar numarası
+gerekmedi, çünkü innerHTML değişimi bunu zaten bedava sağlıyor.
+
+Altı senaryo ile test edildi: ilk boyama (parlama yok), aynı yuvarlanmış değer
+(parlama yok), yukarı tik, aşağı tik, açılış verisi eksik (ok yok), eşik altı
+günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
+
 ---
 
 ## Geliştirme notları

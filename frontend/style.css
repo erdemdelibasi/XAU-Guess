@@ -534,3 +534,39 @@ code {
   margin-left: 0.15rem;
 }
 .live-source { line-height: 1.45; }
+
+/* The day-over-open arrow. A separate claim from the tick flash below: this
+   one is persistent (it says "today is red/green"), the flash is momentary
+   (it says "a new number just arrived"). Reuses --up/--down rather than
+   inventing a third colour vocabulary for direction. */
+.live-arrow {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2em;
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+
+/* The tick flash: a brief background pulse on the card that just printed a
+   new price, coloured by the direction of THAT tick (not the day-open
+   comparison above -- a price can be up on the day but tick down for one
+   print, and the flash has to answer "which way did it just move", not
+   repeat the arrow). `renderLivePrices` only attaches these classes on a
+   render where the shown value actually changed, and because the whole grid
+   is rebuilt from innerHTML every cycle, an unchanged tick yields a plain
+   node with neither class, so the animation does not replay every poll. */
+@keyframes live-flash-up {
+  0% { background-color: rgba(78, 201, 138, 0.32); }
+  100% { background-color: transparent; }
+}
+@keyframes live-flash-down {
+  0% { background-color: rgba(226, 99, 92, 0.32); }
+  100% { background-color: transparent; }
+}
+.live-card.flash-up { animation: live-flash-up 1000ms ease-out; }
+.live-card.flash-down { animation: live-flash-down 1000ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .live-card.flash-up, .live-card.flash-down { animation: none; }
+}

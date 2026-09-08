@@ -420,7 +420,7 @@ async function fetchTradingView() {
       headers: { "Content-Type": "text/plain;charset=UTF-8" },
       body: JSON.stringify({
         symbols: { tickers: [...Object.values(TV_TICKERS), ...Object.values(TV_FUTURES)] },
-        columns: ["close", "update_mode"],
+        columns: ["close", "update_mode", "open"],
       }),
     });
     if (!response.ok) return null;
@@ -429,6 +429,16 @@ async function fetchTradingView() {
     const read = (ticker) => {
       const cell = bySymbol.get(ticker);
       const value = cell ? Number(cell[0]) : NaN;
+      return Number.isFinite(value) && value > 0 ? value : null;
+    };
+    // Column index 2: today's session open, per TradingView's own daily bar
+    // (its exchange-timezone boundary, not ours). This is what "up/down
+    // today" is measured against below -- deliberately NOT the previous
+    // close, which is a different and more common convention but not the one
+    // asked for here.
+    const readOpen = (ticker) => {
+      const cell = bySymbol.get(ticker);
+      const value = cell ? Number(cell[2]) : NaN;
       return Number.isFinite(value) && value > 0 ? value : null;
     };
     const gold = read(TV_TICKERS.gold);
@@ -450,6 +460,11 @@ async function fetchTradingView() {
       usdtry: read(TV_TICKERS.usdtry),
       // The series the portfolios are valued on -- see the TV_FUTURES note.
       futures: { gold: read(TV_FUTURES.gold), silver: read(TV_FUTURES.silver) },
+      // No fallback source (Binance) has a comparable "today's open" -- its
+      // 24hr ticker has a rolling-window open, a different number wearing the
+      // same name -- so this stays empty rather than mixing definitions, and
+      // the up/down arrow simply does not render while TradingView is down.
+      open: { gold: readOpen(TV_TICKERS.gold), silver: readOpen(TV_TICKERS.silver) },
       delayed: modes.length > 0 && modes.some((m) => m !== "streaming"),
       source: "TradingView",
     };
@@ -471,7 +486,7 @@ async function fetchBinance(symbol) {
   }
 }
 
-function livePriceCard({ label, metal, usd, usdtry, source, live, badge, footnote }) {
+function livePriceCard({ label, metal, usd, usdtry, source, live, badge, footnote, dayChangePct, flashClass }) {
   // These two cards are the only place both metals appear at once, so each
   // pins its own palette (.metal-gold / .metal-silver) instead of inheriting
   // the active tab's. Everything else on the page follows the tab.
@@ -486,12 +501,31 @@ function livePriceCard({ label, metal, usd, usdtry, source, live, badge, footnot
   // here, so it is dollar price x USDTRY and nothing more.
   const tlOunce = usdtry ? usd * usdtry : null;
   const tlGram = tlOunce === null ? null : tlOunce / TROY_OUNCE_GRAMS;
+
+  // Arrow against TODAY'S OPEN, not the previous close -- that is what was
+  // asked for, and it is a different (and less common) comparison, so it is
+  // never silently swapped for the more standard one. Absent whenever there
+  // is no genuine same-day open to compare against (Binance fallback, or a
+  // move too small to round to a visible percentage) rather than guessing.
+  const arrowHtml = dayChangePct === null
+    ? ""
+    : `<span class="live-arrow ${dayChangePct >= 0 ? "up-text" : "down-text"}">` +
+      `${dayChangePct >= 0 ? "▲" : "▼"} ${fmtSignedPct(dayChangePct)}</span>`;
+
+  // renderLivePrices rebuilds this whole grid's innerHTML every 2s regardless
+  // of whether anything changed, so every card is a brand-new DOM node on
+  // every render -- which is what makes this safe rather than needing a key
+  // trick to restart the CSS animation: the class is only INCLUDED on a
+  // render where the price actually moved, so an unchanged tick produces a
+  // fresh node with no animation class and nothing plays.
+  const flash = flashClass ? ` ${flashClass}` : "";
+
   return `
-    <div class="${skin}${live ? " is-live" : ""}">
+    <div class="${skin}${live ? " is-live" : ""}${flash}">
       <div class="live-label">${label}
         <span class="live-badge">${badge ?? (live ? "canlı" : "son kapanış")}</span>
       </div>
-      <div class="live-usd">${fmtUsd(usd, digits)}<span class="unit">/ons</span></div>
+      <div class="live-usd">${fmtUsd(usd, digits)}<span class="unit">/ons</span> ${arrowHtml}</div>
       <div class="live-tl">
         <span>${tlOunce === null ? "-" : fmtNumber(tlOunce, 0) + " ₺"}<span class="unit">/ons</span></span>
         <span>${tlGram === null ? "-" : fmtNumber(tlGram, 2) + " ₺"}<span class="unit">/gram</span></span>
@@ -521,11 +555,40 @@ function renderLivePrices(live, goldRow, silverRow) {
     // close, which can be days old. Calling the gap "basis" -- as an earlier
     // version did -- reports a stale price move as a financing cost.
     const gap = spot && close ? spot / close - 1 : null;
+    const usd = spot ?? close;
+    const digits = key === "silver" ? 3 : 2;
+
+    // Arrow: today's session open, TradingView-only, and only against a
+    // genuine live spot quote -- comparing a possibly days-old COMEX close to
+    // TODAY's open would date-mismatch the two sides of the comparison.
+    const open = live.open?.[key] ?? null;
+    let dayChangePct = null;
+    if (spot && open) {
+      const pct = spot / open - 1;
+      // Rounds to 0.00% at the precision actually shown -- an arrow claiming
+      // a direction the reader cannot see the size of would overstate it.
+      if (Math.abs(pct) >= 0.00005) dayChangePct = pct;
+    }
+
+    // Flash: did the number actually ON SCREEN just change, versus the last
+    // render -- not the raw float, which jitters below what is displayed and
+    // would flash on movement nobody can see. `null` the first time a value
+    // appears, so the initial paint never flashes.
+    const rounded = usd === null || usd === undefined ? null : usd.toFixed(digits);
+    const prev = lastPaintedPrice[key];
+    let flashClass = null;
+    if (rounded !== null && prev !== null && rounded !== prev) {
+      flashClass = Number(rounded) > Number(prev) ? "flash-up" : "flash-down";
+    }
+    if (rounded !== null) lastPaintedPrice[key] = rounded;
+
     return livePriceCard({
       label,
       metal: key,
-      usd: spot ?? close,
+      usd,
       usdtry,
+      dayChangePct,
+      flashClass,
       // The green "is-live" treatment tracks a REAL-TIME quote, not merely a
       // present one: a delayed feed still gets its number shown, but it must
       // not wear the styling that says "this is the price right now".
@@ -960,7 +1023,7 @@ function renderAll() {
 // Declared before its use in loadData rather than after: a `const` is in the
 // temporal dead zone until evaluated, so the current bottom-of-file call
 // order is the only thing that makes a later declaration work.
-const EMPTY_LIVE = { gold: null, silver: null, usdtry: null, futures: {}, delayed: false, source: "" };
+const EMPTY_LIVE = { gold: null, silver: null, usdtry: null, futures: {}, open: {}, delayed: false, source: "" };
 
 /* Supabase data. One row per trading day, so this stays on the slow cycle --
    polling it every few seconds would re-download identical bytes. */
@@ -1007,6 +1070,14 @@ let binanceCache = { paxg: null, usdtry: null };
 // facts, and it is the second one that tells a reader the page is alive.
 let lastChangedAt = { usdtry: null };
 let binanceFetchedAt = 0;
+
+// The DISPLAYED (rounded) price last painted for each live card, used only to
+// decide whether to flash on the next render. Rounded rather than raw: the
+// feed sometimes jitters in a decimal the card does not even show, and
+// flashing on a change nobody can see would just be noise. Separate from the
+// day-open comparison below -- this is "did the number just move", not
+// "is today red or green".
+let lastPaintedPrice = { gold: null, silver: null };
 
 async function refreshBinance() {
   const [paxg, usdtry] = await Promise.all([
@@ -1075,6 +1146,7 @@ async function refreshPrices() {
     silver: tv?.silver ?? null,
     usdtry,
     futures: tv?.futures ?? {},
+    open: tv?.open ?? {},
     delayed: tv?.delayed ?? false,
     source: tv?.gold ? tv.source : "Binance",
     at: Date.now(),
