@@ -10,6 +10,14 @@ on:
     - cron: "0 23 * * 1-5"
   workflow_dispatch:
 
+# New repos default the GITHUB_TOKEN to read-only. Without this the commit
+# step's `git push` fails with "Write access to repository not granted" /
+# 403 -- caught on daily_retrain.yml's first real run (2026-09-07); this
+# workflow has the identical commit step and would fail the same way the
+# first time it actually bootstrap-trains a model.
+permissions:
+  contents: write
+
 jobs:
   predict:
     runs-on: ubuntu-latest

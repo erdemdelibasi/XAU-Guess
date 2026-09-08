@@ -7,6 +7,12 @@ on:
     - cron: "30 1 * * *"
   workflow_dispatch:
 
+# New repos default the GITHUB_TOKEN to read-only. Without this the commit
+# step's `git push` fails with "Write access to repository not granted" /
+# 403 -- caught live on the first real run (2026-09-07).
+permissions:
+  contents: write
+
 jobs:
   retrain:
     runs-on: ubuntu-latest
