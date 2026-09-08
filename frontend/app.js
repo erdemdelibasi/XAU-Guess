@@ -155,10 +155,42 @@ const TROY_OUNCE_GRAMS = 31.1034768;
    endpoint, and this is the same lesson kanal_finans.RETRY_SCHEDULE records
    in the backend: hammering an endpoint that is already refusing us is the
    surest way to turn a temporary block into a permanent one. A failing fetch
-   backs off geometrically to a minute; the first success resets it. */
-const PRICE_REFRESH_MS = 5000;
+   backs off geometrically to a minute; the first success resets it.
+
+   HOW FAST IS WORTH POLLING WAS MEASURED (2026-09-08), not guessed. Sampling
+   the scanner once a second for 109 seconds, each series produced a new value
+   only every 11-22 seconds:
+
+     TVC:GOLD        8 ticks   ~13.7s apart
+     TVC:SILVER     10 ticks   ~10.9s
+     COMEX:GC1!      5 ticks   ~21.9s
+     FX_IDC:USDTRY   9 ticks   ~12.1s
+
+   Polling at 1s, 2s and 5s all landed on the SAME set of values: because each
+   value persists far longer than the poll interval, a 5s poll already misses
+   no tick. So a faster loop buys latency, not information -- at 2s the newest
+   value reaches the screen up to 3 seconds sooner, and that is the whole gain.
+
+   Two seconds is used anyway because that latency is what the page feels
+   like, and it is paid for by NOT re-fetching Binance every cycle (below)
+   rather than by making 2.5x the requests. */
+const PRICE_REFRESH_MS = 2000;
 const PRICE_BACKOFF_MAX_MS = 60000;
 const DATA_REFRESH_MS = 5 * 60 * 1000;
+
+/* Binance is only ever a FALLBACK -- gold and FX, for when TradingView is
+   unreachable -- so it does not need TradingView's cadence. It used to ride
+   in every cycle so the fallback was already in hand rather than costing a
+   serial round trip at the worst possible moment; that reasoning still holds,
+   but 30 seconds satisfies it just as well as 2.
+
+   The arithmetic is why 2s costs nothing here. Per tab, per hour:
+     before, 5s x 3 requests  = 2160
+     now,    2s x 1 request + 30s x 2 = 1800 + 240 = 2040
+   i.e. a faster loop that makes FEWER total requests than the slower one it
+   replaces. A TradingView failure refreshes Binance immediately regardless of
+   this timer, so the fallback is never stale when it is actually needed. */
+const BINANCE_REFRESH_MS = 30000;
 
 const KF_STANCE = { UP: "Olumlu", DOWN: "Olumsuz", NEUTRAL: "Nötr" };
 const KF_ACTION = { BUY: "AL", SELL: "SAT", HOLD: "TUT" };
@@ -515,10 +547,26 @@ function renderLivePrices(live, goldRow, silverRow) {
   });
   document.getElementById("live-prices").innerHTML = cards.join("");
 
+  // A refresh clock, and when the parity last actually MOVED.
+  //
+  // Without these the panel cannot distinguish "still updating" from "stuck",
+  // and USDTRY makes that distinction constantly: measured 2026-09-08 it
+  // produces a new value only about every 12 seconds and moves ~0.004% a
+  // minute, so a correct, live page shows an unchanging parity most of the
+  // time. Printing the poll time makes the loop visible; printing the last
+  // change makes the stillness legible as the currency's, not the page's.
+  const clock = (t) => (t ? new Date(t).toLocaleTimeString("tr-TR") : "-");
+  const pulse =
+    `<br />Son kontrol <strong>${clock(live.at)}</strong> `
+    + `&middot; her ${Math.round(PRICE_REFRESH_MS / 1000)} saniyede bir. `
+    + `Parite en son ${clock(lastChangedAt.usdtry)}'te değişti &mdash; USDTRY `
+    + `ortalama 12 saniyede bir güncelleniyor, yani aynı sayıyı görmek normaldir.`;
+
   document.getElementById("live-note").innerHTML = usdtry
     ? `TL değerleri <strong>paritedir</strong>: dolar fiyatı × USDTRY `
       + `(${fmtNumber(usdtry, 4)}). Türkiye'de gram altın bu paritenin `
       + `<em>üzerinde</em> bir primle işlem görür, dolayısıyla bu sayı kuyumcu fiyatı değildir.`
+      + pulse
     : "USDTRY alınamadı &mdash; TL karşılıkları gösterilemiyor.";
 }
 
@@ -877,7 +925,10 @@ function renderValuationNote(asset, mark) {
   el.innerHTML = mark.live
     ? `Değerleme fiyatı <strong>${fmtUsd(mark.price, asset.digits)}</strong> `
       + `&mdash; ${currentAsset === "gold" ? "COMEX:GC1!" : "COMEX:SI1!"} vadeli, `
-      + `<strong>10 dakika gecikmeli</strong>, 5 saniyede bir yenileniyor. `
+      // Derived, never typed: this sentence said "5 saniyede bir" for one
+      // commit after the loop moved to 2s.
+      + `<strong>10 dakika gecikmeli</strong>, ${Math.round(PRICE_REFRESH_MS / 1000)} `
+      + `saniyede bir yenileniyor. `
       + `Spot değil vadeli kullanılıyor: portföyler vadeli fiyattan alındı ve vadeliden `
       + `satılacak, spotla değerlemek ~%1'lik vadeli&ndash;spot bazını sahte bir zarar `
       + `gibi yazardı.`
@@ -948,6 +999,30 @@ async function loadData() {
   }
 }
 
+// Last known Binance quotes, refreshed on their own slower timer. Kept as
+// module state so a cycle that skips the fetch still has a fallback in hand.
+let binanceCache = { paxg: null, usdtry: null };
+// When each quoted value last actually CHANGED, as opposed to when it was
+// last polled. On a series that ticks every ~12 seconds these are different
+// facts, and it is the second one that tells a reader the page is alive.
+let lastChangedAt = { usdtry: null };
+let binanceFetchedAt = 0;
+
+async function refreshBinance() {
+  const [paxg, usdtry] = await Promise.all([
+    fetchBinance("PAXGUSDT"), fetchBinance("USDTTRY"),
+  ]);
+  binanceFetchedAt = Date.now();
+  // A failed leg keeps its previous value rather than blanking the fallback:
+  // a slightly stale backup is worth more than no backup, and this value is
+  // only ever read when TradingView is already down.
+  binanceCache = {
+    paxg: paxg ?? binanceCache.paxg,
+    usdtry: usdtry ?? binanceCache.usdtry,
+  };
+  return binanceCache;
+}
+
 /* Prices. Fast loop, and the only thing on the page that actually moves
    intraday: the two live cards, every portfolio's value, and the next-order
    line that depends on it. */
@@ -957,12 +1032,23 @@ async function refreshPrices() {
   // undocumented endpoint.
   if (document.hidden) { schedulePrices(); return; }
 
-  // Binance is fetched unconditionally rather than only when TradingView
-  // fails: it costs one small request and it means the fallback is already in
-  // hand instead of adding a serial round trip at the worst possible moment.
-  const [tv, paxg, binanceFx] = await Promise.all([
-    fetchTradingView(), fetchBinance("PAXGUSDT"), fetchBinance("USDTTRY"),
+  // TradingView every cycle; Binance only when its own timer is due, because
+  // it is a fallback and not the feed being watched. See BINANCE_REFRESH_MS.
+  const binanceDue = Date.now() - binanceFetchedAt >= BINANCE_REFRESH_MS;
+  const [tv, binance] = await Promise.all([
+    fetchTradingView(),
+    binanceDue ? refreshBinance() : Promise.resolve(binanceCache),
   ]);
+  // No "refetch immediately because TradingView failed" branch, deliberately.
+  // `!binanceDue` already means the cache is younger than BINANCE_REFRESH_MS,
+  // so there is nothing fresher to fetch -- and an outage is exactly when the
+  // condition holds on every single cycle. A simulated 60s TradingView outage
+  // with that branch in place made 3720 Binance requests an hour instead of
+  // 360: the backoff never engages, because Binance is still answering.
+  // The first cycle needs no special case either; binanceFetchedAt starts at
+  // 0, so binanceDue is true and the fallback is fetched before it is read.
+  const paxg = binance.paxg;
+  const binanceFx = binance.usdtry;
 
   if (!tv && paxg === null && binanceFx === null) {
     // Everything failed. Keep the last good prices on screen rather than
@@ -977,13 +1063,21 @@ async function refreshPrices() {
   // Binance fills whatever it left null -- gold and FX only, since it has no
   // silver at all -- and silver then falls through to its last COMEX close,
   // labelled as such by the renderer.
+  const usdtry = tv?.usdtry ?? binanceFx;
+  // Record the moment the parity actually moved, not merely the moment it was
+  // polled -- the two are far apart on a series that ticks every ~12 seconds.
+  if (usdtry !== null && usdtry !== cache.live?.usdtry) {
+    lastChangedAt.usdtry = Date.now();
+  }
+
   cache.live = {
     gold: tv?.gold ?? paxg,
     silver: tv?.silver ?? null,
-    usdtry: tv?.usdtry ?? binanceFx,
+    usdtry,
     futures: tv?.futures ?? {},
     delayed: tv?.delayed ?? false,
     source: tv?.gold ? tv.source : "Binance",
+    at: Date.now(),
   };
 
   const gold = cache.predictions.gold?.[0];

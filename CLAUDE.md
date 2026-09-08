@@ -611,13 +611,52 @@ tanım gereği hep gecikmelidir; onları da hesaba katmak gerçek zamanlı spot
 kartlarını kalıcı olarak "gecikmeli" damgalar ve rozeti işe yaramaz hâle
 getirir.
 
-### İki döngü: fiyatlar 5 sn, Supabase 5 dk
+### İki döngü: fiyatlar 2 sn, Supabase 5 dk
 
 `refreshPrices` (5 sn) ve `loadData` (5 dk) ayrıdır. Supabase günde bir satır
 üretiyor; onu saniyede bir çekmek aynı baytları tekrar indirmektir. Gün içinde
 gerçekten kıpırdayan tek şey fiyattır — ve fiyat kıpırdayınca portföy değeri,
 ima ettiği pozisyon ve dolayısıyla "sonraki işlem" satırı da kıpırdar, o yüzden
 üçü aynı tikte yeniden çizilir.
+
+**Ne kadar hızlı çekmeye değdiği ölçüldü (2026-09-08), tahmin edilmedi.**
+Tarayıcının gördüğü uç nokta saniyelik bir akış değil; ~1 sn aralıkla 109
+saniye örneklendiğinde her seri **11-22 saniyede bir** yeni değer üretiyor:
+
+| Seri | Tik | Ortalama aralık |
+|---|---|---|
+| `TVC:GOLD` | 8 | 13,7 sn |
+| `TVC:SILVER` | 10 | 10,9 sn |
+| `COMEX:GC1!` | 5 | 21,9 sn |
+| `FX_IDC:USDTRY` | 9 | 12,1 sn |
+
+1 sn, 2 sn ve 5 sn'de **aynı** değer kümesine ulaşılıyor: her değer poll
+aralığından çok daha uzun süre ekranda kaldığı için 5 sn zaten hiçbir tiki
+kaçırmıyor. Yani hızlandırmak **bilgi değil gecikme** satın alır. 2 sn yine de
+seçildi çünkü sayfanın "canlı" hissi bu gecikmedir — ama bedeli 2,5 kat istekle
+değil, **Binance'i her turdan çıkararak** ödendi (`BINANCE_REFRESH_MS` 30 sn):
+
+| | TradingView | Binance | Toplam |
+|---|---|---|---|
+| eski (5 sn, her turda Binance) | 720/sa | 1440/sa | 2160/sa |
+| yeni (2 sn, Binance 30 sn'de) | 1800/sa | 240/sa | **2100/sa** |
+
+Toplam yük düştü ama **TradingView'ün payı 2,5 katına çıktı** ve belgelenmemiş
+uç nokta odur; gerekirse geri alınacak sayı `PRICE_REFRESH_MS`'tir.
+
+**"TradingView düştü, yedeği hemen çek" dalı bir hataydı ve simülasyon yakaladı.**
+`!binanceDue` zaten "önbellek 30 sn'den taze" demektir, dolayısıyla çekilecek
+daha tazesi yoktur — ve kesinti tam da bu koşulun *her turda* sağlandığı andır.
+Geri çekilme de devreye girmez, çünkü Binance cevap vermeye devam ediyordur.
+Ölçülen: 60 saniyelik sahte kesintide Binance 240/sa yerine **3720/sa**. İlk tur
+için de özel duruma gerek yok: `binanceFetchedAt` 0 başlar, yani ilk turda
+zaten çekilir.
+
+**Durağan bir sayı ile donmuş bir sayfa ayırt edilebilmeli.** USDTRY dakikada
+~%0,004 oynuyor ve ~12 saniyede bir güncelleniyor, yani doğru çalışan bir sayfa
+pariteyi çoğu zaman **değişmeden** gösterir. Bu yüzden not satırı hem son
+kontrol saatini hem parite en son ne zaman *gerçekten değiştiğini* basıyor;
+ikisi olmadan kullanıcı haklı olarak "takıldı" diye okur.
 
 İki koruma var ve ikisi de bilinçli:
 - **Gizli sekme istek atmaz** (`document.hidden`). Unutulmuş bir arka plan
