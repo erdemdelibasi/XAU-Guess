@@ -18,8 +18,13 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
 
 Kullanıcının kendi bilgisayarı (Windows Task Scheduler -- GitHub Actions DEĞİL,
 bkz. aşağıdaki Kanal Finans notu)
+  -> ../Kanal-Finans-Fetcher/fetcher.py    her 30 dk -- YouTube'dan TEK çekiş,
+                              XRP-Guess'le PAYLAŞILAN sibling repo, iki projeye
+                              de kendi şemasıyla yazar (bkz. o reponun README'si)
   -> backend/run_kanal_finans_hidden.vbs -> run_kanal_finans.ps1
-                              her 15 dk, tahmin akışından bağımsız
+                              her 15 dk, YouTube'a HİÇ gitmez: sadece
+                              fetcher'ın yazdığı bekleyen görüşleri portföye
+                              uygular (bkz. aşağıdaki Kanal Finans notu)
        |
        v
 Supabase (Postgres + otomatik REST API, RLS ile korunur)
@@ -464,16 +469,44 @@ rate-hike bets" başlığını doğru şekilde DÜŞÜŞ olarak okudu.
 
 ### Kanal Finans TŞ: bir insanın görüşü, bizim tahminimiz değil
 
-`backend/kanal_finans.py` — YouTube @KanalFinans (Tunç Şatıroğlu) kanalının
-videolarından **iki ayrı şey** çıkarır:
+**2026-09-08'de ikiye bölündü ve bunu anlamak önemli.** Bu bölümün geri
+kalanı hâlâ geçerli (görüşün ne olduğu, direnç kuralı, zarar-kes yönü, seviye
+korunumu) ama **YouTube'a giden kısım artık bu repoda değil.**
 
-- **mentions**: varlık başına (ALTIN / GUMUS / GENEL) sadık tek cümlelik
-  özet, konuşmacının duruşu, al/tut/sat okuması, ve verdiyse ons hedefi /
-  zarar-kes / direnç seviyeleri. `kanalfinans` portföyü bunlara göre işlem
-  yapar.
-- **themes**: o görüşün dayandığı makro hikâye — SAVAS, ABD_POLITIKA,
-  REZERV, DOLAR, ENFLASYON, ARZ_TALEP, BORSA, TURKIYE. **Bilerek işlem
-  üretmez.** Çıplak bir "yükseliş"in bağlamıyla okunabilmesi için var.
+**Neden bölündü**: XAU-Guess ve XRP-Guess, aynı YouTube kanalını, aynı
+makineden (aynı IP'den), her 15 dakikada bir **bağımsız** olarak izliyordu.
+Aynı videonun transkripti YouTube'dan iki proje için ayrı ayrı, yani iki kez
+çekiliyordu — aralıklı olarak bizi zaten engelleyen bir uç noktaya karşı
+gereksiz bir ikiye katlama. Ölçüldü (2026-09-08): bu proje `kanal_finans_videos`
+tablosunda **sıfır** başarılı satırla dururken, XRP-Guess'in 23 başarılı satırı
+vardı, en sonuncusu bir gün önceden — yani engel kalıcı değil, aralıklı, ve iki
+projenin toplam isteğini ikiye katlamak onu daha sık/uzun engele çeviriyor
+olabilir (kesin nedensellik iddia edilemez, ama zamanlama örtüşüyor).
+
+**Yeni bölünme**:
+
+- **`../Kanal-Finans-Fetcher/fetcher.py`** (sibling repo, XRP-Guess'le
+  PAYLAŞILAN) — RSS'i **bir kez** okur, her videonun transkriptini **bir kez**
+  çeker, sonra **iki ayrı** Claude çağrısıyla (bu projenin ALTIN/GUMUS/GENEL +
+  tema şeması, XRP-Guess'in XRP/BTC/ETH/KRIPTO şeması — gerçekten farklı
+  sorular, birleştirilecek ortak bir şema yok) her iki projenin **kendi**
+  Supabase'ine yazar. Her 30 dakikada bir çalışır. Geri çekilme artık **tek
+  ve gerçekten paylaşılan** bir sayaç (`state/backoff.json`, yerel dosya,
+  Supabase'de değil) — eskiden iki proje aynı videonun geri çekilmesini
+  birbirinden bağımsız sayıyordu, yani her ikisinin toplamı tek bir paylaşılan
+  sayaçtan daha sık deniyordu.
+- **`backend/kanal_finans.py`** (burada, değişti) — artık YouTube'a **hiç**
+  gitmiyor. Tek işi: fetcher'ın yazdığı `kanal_finans_mentions` satırlarından
+  `applied_at is null` olanları okuyup portföye uygulamak. Bu yüzden **eski
+  15 dakikalık takviminde kalabildi** — hatta öncesinden daha duyarlı oldu,
+  çünkü artık bloklanabilen bir transkript çekişinin arkasında beklemiyor.
+
+`mentions` (varlık başına ALTIN/GUMUS/GENEL görüş, duruş, al/tut/sat, ons
+hedefi/zarar-kes/direnç) ve `themes` (SAVAS, ABD_POLITIKA, REZERV, DOLAR,
+ENFLASYON, ARZ_TALEP, BORSA, TURKIYE — **bilerek işlem üretmez**, çıplak bir
+"yükseliş"in bağlamla okunabilmesi için var) hâlâ aynı iki şey; sadece
+**kim çıkardığı** değişti (fetcher), **kim uyguladığı** değişmedi
+(`kanal_finans_trading.py`, dokunulmadı).
 
 Tema sözlüğü **sabit ve küçük** tutuldu: açık uçlu bir "neden bahsetti"
 alanı her videoda farklı bir taksonomi üretir ve zaman içinde hiçbir şey
@@ -484,24 +517,15 @@ Burada bir tahmin üretmiyoruz, birinin ne dediğini raporluyoruz. Frontend'de
 bu netleşsin diye modelin İngilizce "YÜKSELİŞ/DÜŞÜŞ" etiketlerinden bilerek
 farklı, Türkçe "Olumlu/Olumsuz/Nötr" rozetleri kullanılıyor.
 
-**Neden GitHub Actions'ta DEĞİL de kullanıcının kendi bilgisayarında**:
-XRP-Guess'te canlı doğrulandı (2026-09-02, iki ayrı manuel koşu, her
-birinde 15 videonun 15'i) — Actions'ın Azure IP aralığından yapılan
-transkript istekleri YouTube tarafından `RequestBlocked` ile sistematik
-olarak reddediliyor. Binance'te işe yarayan "alternatif host" çözümünün
-burada karşılığı yok.
-
-**2026-09-03 güncellemesi aynı derecede önemli**: yerel makine de
-`IpBlocked` aldı. Yerele taşımak sorunu azalttı, çözmedi. `RETRY_SCHEDULE`
-bu yüzden bir nezaket özelliği değil — zaten bizi reddeden bir endpoint'i
-günde 96 kez dövmek, geçici bir engeli kalıcıya çevirmenin en garanti
-yoludur. Kalıcı takılı bir video ~2 deneme/gün'e oturur, yeni bir video ise
-hiç geciktirilmez (kaydı yoktur, her zaman "due"dur).
-
-**Bir video ancak transkript VE Claude çıkarımı ikisi de başarılı olunca**
-`kanal_finans_videos`'a yazılır. Herhangi bir adım başarısız olursa video
-hiç yazılmaz ve bir sonraki koşuda otomatik tekrar denenir — takılan bir
-video geciker, kaybolmaz.
+**Bir video ancak transkript VE o projenin Claude çıkarımı ikisi de başarılı
+olunca** `kanal_finans_videos`'a yazılır (artık fetcher'da). Herhangi bir adım
+başarısız olursa video hiç yazılmaz ve bir sonraki koşuda otomatik tekrar
+denenir — takılan bir video geciker, kaybolmaz. Bir projenin çıkarımı
+başarısız olup diğerininki başarılı olursa (nadir — Claude ayrı bir kaynak,
+YouTube gibi bloklanmıyor), transkript zaten elde olduğu için o video bir
+dahaki YouTube çekişini beklemeden **aynı koşuda** her iki proje için de
+denenir; sadece başarısız kalan taraf bir sonraki koşuda YouTube'a yeniden
+gitmeyi gerektirir.
 
 **Direnç seviyesi bilerek otomatik satış tetiklemez.** XRP-Guess canlı
 veride konuşmacının direnç kırılmasını bazen *alım fırsatı* olarak

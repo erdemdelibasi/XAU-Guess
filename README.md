@@ -132,9 +132,16 @@ Kanalın videolarından **iki ayrı şey** çıkarılır:
 
 Bu bir tahmin bileşeni **değildir**; bir insanın görüşünün raporudur ve
 arayüzde de öyle etiketlenir. Ayrıca **GitHub Actions'ta çalışmaz**: YouTube
-transkript isteklerini bulut IP'lerinden sistematik olarak reddediyor, o
-yüzden Windows Task Scheduler ile kullanıcının kendi makinesinde 15 dakikada
-bir çalışır (`backend/run_kanal_finans_hidden.vbs`).
+transkript isteklerini bulut IP'lerinden sistematik olarak reddediyor.
+
+YouTube'dan çekme kısmı 2026-09-08'de ayrı bir sibling repoya taşındı
+(`../Kanal-Finans-Fetcher`), çünkü bu proje ve XRP-Guess aynı kanalı aynı
+IP'den bağımsız olarak izleyip her transkripti gereksiz yere iki kez
+çekiyordu. O repo her 30 dakikada bir tek çekiş yapıp her iki projeye de
+kendi şemasıyla yazıyor; `backend/kanal_finans.py` artık YouTube'a hiç
+gitmeden sadece bekleyen görüşleri portföye uyguluyor ve bu yüzden eski
+15 dakikalık takviminde kalabildi (Windows Task Scheduler,
+`backend/run_kanal_finans_hidden.vbs`). Ayrıntı: `CLAUDE.md`.
 
 ### 19,5 yıllık backtest, ALTIN (ETF maliyeti, 10 bp gidiş-dönüş)
 
@@ -219,17 +226,31 @@ python fedcycle.py          # Fed faiz kararlari -- 32 test, 0 gecti
 python realrate.py          # gercek reel faiz vs vekil; merkez bankasi izi
 ```
 
-### 5. Kanal Finans (isteğe bağlı, yerel)
+### 5. Kanal Finans (isteğe bağlı, yerel, iki parça)
 
-GitHub Actions'ta çalışmaz (YouTube bulut IP'lerini engelliyor). Windows'ta:
+GitHub Actions'ta çalışmaz (YouTube bulut IP'lerini engelliyor). Windows'ta,
+**iki ayrı** zamanlanmış görev gerekir:
 
-1. `backend/.env` içine `ANTHROPIC_API_KEY` ve Supabase bilgilerini yaz.
+**a) Paylaşılan çekiş** (`../Kanal-Finans-Fetcher` — bu reponun DIŞINDA,
+XRP-Guess ile paylaşılan sibling repo; ayrıntı o reponun README'si):
+1. O reponun `.env`'ine hem bu projenin hem XRP-Guess'in Supabase +
+   Anthropic bilgilerini yaz (`XAU_*` / `XRP_*` önekli).
+2. Task Scheduler → yeni görev → eylem:
+   `wscript.exe "...\Kanal-Finans-Fetcher\run_fetcher_hidden.vbs"`
+3. Tetikleyici: **30 dakikada bir tekrarla, sınırsız süre**.
+
+**b) Bu projenin uygulama adımı** (`backend/kanal_finans.py`, YouTube'a
+gitmez, sadece Supabase okuyup portföye işlem uygular):
+1. `backend/.env` içine Supabase bilgilerini yaz (`ANTHROPIC_API_KEY`
+   artık burada gerekmiyor — çıkarım fetcher'da yapılıyor).
 2. Task Scheduler → yeni görev → eylem:
    `wscript.exe "...\backend\run_kanal_finans_hidden.vbs"`
 3. Tetikleyici: günlük 00:00, **15 dakikada bir tekrarla, 24 saat boyunca**.
-4. Ayarlar: `MultipleInstances = IgnoreNew`, `ExecutionTimeLimit = 10 dk`,
-   ve **"Yalnızca AC gücündeyse çalıştır" seçeneğini KAPAT** — varsayılan
-   açık, ve dizüstü fişten çekiliyken görev hiç çalışmaz.
+
+İkisi için de: `MultipleInstances = IgnoreNew`, ve **"Yalnızca AC
+gücündeyse çalıştır" seçeneğini KAPAT** — varsayılan açık, ve dizüstü
+fişten çekiliyken görev hiç çalışmaz. `ExecutionTimeLimit` (a) için 20 dk,
+(b) için 10 dk yeterli.
 
 ---
 

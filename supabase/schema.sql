@@ -243,10 +243,16 @@ create table if not exists kanal_finans_mentions (
     -- that sentinel to NULL, so a stored number is always a real level.
     ounce_target        numeric,
     stop_loss_price     numeric,
-    resistance_price    numeric
+    resistance_price    numeric,
+    -- NULL = not yet traded on. Written by Kanal-Finans-Fetcher (a sibling
+    -- repo shared with XRP-Guess, see CLAUDE.md); read and stamped by this
+    -- project's own kanal_finans.py, which no longer talks to YouTube at
+    -- all and just applies whatever mentions this column says are pending.
+    applied_at          timestamptz
 );
 
 create index if not exists kf_mentions_asset_idx on kanal_finans_mentions (asset, published_at desc);
+create index if not exists kf_mentions_pending_idx on kanal_finans_mentions (applied_at) where applied_at is null;
 
 alter table trades
     drop constraint if exists trades_triggered_by_mention_id_fkey;
@@ -364,4 +370,22 @@ end $$;
 --   alter table predictions add column if not exists ml_confidence_raw numeric;
 --   alter table predictions add column if not exists macro_confidence_raw numeric;
 --   alter table predictions add column if not exists cold_start boolean;
+--
+-- 2026-09-08  Kanal Finans TS split into a shared fetcher (Kanal-Finans-
+--             Fetcher, a sibling repo also serving XRP-Guess) plus this
+--             project's own trade-application step. RUN THIS ONE before
+--             deploying the new backend/kanal_finans.py -- it reads
+--             `applied_at`, and PostgREST rejects a query against an unknown
+--             column outright. Safe to run twice. This project had zero rows
+--             in kanal_finans_mentions at the time of the split (see
+--             CLAUDE.md) so the backfill below is a no-op today, but it is
+--             included anyway (XRP-Guess's identical migration needed it for
+--             its 45 pre-existing rows) so that if any row somehow exists
+--             before this runs, it is treated as already-traded rather than
+--             replayed against today's price on the new script's first run.
+--
+--   alter table kanal_finans_mentions add column if not exists applied_at timestamptz;
+--   create index if not exists kf_mentions_pending_idx
+--     on kanal_finans_mentions (applied_at) where applied_at is null;
+--   update kanal_finans_mentions set applied_at = created_at where applied_at is null;
 --

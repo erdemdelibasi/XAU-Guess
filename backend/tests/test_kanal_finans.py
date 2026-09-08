@@ -1,13 +1,14 @@
-"""Tests for the DB-free decision functions in the Kanal Finans pipeline.
+"""Tests for the DB-free decision functions in the Kanal Finans pipeline, plus
+apply_pending_mentions()'s bookkeeping.
 
-The network parts (RSS, transcripts, the Claude call) have no tests -- they
-are validated by watching live rows, exactly as in XRP-Guess. What IS tested
-here is every rule that would fail silently: a stop-loss that quietly
-disarms, a retry that stops backing off, a level read from the wrong end of a
-range.
+The YouTube-facing half (RSS, transcripts, retry backoff, the Claude call) no
+longer lives in this project -- it moved to ../Kanal-Finans-Fetcher, a sibling
+repo shared with XRP-Guess (see kanal_finans.py's module docstring for why).
+Its tests moved with it, into Kanal-Finans-Fetcher/tests/test_fetcher.py.
+What's tested here is everything that stayed: a stop-loss that quietly
+disarms, a level read from the wrong end of a range, and a pending mention
+that must retry (never get marked applied) if trading on it fails.
 """
-from datetime import datetime, timedelta, timezone
-
 import pytest
 
 import kanal_finans
@@ -22,46 +23,6 @@ class FakeAsset:
 
 
 ASSET = FakeAsset()
-NOW = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
-
-
-# --------------------------------------------------------------------------
-# Retry backoff
-# --------------------------------------------------------------------------
-
-def test_new_video_is_always_due():
-    """A newly published video has no failure record, so it must never be
-    delayed by the backoff meant for stuck ones."""
-    assert kanal_finans.is_retry_due(None, NOW) is True
-
-
-def test_early_failures_retry_immediately():
-    """The first few attempts are cheap and often succeed -- a transient blip
-    clears on the very next run."""
-    record = {"attempts": 1, "last_attempt_at": (NOW - timedelta(minutes=1)).isoformat()}
-    assert kanal_finans.is_retry_due(record, NOW) is True
-
-
-def test_backoff_widens_with_failures():
-    """Without this, a video whose transcript is IP-blocked would be retried
-    96 times a day against the endpoint already refusing us -- the surest way
-    to turn a temporary block into a lasting one."""
-    stuck = {"attempts": 5, "last_attempt_at": (NOW - timedelta(minutes=10)).isoformat()}
-    assert kanal_finans.is_retry_due(stuck, NOW) is False
-    later = {"attempts": 5, "last_attempt_at": (NOW - timedelta(hours=2)).isoformat()}
-    assert kanal_finans.is_retry_due(later, NOW) is True
-
-
-def test_backoff_is_monotonic_and_capped():
-    delays = [kanal_finans._retry_delay_minutes(n) for n in (0, 3, 6, 10, 50)]
-    assert delays == sorted(delays), "a later failure must never retry sooner"
-    assert delays[-1] == kanal_finans.RETRY_MAX_DELAY_MINUTES
-
-
-def test_permanently_stuck_video_settles_at_about_two_attempts_a_day():
-    """The stated design goal, asserted rather than assumed."""
-    per_day = 24 * 60 / kanal_finans.RETRY_MAX_DELAY_MINUTES
-    assert 1 <= per_day <= 3
 
 
 # --------------------------------------------------------------------------
@@ -147,37 +108,120 @@ def test_resistance_never_triggers_a_sale():
 
 
 # --------------------------------------------------------------------------
-# Extraction contract
+# apply_pending_mentions -- the bookkeeping half that stayed here
 # --------------------------------------------------------------------------
 
-def test_zero_is_the_not_mentioned_sentinel():
-    """The response schema cannot express "null number", so 0 means "he did
-    not give a level" and must never be stored as a real price."""
-    assert kanal_finans._level(0) is None
-    assert kanal_finans._level(None) is None
-    assert kanal_finans._level(4300.5) == 4300.5
+class _FakeTable:
+    def __init__(self, name, store):
+        self.name = name
+        self.store = store
+        self._filter_null = None
+        self._eq = None
 
+    def select(self, _cols):
+        return self
+
+    def is_(self, column, value):
+        assert value == "null"
+        self._filter_null = column
+        return self
+
+    def order(self, _col):
+        return self
+
+    def update(self, patch):
+        self._patch = patch
+        return self
+
+    def eq(self, column, value):
+        self._eq = (column, value)
+        return self
+
+    def execute(self):
+        if self._filter_null:
+            rows = [r for r in self.store if r.get(self._filter_null) is None]
+            return type("R", (), {"data": rows})()
+        if self._eq:
+            column, value = self._eq
+            for row in self.store:
+                if row[column] == value:
+                    row.update(self._patch)
+            return type("R", (), {"data": None})()
+        return type("R", (), {"data": self.store})()
+
+
+class FakeDb:
+    """Mimics just enough of the supabase-py chain for kanal_finans_mentions:
+    .select().is_(col, "null").order().execute().data and
+    .update(patch).eq(col, val).execute()."""
+    def __init__(self, rows):
+        self.rows = rows
+
+    def table(self, name):
+        assert name == "kanal_finans_mentions"
+        return _FakeTable(name, self.rows)
+
+
+def test_get_pending_mentions_only_returns_unapplied_rows():
+    rows = [
+        {"id": 1, "asset": "ALTIN", "applied_at": None},
+        {"id": 2, "asset": "GUMUS", "applied_at": "2026-09-08T00:00:00+00:00"},
+    ]
+    pending = kanal_finans.get_pending_mentions(FakeDb(rows))
+    assert [r["id"] for r in pending] == [1]
+
+
+def test_apply_pending_mentions_stamps_genel_without_trading(monkeypatch):
+    """GENEL has no portfolio to trade, but must still be marked applied --
+    otherwise it is read as "pending" on every run forever."""
+    rows = [{"id": 1, "asset": "GENEL", "applied_at": None}]
+    db = FakeDb(rows)
+
+    def boom(*_a, **_kw):
+        raise AssertionError("GENEL must never reach the trading engine")
+    monkeypatch.setattr(kanal_finans.kanal_finans_trading, "apply_mention", boom)
+
+    applied = kanal_finans.apply_pending_mentions(db)
+    assert applied == 0
+    assert rows[0]["applied_at"] is not None
+
+
+def test_apply_pending_mentions_trades_real_metals(monkeypatch):
+    rows = [{"id": 1, "asset": "ALTIN", "action": "BUY", "applied_at": None}]
+    db = FakeDb(rows)
+    calls = []
+
+    monkeypatch.setattr(kanal_finans.fetch_data, "get_live_price",
+                         lambda symbol: (4400.0, "GC=F"))
+    monkeypatch.setattr(kanal_finans.kanal_finans_trading, "apply_mention",
+                         lambda db, asset, mention, price: calls.append((asset.key, price)))
+
+    applied = kanal_finans.apply_pending_mentions(db)
+    assert applied == 1
+    assert calls == [("gold", 4400.0)]
+    assert rows[0]["applied_at"] is not None
+
+
+def test_a_failed_trade_is_not_marked_applied(monkeypatch):
+    """The retry contract: leaving applied_at NULL is what makes the next run
+    try again. Marking it applied here would silently drop a real mention."""
+    rows = [{"id": 1, "asset": "ALTIN", "action": "BUY", "applied_at": None}]
+    db = FakeDb(rows)
+
+    def boom(_symbol):
+        raise RuntimeError("Yahoo hiccup")
+    monkeypatch.setattr(kanal_finans.fetch_data, "get_live_price", boom)
+
+    applied = kanal_finans.apply_pending_mentions(db)
+    assert applied == 0
+    assert rows[0]["applied_at"] is None
+
+
+# --------------------------------------------------------------------------
+# What still maps mentions to portfolios
+# --------------------------------------------------------------------------
 
 def test_only_real_metals_map_to_portfolios():
     """GENEL ("kıymetli madenler" with neither metal named) is informational:
     there is no "general metal" position to take."""
     assert set(kanal_finans.PORTFOLIO_ASSET) == {"ALTIN", "GUMUS"}
-    assert "GENEL" in kanal_finans.MENTION_ASSETS
-    assert "GENEL" not in kanal_finans.PORTFOLIO_ASSET
-
-
-def test_theme_vocabulary_is_closed():
-    """An open-ended "what did he talk about" field produces a different
-    taxonomy every video and nothing can be counted across time."""
-    schema = kanal_finans.RESPONSE_SCHEMA["properties"]["themes"]["items"]
-    assert schema["properties"]["theme"]["enum"] == list(kanal_finans.THEMES)
-    assert schema["additionalProperties"] is False
-
-
-def test_prompt_states_both_level_directions_explicitly():
-    """XRP-Guess only said "pick the more cautious end", and the model got it
-    backwards: for a stop-loss the cautious end is the HIGHEST value, for a
-    resistance the LOWEST. Worth ~1.8% of extra loss on a real position."""
-    prompt = kanal_finans.SYSTEM_PROMPT
-    assert "EN YUKSEK" in prompt and "EN DUSUK" in prompt
-    assert "stop_loss_price" in prompt and "resistance_price" in prompt
