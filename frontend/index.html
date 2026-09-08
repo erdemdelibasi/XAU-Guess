@@ -20,11 +20,13 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-<main id="app">
+<!-- data-asset drives the whole page's metal palette (see style.css). It is
+     set here rather than left to JS so the first paint is already themed. -->
+<main id="app" data-asset="gold">
 
   <header class="topbar">
     <div>
-      <h1>ALTIN <span class="muted">&amp;</span> GÜMÜŞ</h1>
+      <h1><span class="h1-gold">ALTIN</span> <span class="muted">&amp;</span> <span class="h1-silver">GÜMÜŞ</span></h1>
       <p class="muted small">COMEX vadeli (GC=F / SI=F) &middot; ons başına dolar</p>
     </div>
     <!-- The ratio gets its historical placement next to it on purpose. A bare
@@ -54,16 +56,18 @@
   </section>
 
   <!-- Asset switch. Both metals run the full pipeline independently; the tab
-       only chooses which one's detail is on screen. -->
+       only chooses which one's detail is on screen -- and repaints the page
+       in that metal's colour, because most of what changes underneath are
+       percentages that would otherwise look identical. -->
   <div class="asset-tabs" id="asset-tabs">
-    <button data-asset="gold" class="active">Altın</button>
-    <button data-asset="silver">Gümüş</button>
+    <button data-asset="gold" class="active metal-gold">Altın</button>
+    <button data-asset="silver" class="metal-silver">Gümüş</button>
   </div>
 
   <!-- The current call. `edge_over_base` gets equal billing with the
        direction on purpose: each metal already rises more often than not, so
        "UP" on its own is close to content-free. -->
-  <section class="card prediction" id="prediction-card">
+  <section class="card asset-scoped prediction" id="prediction-card">
     <div class="prediction-head">
       <h2>Güncel Tahmin &mdash; <span id="asset-name">Altın</span></h2>
       <span class="muted small" id="prediction-horizon">-</span>
@@ -88,16 +92,45 @@
         </div>
       </div>
     </div>
+    <!-- The same three numbers as one sentence. A reader who does not want to
+         do arithmetic in their head still has to be able to leave this card
+         knowing what it said. -->
+    <p class="verdict" id="prediction-verdict">-</p>
     <p class="muted small footnote" id="base-rate-note">-</p>
+
+    <details class="explain">
+      <summary>Bu tahmin ne işe yarar, neye yaramaz?</summary>
+      <div class="explain-body">
+        <p><strong>Ne diyor:</strong> son kapanmış seanstan itibaren
+        <strong>5 işlem günü sonra</strong> fiyatın bugünkünden yukarıda mı aşağıda mı
+        olacağını söylüyor. Gün içi hareketle, tepe/dip yakalamakla ilgisi yok.</p>
+        <dl>
+          <dt>P(yükseliş)</dt>
+          <dd>Modelin yükselişe verdiği ihtimal.</dd>
+          <dt>Taban oran</dt>
+          <dd>Hiçbir model olmasaydı geçerli olacak ihtimal. Altın 5 günde zaten
+              %55,7, gümüş %53,9 oranında yükseliyor &mdash; yani &ldquo;YÜKSELİŞ&rdquo;
+              demek tek başına neredeyse bilgi taşımaz.</dd>
+          <dt>Kattığı fark</dt>
+          <dd><strong>Tek anlamlı sayı budur.</strong> P(yükseliş) eksi taban oran.
+              Sıfıra yakınsa model o gün fazladan bir şey söylemiyor demektir.</dd>
+        </dl>
+        <p><strong>Neye yaramaz:</strong> bu proje kendi ölçümüyle şunu buldu &mdash;
+        yön tahmini şansı yeniyor ama <strong>&ldquo;hep YÜKSELİŞ de&rdquo; demeyi
+        yenmiyor.</strong> Yani bu satıra bakarak al-sat yapmak, hiç bakmadan tutmaktan
+        daha iyi sonuç vermiyor. Ölçülen tek gerçek katkı pozisyon
+        <em>boyutlandırmasında</em> (aşağıdaki oynaklık hedefi portföyü).</p>
+      </div>
+    </details>
   </section>
 
-  <section class="card">
+  <section class="card asset-scoped">
     <h2>Piyasa Durumu</h2>
     <div class="context-grid" id="context-grid"></div>
     <p class="muted small footnote" id="gs-ratio-note">-</p>
   </section>
 
-  <section class="card">
+  <section class="card asset-scoped">
     <h2>Sinyal Bileşenleri</h2>
     <p class="muted small">
       Her bileşen bağımsız bir görüş üretir. Sicil biriktikten sonra harman, bileşenlerin
@@ -119,6 +152,30 @@
       </table>
     </div>
     <p class="muted small" id="claude-reasoning"></p>
+
+    <details class="explain">
+      <summary>Bu tablo neyi değiştiriyor?</summary>
+      <div class="explain-body">
+        <p>Yukarıdaki tek tahmin, aslında <strong>beş ayrı görüşün harmanı</strong>.
+        Bu tablo o beşini tek tek açar. Hepsi aynı soruya bağımsız cevap verir,
+        sonra ağırlıklarına göre birleştirilir &mdash; sonuç &ldquo;Güncel Tahmin&rdquo;dir.</p>
+        <dl>
+          <dt>Teknik</dt><dd>Kural tabanlı fiyat göstergeleri (trend, momentum, Donchian).</dd>
+          <dt>ML modeli</dt><dd>25 yıllık panelde eğitilmiş gradient boosting sınıflandırıcı.</dd>
+          <dt>Makro sürücüler</dt><dd>Ölçülmüş öncü seriler: TIP (reel faiz), IEF (tahvil), VIX.</dd>
+          <dt>Haber tonu</dt><dd>Başlık sözlüğü. <em>Altına etkiye</em> göre puanlar, tona göre değil
+              &mdash; &ldquo;güçlü istihdam&rdquo; kulağa iyi gelir ama altın için olumsuzdur.</dd>
+          <dt>Claude</dt><dd>Aynı verilere bakan bağımsız bir dil modeli yargısı.</dd>
+        </dl>
+        <p><strong>Güven</strong> bileşenin ne kadar emin olduğu; <strong>0 ise o tur
+        konuşmuyor</strong> demektir ve tabloda &ldquo;sessiz&rdquo; yazar. Bu bir arıza değil,
+        tasarım: makro ve haber bileşenleri çoğu gün susacak şekilde yapıldı.</p>
+        <p><strong>Etki</strong> o bileşenin nihai karardaki payı. Sicil biriktikçe bu pay
+        <em>ölçülmüş</em> başarıya göre kendiliğinden değişir: taban oranı geçemeyen bir bileşen
+        %0'a düşer ve karara hiç katılmaz. Sicil yokken varsayılan ağırlıklar kullanılır
+        &mdash; o durumda tablonun üstünde sarı uyarı çıkar.</p>
+      </div>
+    </details>
   </section>
 
   <!-- Kanal Finans: a person's opinion, reported not adopted. Styled
@@ -152,24 +209,64 @@
     <div id="kf-themes"></div>
   </section>
 
-  <section class="card">
+  <section class="card asset-scoped">
     <h2>Kağıt Portföyler &mdash; <span id="portfolio-asset-name">Altın</span></h2>
     <p class="muted small strategy-intro">
-      Bağımsız $1000 simülasyonları (gerçek para yok, gerçek emir yok), her metal kendi
-      maliyet varsayımıyla. <strong>Al-ve-tut kıyas ölçütüdür</strong>: 25 yılda yıllık
-      ~%11,8 kazandıran, geçilmesi gerçekten zor bir strateji. Diğerleri onu
-      geçemediğinde bu ekranda görünür.
+      On ayrı strateji, her biri <strong>$1000</strong> sanal parayla aynı gün başladı
+      (gerçek para yok, gerçek emir yok). Hepsi aynı fiyatı görüyor, farklı davranıyor
+      &mdash; amaç hangisinin işe yaradığını yıllar içinde <em>ölçmek</em>.
+      <strong>Al-ve-tut kıyas ölçütüdür</strong>: 25 yılda yıllık ~%11,8 kazandıran,
+      geçilmesi gerçekten zor bir strateji. Diğerleri onu geçemediğinde bu ekranda görünür.
     </p>
+
+    <details class="explain">
+      <summary>Bu kutulardaki sayılar ne anlama geliyor?</summary>
+      <div class="explain-body">
+        <p>Her kutu bir stratejinin <strong>şu anki cüzdanı</strong>. Üstteki büyük sayı
+        toplam değeri ($1000'dan bugüne), altındaki yüzde ise kâr/zararı.</p>
+        <dl>
+          <dt>kıyas</dt>
+          <dd>Al-ve-tut kutusundaki rozet. O strateji &ldquo;ilk gün al, bir daha hiç
+              dokunma&rdquo; demek. Diğer her kutunun <em>geçmesi gereken</em> hedef odur;
+              bu yüzden hepsinin altında &ldquo;al-ve-tut'a göre&rdquo; satırı var.</dd>
+          <dt>pozisyon</dt>
+          <dd>Paranın yüzde kaçı <strong>şu anda</strong> metalde. %100 = tamamı metal,
+              %0 = tamamı nakit.</dd>
+          <dt>hedef</dt>
+          <dd>Stratejinin <strong>olmak istediği</strong> pozisyon. Pozisyondan farklıysa
+              strateji dengede değil demektir.</dd>
+          <dt>elindeki</dt>
+          <dd>Kaç ons metali ve kaç doları var. &ldquo;Altın almış mı?&rdquo; sorusunun
+              doğrudan cevabı burasıdır.</dd>
+          <dt>sonraki işlem</dt>
+          <dd>Pozisyon ile hedef arasındaki fark <strong>5 puandan</strong> büyükse
+              strateji bir sonraki koşuda alım ya da satım yapar; küçükse hiçbir şey
+              yapmaz. Kutuda hangisi olduğu yazılı.</dd>
+        </dl>
+        <p>Bu eşik bilerek var: her küçük sapmada işlem yapmak, kazandırdığından fazlasını
+        komisyona ödemenin en garanti yoludur.</p>
+      </div>
+    </details>
+
     <div class="strategy-grid" id="strategy-panels"></div>
   </section>
 
-  <section class="card">
-    <h2>Geçmiş Tahminler</h2>
+  <!-- NOT "Geçmiş Tahminler". The newest row here is normally still OPEN --
+       its target session has not arrived yet -- and titling the panel "past"
+       made a future date read as a past one. The panel is the track record;
+       pending rows are marked as pending. -->
+  <section class="card asset-scoped">
+    <h2>Tahmin Sicili</h2>
+    <p class="muted small">
+      Verilmiş her tahmin, sonucuyla birlikte. Bir tahmin <strong>hedef seansı gelene
+      kadar</strong> açık kalır ve &ldquo;bekliyor&rdquo; görünür &mdash; hedef tarihi
+      gelecekte olan satır henüz geçmiş değildir.
+    </p>
     <div class="table-wrap">
       <table id="history-table">
         <thead>
           <tr>
-            <th>Hedef</th><th>Giriş</th><th>Yön</th><th>P(yük.)</th>
+            <th>Verildi</th><th>Hedef seans</th><th>Giriş</th><th>Yön</th><th>P(yük.)</th>
             <th>Fark</th><th>Sonuç</th><th>Gerçekleşen</th>
           </tr>
         </thead>
@@ -177,6 +274,28 @@
       </table>
     </div>
     <p class="muted small" id="history-summary">-</p>
+
+    <details class="explain">
+      <summary>&ldquo;Hedef seans&rdquo; neden ileri bir tarih?</summary>
+      <div class="explain-body">
+        <p>Tahmin <strong>5 işlem günü sonrasına</strong> yapılıyor. Yani model bugün
+        konuşur, ama <strong>haklı mı haksız mı 5 seans sonra belli olur</strong>.</p>
+        <dl>
+          <dt>Verildi</dt><dd>Tahminin üretildiği gün.</dd>
+          <dt>Hedef seans</dt><dd>Puanlanacağı gün. O gün gelene kadar sonuç
+              &ldquo;bekliyor&rdquo;dur.</dd>
+          <dt>Giriş</dt><dd>Tahmin anındaki fiyat &mdash; karşılaştırma bu fiyata göre yapılır.</dd>
+          <dt>Gerçekleşen</dt><dd>Hedef seansta oluşan fiyat. Sadece kapanmış tahminlerde dolar.</dd>
+        </dl>
+        <p><strong>Örnek:</strong> 7 Eylül'de verilen bir tahminin hedefi 11 Eylül'dür.
+        Model 4 Eylül Cuma kapanışına bakıp konuştu, 5 işlem günü sonrası 11 Eylül Cuma
+        oluyor. 11 Eylül gelmeden o satır ne doğru ne yanlıştır &mdash; açıktır.</p>
+        <p>Alttaki özet satırı isabeti <strong>her zaman</strong> aynı dönemde fiyatın
+        kaç kez yükseldiğiyle birlikte verir. Tek başına &ldquo;%60 isabet&rdquo; bu
+        piyasada anlamsızdır: hiç düşünmeden &ldquo;hep yükselir&rdquo; demek de zaten
+        %55 tutturur.</p>
+      </div>
+    </details>
   </section>
 
   <footer>
@@ -186,7 +305,7 @@
       yön tahmini al-ve-tut'u geçmiyor; ölçülebilir katkı yalnızca pozisyon
       boyutlandırmasında (oynaklık hedefleme) ve orada bile mütevazı.
     </p>
-    <p class="muted small">Veri: Yahoo Finance (GC=F, SI=F ve makro seriler), Binance PAXG (altın hafta sonu fiyatı), YouTube RSS.</p>
+    <p class="muted small">Veri: Yahoo Finance (GC=F, SI=F ve makro seriler), TradingView ve Binance PAXG (anlık fiyat), YouTube RSS.</p>
   </footer>
 
 </main>

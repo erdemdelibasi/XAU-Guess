@@ -57,6 +57,11 @@ const STRATEGIES = [
 
 const STARTING_CASH = 1000;
 
+// Must match trading.REBALANCE_THRESHOLD. Duplicated for the same reason the
+// base rates are: this only decides a label ("sonraki işlem"), never a trade.
+// The backend remains the sole authority on what actually gets executed.
+const REBALANCE_THRESHOLD = 0.05;
+
 // Measured facts about the gold/silver ratio, from backend/research/ratio.py
 // on the 25-year panel (2001-09-07 .. 2026-09-04). Hardcoded the same way
 // indicators.py hardcodes its scale constants: a measured number with a named
@@ -168,6 +173,14 @@ const fmtSigned = (v, digits = 2) =>
     ? "-"
     : `${Number(v) >= 0 ? "+" : "−"}${fmtNumber(Math.abs(Number(v)), digits)}`;
 
+// A signed percentage, Turkish word order: the sign goes OUTSIDE the percent
+// sign ("+%0,02"), unlike English's "+0.02%". Used for P&L, where the sign is
+// the first thing read and must not be buried after the symbol.
+const fmtSignedPct = (v, digits = 2) =>
+  v === null || v === undefined || Number.isNaN(Number(v))
+    ? "-"
+    : `${Number(v) >= 0 ? "+" : "−"}%${fmtNumber(Math.abs(Number(v) * 100), digits)}`;
+
 const fmtPct = (v, digits = 1) =>
   v === null || v === undefined || Number.isNaN(Number(v)) ? "-" : `%${fmtNumber(Number(v) * 100, digits)}`;
 
@@ -195,6 +208,7 @@ function renderPrediction(row, asset) {
   if (!row) {
     el("prediction-direction").textContent = "-";
     el("prediction-horizon").textContent = "henüz tahmin yok";
+    el("prediction-verdict").textContent = "Bu varlık için henüz tahmin üretilmedi.";
     return;
   }
 
@@ -221,6 +235,41 @@ function renderPrediction(row, asset) {
   // rather than being dressed up as a signal.
   edgeEl.className = edge === null || Math.abs(edge) < 0.01
     ? "" : (edge > 0 ? "up-text" : "down-text");
+
+  // The same three numbers, as one sentence. A reader who does not want to do
+  // arithmetic in their head still has to be able to leave this card knowing
+  // what it said -- and the honest reading of a near-zero edge is "nothing
+  // today", which a large "YÜKSELİŞ" label actively hides. This is the same
+  // threshold the edge styling uses, so the wording and the colour can never
+  // disagree with each other.
+  const verdict = el("prediction-verdict");
+  const dirWord = isUp ? "yükseliş" : "düşüş";
+  const lede =
+    `<strong>Özet:</strong> <strong>${fmtDate(row.target_date)}</strong> seansında fiyatın, ` +
+    `bugünkü ${fmtUsd(row.price_at_prediction, asset.digits)} seviyesine göre ` +
+    `<strong>${dirWord}</strong> yönünde olmasını bekliyor. Yükseliş ihtimalini ` +
+    `${fmtPct(pUp)} görüyor; hiçbir model olmasaydı bu ihtimal ${fmtPct(baseRate)} olurdu`;
+
+  if (edge === null || edge === undefined) {
+    verdict.textContent = "-";
+  } else if (Math.abs(edge) < 0.01) {
+    verdict.innerHTML =
+      `<strong>Özet:</strong> model bugün kayda değer bir şey söylemiyor. Yön olarak ` +
+      `${dirWord} diyor, ama taban orana kattığı fark yalnızca ${fmtPoints(edge)} ` +
+      `&mdash; yani &ldquo;bilmiyorum&rdquo;a çok yakın.`;
+  } else if (isUp && edge < 0) {
+    // The case a bare "YÜKSELİŞ" label misreports most badly. p_up above 0.5
+    // but BELOW the base rate means the model is bullish and still less
+    // bullish than doing nothing at all -- so the reader must not walk away
+    // treating this as a buy signal. Spelling it out is the whole reason
+    // edge_over_base is on this page.
+    verdict.innerHTML =
+      `${lede} &mdash; yani model yükseliş diyor ama <strong>taban orandan daha az ` +
+      `iyimser</strong> (${fmtPoints(edge)}). Bu bir alım sinyali değildir: hiç ` +
+      `bakmadan &ldquo;yükselir&rdquo; demek bugün modelden daha iyimser bir duruştur.`;
+  } else {
+    verdict.innerHTML = `${lede} &mdash; yani modelin kendi katkısı ${fmtPoints(edge)}.`;
+  }
 
   el("base-rate-note").innerHTML =
     `${asset.label}, 5 işlem gününde zaten <strong>${fmtPct(baseRate)}</strong> ihtimalle ` +
@@ -326,9 +375,13 @@ async function fetchBinance(symbol) {
   }
 }
 
-function livePriceCard({ label, usd, usdtry, source, live, badge, footnote }) {
+function livePriceCard({ label, metal, usd, usdtry, source, live, badge, footnote }) {
+  // These two cards are the only place both metals appear at once, so each
+  // pins its own palette (.metal-gold / .metal-silver) instead of inheriting
+  // the active tab's. Everything else on the page follows the tab.
+  const skin = `live-card metal-${metal}`;
   if (usd === null || usd === undefined) {
-    return `<div class="live-card"><div class="live-label">${label}</div>
+    return `<div class="${skin}"><div class="live-label">${label}</div>
             <div class="live-usd">-</div>
             <div class="muted small">fiyat alınamadı</div></div>`;
   }
@@ -338,7 +391,7 @@ function livePriceCard({ label, usd, usdtry, source, live, badge, footnote }) {
   const tlOunce = usdtry ? usd * usdtry : null;
   const tlGram = tlOunce === null ? null : tlOunce / TROY_OUNCE_GRAMS;
   return `
-    <div class="live-card${live ? " is-live" : ""}">
+    <div class="${skin}${live ? " is-live" : ""}">
       <div class="live-label">${label}
         <span class="live-badge">${badge ?? (live ? "canlı" : "son kapanış")}</span>
       </div>
@@ -374,6 +427,7 @@ function renderLivePrices(live, goldRow, silverRow) {
     const gap = spot && close ? spot / close - 1 : null;
     return livePriceCard({
       label,
+      metal: key,
       usd: spot ?? close,
       usdtry,
       // The green "is-live" treatment tracks a REAL-TIME quote, not merely a
@@ -441,8 +495,15 @@ function renderComponents(row, asset) {
   // caption about measured skill would claim a track record that does not
   // exist. `cold_start` is stored per row precisely so this can be said out
   // loud instead of inferred.
+  //
+  // `!== false` rather than truthy: rows written before the 2026-09-08
+  // migration carry NULL here, and those are by construction the OLDEST rows
+  // in the table -- i.e. exactly the cold-start period. Treating NULL as
+  // "not a cold start" would suppress the warning on precisely the rows that
+  // need it. Once a component earns a record, predict.py writes an explicit
+  // false and the note disappears.
   const note = document.getElementById("components-note");
-  if (row.cold_start) {
+  if (row.cold_start !== false) {
     note.textContent =
       "Bileşenlerin henüz ölçülmüş sicili yok. Harman bu satırda taban orandan " +
       "başlayan bir yön oylaması kullandı; aşağıdaki “Etki” payları o oylamanın " +
@@ -454,6 +515,62 @@ function renderComponents(row, asset) {
 
   const reasoning = document.getElementById("claude-reasoning");
   reasoning.textContent = row.claude_reasoning ? `Claude: "${row.claude_reasoning}"` : "";
+}
+
+// Quantity of metal, not a price -- gold positions sit around 0.2 oz and
+// silver's around 15, so they need different precision to say anything. The
+// gram is shown alongside because that is the unit this is bought in locally.
+const fmtOunces = (v) => {
+  const digits = currentAsset === "gold" ? 4 : 3;
+  return `${fmtNumber(v, digits)} ons (${fmtNumber(v * TROY_OUNCE_GRAMS, 2)} g)`;
+};
+
+// What this portfolio would do on the backend's next run. Mirrors
+// trading.compute_rebalance exactly, including the 5-point dead band -- the
+// gap between "pozisyon" and "hedef" is otherwise a puzzle the reader has to
+// solve, and the most common answer ("nothing, it is close enough") is the
+// one a bare pair of percentages communicates worst.
+function nextActionFor(state, price, exposure, value) {
+  if (state.strategy === "kanalfinans") {
+    // The follower has no target exposure at all: it is all-in or all-out on
+    // a person's stated call (kanal_finans_trading.decide_on_mention), so
+    // applying the drift rule here would invent a rule it does not follow.
+    const stop = state.stop_loss_price
+      ? ` Zarar-kes ${fmtUsd(state.stop_loss_price, ASSETS[currentAsset].digits)} altına inerse tamamen satar.`
+      : "";
+    return Number(state.ounces) > 0
+      ? { kind: "hold", text: `Pozisyonda &mdash; sonraki video SAT diyene kadar tutar.${stop}` }
+      : { kind: "hold", text: "Nakitte &mdash; sonraki video AL diyene kadar bekler." };
+  }
+
+  const target = Number(state.target_exposure);
+  if (!Number.isFinite(target) || value <= 0 || price <= 0) {
+    return { kind: "hold", text: "&mdash;" };
+  }
+  const drift = exposure - target;
+  if (Math.abs(drift) <= REBALANCE_THRESHOLD) {
+    // Below half a point the drift rounds to zero at one decimal, and
+    // printing it anyway yields "−0,0 puan" -- a negative zero, which reads
+    // as a real (downward) deviation when the portfolio is in fact exactly
+    // on target.
+    const detail = Math.abs(drift) < 0.005
+      ? "Pozisyon hedefin tam üzerinde."
+      : `Sapma ${fmtPoints(drift)}, eşik 5 puan.`;
+    return { kind: "hold", text: `Dengede &mdash; işlem yok. ${detail}` };
+  }
+  if (drift > 0) {
+    const ounces = Math.min(Number(state.ounces), (drift * value) / price);
+    return {
+      kind: "sell",
+      text: `<strong>SATACAK</strong> &mdash; ${fmtOunces(ounces)} ≈ ${fmtUsd(ounces * price, 0)}.`,
+    };
+  }
+  const usd = Math.min(Number(state.cash_usd), -drift * value);
+  if (usd <= 0) return { kind: "hold", text: "Nakit kalmadı &mdash; alım yapamaz." };
+  return {
+    kind: "buy",
+    text: `<strong>ALACAK</strong> &mdash; ${fmtUsd(usd, 0)} ≈ ${fmtOunces(usd / price)}.`,
+  };
 }
 
 function renderStrategies(portfolios, price, asset) {
@@ -487,20 +604,35 @@ function renderStrategies(portfolios, price, asset) {
         }</span></div>`
       : `<div class="row"><span>hedef</span><span>${fmtPct(state.target_exposure, 0)}</span></div>`;
 
+    // "%17 pozisyon" is a ratio; these two are the holding itself, and they
+    // are what the question "did it actually buy any gold?" is asking. A
+    // dashboard that only ever prints ratios cannot answer it.
+    const action = nextActionFor(state, price, exposure, value);
+
     return `
       <div class="strategy-panel${strategy.benchmark ? " benchmark" : ""}${strategy.follower ? " follower" : ""}">
         <div class="name">${strategy.label}${strategy.benchmark ? '<span class="badge">kıyas</span>' : ""}</div>
         <p class="desc">${strategy.desc}</p>
         <div class="value">${fmtUsd(value, 0)}</div>
-        <div class="pnl ${pnl >= 0 ? "up-text" : "down-text"}">${pnl >= 0 ? "+" : ""}${(pnl * 100).toFixed(2)}%</div>
+        <!-- Not toFixed: this panel sat next to "%48,2" while printing
+             "+0.02%", i.e. two decimal conventions on one screen. Turkish
+             puts the sign OUTSIDE the percent sign -- "+%0,02", not "%+0,02". -->
+        <div class="pnl ${pnl >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(pnl)}</div>
         <div class="row"><span>pozisyon</span><span>${fmtPct(exposure, 0)}</span></div>
         ${extraRow}
         ${vsBenchmark === null ? "" : `
         <div class="row"><span>al-ve-tut'a göre</span>
           <span class="${vsBenchmark >= 0 ? "up-text" : "down-text"}">
-            ${vsBenchmark >= 0 ? "+" : ""}${(vsBenchmark * 100).toFixed(2)}%
+            ${fmtSignedPct(vsBenchmark)}
           </span></div>`}
         <div class="exposure-bar"><div style="width:${Math.min(100, exposure * 100).toFixed(1)}%"></div></div>
+        <div class="holding">
+          <div class="row"><span>elindeki ${asset.label.toLowerCase()}</span>
+            <span>${Number(state.ounces) > 0 ? fmtOunces(Number(state.ounces)) : "yok"}</span></div>
+          <div class="row"><span>elindeki nakit</span>
+            <span>${fmtUsd(state.cash_usd, 2)}</span></div>
+        </div>
+        <div class="next-action ${action.kind}">Sonraki işlem: ${action.text}</div>
       </div>`;
   }).join("");
 }
@@ -513,8 +645,13 @@ function renderHistory(rows, asset) {
   body.innerHTML = mine.map((row) => {
     const isUp = row.predicted_direction === "UP";
     const done = Boolean(row.resolved_at);
+    // Both dates, always. With only the target date on screen, the newest row
+    // -- which is normally still open -- shows a date in the FUTURE under a
+    // panel about what already happened, and there is nothing to tell the
+    // reader that is the target rather than the day it was made.
     return `
-      <tr>
+      <tr class="${done ? "" : "pending"}">
+        <td>${fmtDate(row.created_at)}</td>
         <td>${fmtDate(row.target_date)}</td>
         <td class="num">${fmtUsd(row.price_at_prediction, asset.digits)}</td>
         <td class="${isUp ? "up-text" : "down-text"}">${isUp ? "YÜK" : "DÜŞ"}</td>
@@ -529,7 +666,15 @@ function renderHistory(rows, asset) {
 
   const summary = document.getElementById("history-summary");
   if (!resolved.length) {
-    summary.textContent = "Henüz çözülmüş tahmin yok.";
+    // "Henüz çözülmüş tahmin yok" on its own reads like a fault. It is not --
+    // it is the expected state for the first five sessions of a five-day
+    // horizon -- so it says WHY, and when that changes.
+    const pending = mine.filter((r) => !r.resolved_at);
+    summary.textContent = pending.length
+      ? `${pending.length} tahmin açık, hiçbiri henüz puanlanmadı. İlk sonuç ` +
+        `${fmtDate(pending[pending.length - 1].target_date)} seansı kapandığında çıkacak — ` +
+        `5 işlem günlük ufuk gereği bu normaldir.`
+      : "Henüz tahmin üretilmedi.";
     return;
   }
   const accuracy = resolved.filter((r) => r.correct).length / resolved.length;
@@ -587,6 +732,10 @@ function renderKanalFinans(mentions, themes) {
 
 function renderAll() {
   const asset = ASSETS[currentAsset];
+  // Repaints every asset-scoped card in the selected metal's colour. The
+  // numbers below the tab strip are mostly percentages that look identical
+  // between the two assets, so this is the cue that they changed meaning.
+  document.getElementById("app").dataset.asset = currentAsset;
   const row = cache.predictions[currentAsset]?.[0] ?? null;
   const price = row ? Number(row.price_at_prediction) : 0;
 

@@ -1,5 +1,19 @@
-/* XAU-Guess. Dark, warm-neutral palette -- gold reads badly on the cold blue
-   XRP-Guess used, and a yellow accent on a blue ground fights itself. */
+/* XAU-Guess. Dark, warm-neutral base -- gold reads badly on the cold blue
+   XRP-Guess used, and a yellow accent on a blue ground fights itself.
+
+   THE TWO METALS CARRY THEIR OWN COLOUR and this is functional, not
+   decoration. Every per-asset section on this page (the call, the market
+   context, the components, the portfolios, the track record) shows ONE metal
+   at a time, while the tab strip and the live-price cards show BOTH. Without
+   a colour that travels with the asset, a reader who switches tabs has no
+   peripheral cue that the numbers underneath just changed meaning -- gold at
+   $4,476 and silver at $65 are not confusable, but "%17 pozisyon" and
+   "+%2,4" are, and those are most of this page.
+
+   Mechanism: `#app[data-asset]` rebinds the --metal* variables and everything
+   downstream reads those instead of a hardcoded gold. `.metal-gold` /
+   `.metal-silver` pin the palette explicitly for the two live-price cards,
+   which sit side by side and must NOT follow the active tab. */
 
 :root {
   --bg: #0b0906;
@@ -13,7 +27,38 @@
   --up: #4ec98a;
   --down: #e2635c;
   --benchmark: #7fa8d8;
-  --radius: 14px;
+  --warn: #c9a227;
+  --radius: 16px;
+
+  /* Default palette = gold, so anything rendered before the first tab click
+     is already themed rather than flashing an unstyled accent. */
+  --metal: #e8bd5e;
+  --metal-2: #c9962f;
+  --metal-ink: #2a1f08;
+  --metal-tint: rgba(232, 189, 94, 0.07);
+  --metal-line: rgba(232, 189, 94, 0.30);
+  --metal-glow: rgba(232, 189, 94, 0.16);
+}
+
+/* Gold: warm and saturated, the metal under tungsten light. */
+#app[data-asset="gold"], .metal-gold {
+  --metal: #e8bd5e;
+  --metal-2: #c9962f;
+  --metal-ink: #2a1f08;
+  --metal-tint: rgba(232, 189, 94, 0.07);
+  --metal-line: rgba(232, 189, 94, 0.30);
+  --metal-glow: rgba(232, 189, 94, 0.16);
+}
+
+/* Silver: deliberately cool and slightly blue. A neutral grey would read as
+   "disabled" against this warm ground rather than as a second metal. */
+#app[data-asset="silver"], .metal-silver {
+  --metal: #d3dbe6;
+  --metal-2: #8d9cb2;
+  --metal-ink: #10151c;
+  --metal-tint: rgba(190, 205, 226, 0.07);
+  --metal-line: rgba(190, 205, 226, 0.30);
+  --metal-glow: rgba(190, 205, 226, 0.15);
 }
 
 * { box-sizing: border-box; }
@@ -29,10 +74,25 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* The wash behind the whole page picks up the active metal. Very low contrast
+   on purpose: enough that switching tabs is felt, not enough to compete with
+   any number on screen. */
 #app {
   max-width: 1180px;
   margin: 0 auto;
   padding: 20px 16px 64px;
+  position: relative;
+}
+#app::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 420px;
+  background: radial-gradient(115% 100% at 50% 0%, var(--metal-glow) 0%, transparent 70%);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: -1;
+  transition: background 320ms ease;
 }
 
 h1 { font-size: 1.5rem; margin: 0; letter-spacing: 0.02em; font-weight: 800; }
@@ -56,10 +116,14 @@ h2 { font-size: 1.05rem; margin: 0 0 10px; font-weight: 700; }
 .price {
   font-size: 1.9rem;
   font-weight: 800;
-  color: var(--gold);
+  color: var(--metal);
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
+/* The title spells the two metals in their own colours -- it is the legend
+   for every tint further down the page. */
+.h1-gold { color: #e8bd5e; }
+.h1-silver { color: #d3dbe6; }
 
 /* --- cards ------------------------------------------------------------- */
 .card {
@@ -69,11 +133,67 @@ h2 { font-size: 1.05rem; margin: 0 0 10px; font-weight: 700; }
   padding: 16px;
   margin-bottom: 16px;
 }
+/* Cards whose contents belong to the selected asset are tinted with it. */
+.card.asset-scoped {
+  border-color: var(--metal-line);
+  background:
+    linear-gradient(180deg, var(--metal-tint) 0%, transparent 120px),
+    var(--card);
+  transition: border-color 320ms ease, background 320ms ease;
+}
 
 .footnote { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid var(--line); }
 
+/* --- the "what am I looking at" disclosures ----------------------------- */
+/* Every panel a first-time reader asked about carries one. Collapsed by
+   default so the dashboard stays a dashboard; permanent so the answer is
+   never more than one click away and never has to be remembered. */
+.explain {
+  margin: 10px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card-2);
+  overflow: hidden;
+}
+.explain > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--metal);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.explain > summary::-webkit-details-marker { display: none; }
+.explain > summary::before {
+  content: "?";
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid var(--metal-line);
+  font-size: 0.68rem;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.explain[open] > summary { border-bottom: 1px solid var(--line); }
+.explain-body {
+  padding: 12px;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+.explain-body p { margin: 0 0 9px; }
+.explain-body p:last-child { margin-bottom: 0; }
+.explain-body strong { color: var(--text); font-weight: 600; }
+.explain-body dl { margin: 0 0 9px; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; }
+.explain-body dt { color: var(--metal); font-weight: 600; white-space: nowrap; }
+.explain-body dd { margin: 0; }
+
 /* --- current prediction ------------------------------------------------ */
-.prediction-head { display: flex; justify-content: space-between; align-items: baseline; }
+.prediction-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .prediction-body {
   display: flex;
   flex-wrap: wrap;
@@ -82,7 +202,7 @@ h2 { font-size: 1.05rem; margin: 0 0 10px; font-weight: 700; }
   justify-content: space-between;
   margin-top: 8px;
 }
-.prediction-main { display: flex; align-items: baseline; gap: 14px; }
+.prediction-main { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 .direction {
   font-size: 1.8rem;
   font-weight: 800;
@@ -100,7 +220,18 @@ h2 { font-size: 1.05rem; margin: 0 0 10px; font-weight: 700; }
 .meta-item { display: flex; flex-direction: column; gap: 2px; }
 .meta-item strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 /* The one number that answers "did the model add anything today". */
-.meta-item.highlight strong { color: var(--gold); }
+.meta-item.highlight strong { color: var(--metal); }
+
+/* Plain-language restatement of the call, directly under it. The numbers
+   above are the evidence; this is the sentence they add up to. */
+.verdict {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--card-2);
+  border-left: 3px solid var(--metal);
+  font-size: 0.9rem;
+}
 
 /* --- market context ---------------------------------------------------- */
 .context-grid {
@@ -129,13 +260,16 @@ td.num { font-variant-numeric: tabular-nums; }
 .up-text { color: var(--up); }
 .down-text { color: var(--down); }
 .silenced { color: var(--muted); font-style: italic; }
+/* A still-open prediction is not history. It is tinted in the row itself so
+   that a target date in the future never reads as a past one. */
+tr.pending td { background: var(--metal-tint); }
 
 /* --- strategy panels --------------------------------------------------- */
 /* auto-fit grid, never a horizontal scroller: on a wide window every panel
    is visible at once, on a phone they stack. */
 .strategy-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
   gap: 12px;
   margin-top: 12px;
 }
@@ -144,6 +278,8 @@ td.num { font-variant-numeric: tabular-nums; }
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 12px;
+  display: flex;
+  flex-direction: column;
 }
 /* The benchmark is marked, not hidden. */
 .strategy-panel.benchmark { border-color: var(--benchmark); }
@@ -165,14 +301,38 @@ td.num { font-variant-numeric: tabular-nums; }
 .strategy-panel .row {
   display: flex;
   justify-content: space-between;
+  gap: 10px;
   font-size: 0.78rem;
   color: var(--muted);
   margin-top: 6px;
 }
-.strategy-panel .row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; }
-/* Exposure bar: how much of this portfolio is currently in gold. */
-.exposure-bar { height: 5px; background: #241d13; border-radius: 999px; margin-top: 10px; overflow: hidden; }
-.exposure-bar > div { height: 100%; background: var(--gold-dim); border-radius: 999px; }
+.strategy-panel .row span:last-child { color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+/* What this portfolio actually owns, in metal and in cash. "%17 pozisyon" is
+   a ratio; these two are the holding itself, which is what the question "did
+   it buy any gold?" is actually asking. */
+.holding {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--line);
+}
+.holding .row { margin-top: 4px; }
+.holding .row span:last-child { color: var(--metal); font-weight: 600; }
+/* The next order this portfolio would place. Without it, the gap between
+   "pozisyon" and "hedef" is a puzzle the reader has to solve. */
+.next-action {
+  margin-top: 9px;
+  font-size: 0.76rem;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+}
+.next-action.buy  { color: var(--up);   border-color: rgba(78, 201, 138, 0.35); }
+.next-action.sell { color: var(--down); border-color: rgba(226, 99, 92, 0.35); }
+.next-action.hold { color: var(--muted); }
+/* Exposure bar: how much of this portfolio is currently in the metal. */
+.exposure-bar { height: 5px; background: rgba(255, 255, 255, 0.06); border-radius: 999px; margin-top: 10px; overflow: hidden; }
+.exposure-bar > div { height: 100%; background: var(--metal-2); border-radius: 999px; }
 
 footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
 footer p { margin: 0 0 8px; }
@@ -193,11 +353,16 @@ footer p { margin: 0 0 8px; }
 
 /* --- asset switch ------------------------------------------------------- */
 /* Both metals run the full pipeline every day; this only chooses which one's
-   detail is on screen, so switching re-renders from cache and never refetches. */
-.asset-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+   detail is on screen, so switching re-renders from cache and never refetches.
+   Each tab wears its own metal even when inactive, so the strip doubles as
+   the colour legend for the rest of the page. */
+.asset-tabs { display: flex; gap: 10px; margin-bottom: 16px; }
 .asset-tabs button {
   flex: 0 0 auto;
-  padding: 8px 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 22px;
   font: inherit;
   font-weight: 600;
   color: var(--muted);
@@ -205,8 +370,23 @@ footer p { margin: 0 0 8px; }
   border: 1px solid var(--line);
   border-radius: 999px;
   cursor: pointer;
+  transition: color 180ms ease, background 180ms ease, border-color 180ms ease;
 }
-.asset-tabs button.active { color: var(--bg); background: var(--gold); border-color: var(--gold); }
+.asset-tabs button::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: linear-gradient(140deg, var(--metal) 0%, var(--metal-2) 100%);
+  flex: 0 0 auto;
+}
+.asset-tabs button:hover { color: var(--text); border-color: var(--metal-line); }
+.asset-tabs button.active {
+  color: var(--metal-ink);
+  background: linear-gradient(140deg, var(--metal) 0%, var(--metal-2) 130%);
+  border-color: var(--metal);
+}
+.asset-tabs button.active::before { background: var(--metal-ink); opacity: 0.45; }
 
 h3.sub {
   font-size: 0.9rem;
@@ -221,7 +401,8 @@ h3.sub {
 /* Visually distinct from the model's own output: this is a person's opinion
    being reported, not a forecast this project stands behind. The Turkish
    "Olumlu/Olumsuz" labels (vs the model's "YÜKSELİŞ/DÜŞÜŞ") do the same job
-   in words. */
+   in words. Deliberately NOT metal-tinted -- it is not per-asset, and it is
+   not ours. */
 .kanal-finans { border-left: 3px solid var(--benchmark); }
 .summary-cell {
   white-space: normal;
@@ -239,7 +420,7 @@ h3.sub {
 }
 .action-buy  { background: rgba(78, 201, 138, 0.16); color: var(--up); }
 .action-sell { background: rgba(226, 99, 92, 0.16); color: var(--down); }
-.action-hold { background: #241d13; color: var(--muted); }
+.action-hold { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
 
 .theme {
   border-left: 3px solid var(--line);
@@ -271,7 +452,7 @@ code {
    caution rather than as chrome: it is saying the numbers below it are not
    yet measurements, which is the kind of thing this UI must not bury. */
 .cold-start-note {
-  border-left: 3px solid var(--warn, #c9a227);
+  border-left: 3px solid var(--warn);
   padding: 0.5rem 0.75rem;
   margin: 0 0 0.75rem;
   background: rgba(201, 162, 39, 0.08);
@@ -281,25 +462,31 @@ code {
 /* Live price panel. The "canlı" badge is a load-bearing label, not decoration:
    gold has a 24/7 browser-reachable feed and silver does not, so the two cards
    are showing different KINDS of number and the reader has to be able to see
-   which is which at a glance. */
+   which is which at a glance.
+
+   These two cards keep their own metal palette regardless of the active tab,
+   because both are on screen simultaneously. */
 .live-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 0.75rem;
 }
 .live-card {
-  border: 1px solid var(--line);
+  border: 1px solid var(--metal-line);
   border-radius: var(--radius);
-  padding: 0.85rem 1rem;
-  background: var(--card-2);
+  padding: 0.9rem 1rem;
+  background:
+    linear-gradient(150deg, var(--metal-tint) 0%, transparent 60%),
+    var(--card-2);
 }
-.live-card.is-live { border-color: rgba(78, 201, 138, 0.45); }
+.live-card.is-live { box-shadow: inset 0 0 0 1px rgba(78, 201, 138, 0.20); }
 .live-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--metal);
   margin-bottom: 0.35rem;
 }
 .live-badge {

@@ -536,6 +536,54 @@ sayar ve dokuz portföyün `maybe_trade()`'i iki kez ateşlenirdi.
 
 ---
 
+### Arayüz: renk varlığı taşır, ve etiketler ölçülmüş şeyi söylemeli
+
+Sayfanın büyük kısmı **tek metal** gösterir (tahmin, piyasa durumu, bileşenler,
+portföyler, sicil) ama sekme şeridi ve anlık fiyat kartları **ikisini birden**
+gösterir. Metal rengi bu yüzden dekorasyon değil: altının $4.476'sı ile gümüşün
+$66'sı karıştırılamaz, ama "%17 pozisyon" ile "+%2,4" karıştırılabilir — ve
+sayfadaki sayıların çoğu bu türden.
+
+- `#app[data-asset]` `--metal*` değişkenlerini yeniden bağlar; `.card.asset-scoped`
+  taşıyan her bölüm onu okur. `renderAll()` sekme değişiminde `dataset.asset`'i
+  yazar.
+- **Anlık fiyat kartları sekmeyi TAKİP ETMEZ.** İkisi aynı anda ekranda olduğu
+  için her biri `.metal-gold` / `.metal-silver` ile kendi paletini sabitler.
+- Gümüş bilerek soğuk/mavimsidir. Nötr gri bu sıcak zeminde "devre dışı" gibi
+  okunur, ikinci bir metal gibi değil.
+
+**"Geçmiş Tahminler" başlığı yanlıştı ve bu bir etiket hatasından fazlasıydı.**
+Tablodaki en yeni satır normalde hâlâ AÇIKTIR — hedef seansı gelmemiştir — yani
+"geçmiş" başlığı altında **gelecek** bir tarih duruyordu (7 Eylül'de verilen
+tahminin hedefi 11 Eylül). Panel artık `Tahmin Sicili`, satırlar hem **verildiği**
+hem **hedef** tarihi taşıyor ve açık satırlar `tr.pending` ile boyanıyor. Çözülmüş
+tahmin yokken özet bunun bir arıza değil, 5 günlük ufkun doğal sonucu olduğunu
+söylüyor.
+
+**Yön etiketi tek başına yanıltır ve en kötü hâli "YÜKSELİŞ + negatif fark".**
+p_up 0,5'in üstünde ama taban oranın altındaysa model yükseliş der ve yine de
+hiçbir şey yapmamaktan daha az iyimserdir (canlı örnek: gümüş p_up=0,514,
+taban 0,539). `renderPrediction` bu durumu ayrı bir cümleyle yazıyor: "bu bir
+alım sinyali değildir". Üç durum ayrı ele alınıyor — |fark| < 1 puan (sessiz),
+YÜKSELİŞ + negatif fark (yukarıdaki), ve geri kalan.
+
+**Arayüz `trading.REBALANCE_THRESHOLD`'u aynalıyor ve bu ayna ölçülerek
+doğrulandı.** Portföy kutularındaki "sonraki işlem" satırı `compute_rebalance`
+ile aynı kararı vermeli; beş sınır durumunda (tam hedefte / eşik altı / alım /
+satım / nakitsiz) ikisi birebir aynı çıktı verdi. Eşiği bir tarafta değiştirip
+diğerini unutmak, ekranda "ALACAK" yazarken hiçbir şey yapmayan bir sayfa üretir.
+`kanalfinans` bu kuralın DIŞINDADIR — o hedef pozisyona göre değil, ayrık
+AL/SAT ile çalışır (`kanal_finans_trading.decide_on_mention`), o yüzden kendi
+metnini alır.
+
+Ayrıca: `cold_start` kolonu 2026-09-08 migration'ından **önce** yazılmış
+satırlarda NULL'dur ve o satırlar tanım gereği sicilin en eskisi, yani tam da
+soğuk başlangıç dönemidir. Bu yüzden uyarı `row.cold_start !== false` ile
+gösteriliyor — NULL'u "soğuk başlangıç değil" saymak, uyarıyı en çok ihtiyaç
+duyan satırlarda susturur.
+
+---
+
 ## Geliştirme notları
 
 - **Yeni bir varlık eklerken**: `assets.py`'ye giriş ekle, `research/panel.py`
