@@ -122,7 +122,43 @@ const GS_RATIO = {
 const BINANCE = "https://data-api.binance.vision/api/v3/ticker/price";
 const TRADINGVIEW = "https://scanner.tradingview.com/global/scan";
 const TV_TICKERS = { gold: "TVC:GOLD", silver: "TVC:SILVER", usdtry: "FX_IDC:USDTRY" };
+
+/* TWO PRICE SERIES ARE NEEDED, NOT ONE, and using the wrong one for the wrong
+   job is a silent 1% error.
+
+     TVC:GOLD / TVC:SILVER   spot, `streaming` (real-time), 24/7. This is
+                             "what is an ounce worth right now" -- the Anlık
+                             Fiyatlar cards.
+     COMEX:GC1! / SI1!       front-month COMEX futures, `delayed_streaming_600`
+                             (10 minutes behind). This is the instrument the
+                             BACKEND trades: price_at_prediction comes from
+                             GC=F, every trade in `trades` was filled at a
+                             futures price, and any future trade will be too.
+
+   Measured 2026-09-08: stored close 4476.60, GC1! 4442.30 (-0.77%), TVC spot
+   4397.34 (-1.77%). Valuing the portfolios at SPOT would therefore book an
+   instant ~1% loss on every one of them that no market move caused -- it is
+   the futures-spot basis (financing + storage), i.e. a change of units
+   masquerading as a change of value. Portfolios are valued on GC1!/SI1! for
+   that reason, and the 10-minute delay is the price paid for being on the
+   right series; it is stated on screen rather than hidden. */
+const TV_FUTURES = { gold: "COMEX:GC1!", silver: "COMEX:SI1!" };
 const TROY_OUNCE_GRAMS = 31.1034768;
+
+/* Live prices refresh on their own fast loop, separate from Supabase.
+
+   The Supabase side produces ONE row per trading day, so re-fetching it every
+   few seconds would just re-download identical data; it stays on the slow
+   cycle. Prices are the only thing that actually moves intraday.
+
+   BACKOFF IS NOT POLITENESS HERE. TradingView's scanner is an undocumented
+   endpoint, and this is the same lesson kanal_finans.RETRY_SCHEDULE records
+   in the backend: hammering an endpoint that is already refusing us is the
+   surest way to turn a temporary block into a permanent one. A failing fetch
+   backs off geometrically to a minute; the first success resets it. */
+const PRICE_REFRESH_MS = 5000;
+const PRICE_BACKOFF_MAX_MS = 60000;
+const DATA_REFRESH_MS = 5 * 60 * 1000;
 
 const KF_STANCE = { UP: "Olumlu", DOWN: "Olumsuz", NEUTRAL: "Nötr" };
 const KF_ACTION = { BUY: "AL", SELL: "SAT", HOLD: "TUT" };
@@ -140,7 +176,14 @@ const KF_THEME_LABEL = {
 const KF_ASSET_LABEL = { ALTIN: "Altın", GUMUS: "Gümüş", GENEL: "Genel" };
 
 let currentAsset = "gold";
-let cache = { predictions: {}, portfolios: [], mentions: [], themes: [] };
+let cache = {
+  predictions: {}, portfolios: [], mentions: [], themes: [],
+  costBasis: new Map(),
+  // Filled by the fast price loop, not by the Supabase load.
+  live: null,
+};
+let priceFailures = 0;
+let priceTimer = null;
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -148,6 +191,21 @@ async function api(path) {
   const response = await fetch(`${REST}/${path}`, { headers: HEADERS });
   if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
   return response.json();
+}
+
+// Supabase's REST API caps a response at ~1000 rows and says so by simply
+// returning fewer -- silently, with no error. An average purchase price
+// computed from a truncated trade log is wrong rather than missing, so this
+// pages until a short page arrives. `trades` grows without bound; `predictions`
+// is one row per day and does not need it.
+async function apiAll(path, pageSize = 1000, maxPages = 25) {
+  const rows = [];
+  for (let page = 0; page < maxPages; page += 1) {
+    const chunk = await api(`${path}&limit=${pageSize}&offset=${page * pageSize}`);
+    rows.push(...chunk);
+    if (chunk.length < pageSize) break;
+  }
+  return rows;
 }
 
 const fmtUsd = (v, digits = 2) =>
@@ -329,7 +387,7 @@ async function fetchTradingView() {
       // type is what keeps the request preflight-free and therefore allowed.
       headers: { "Content-Type": "text/plain;charset=UTF-8" },
       body: JSON.stringify({
-        symbols: { tickers: Object.values(TV_TICKERS) },
+        symbols: { tickers: [...Object.values(TV_TICKERS), ...Object.values(TV_FUTURES)] },
         columns: ["close", "update_mode"],
       }),
     });
@@ -348,12 +406,18 @@ async function fetchTradingView() {
     // "canlı" badge stops being a hardcoded claim: if TradingView ever serves
     // this account a delayed quote, the card says "gecikmeli" instead of
     // asserting something that is no longer true.
+    //
+    // Only the SPOT tickers decide this flag. The futures legs are always
+    // `delayed_streaming_600` by design, so folding them in would permanently
+    // brand the real-time spot cards "gecikmeli" and make the badge useless.
     const modes = Object.values(TV_TICKERS)
       .map((t) => bySymbol.get(t)?.[1])
       .filter(Boolean);
     return {
       gold, silver,
       usdtry: read(TV_TICKERS.usdtry),
+      // The series the portfolios are valued on -- see the TV_FUTURES note.
+      futures: { gold: read(TV_FUTURES.gold), silver: read(TV_FUTURES.silver) },
       delayed: modes.length > 0 && modes.some((m) => m !== "streaming"),
       source: "TradingView",
     };
@@ -517,6 +581,56 @@ function renderComponents(row, asset) {
   reasoning.textContent = row.claude_reasoning ? `Claude: "${row.claude_reasoning}"` : "";
 }
 
+/* Weighted-average purchase price per (asset, strategy), replayed from the
+   trade log.
+
+   Average-cost method: a BUY adds ounces at its own price, a SELL removes
+   ounces at the running average and therefore leaves that average unchanged.
+   This is the only method that answers "what did the metal I am STILL holding
+   cost me" -- FIFO would answer a different question and would disagree the
+   moment a portfolio sells part of a position, which the volatility-targeted
+   ones do routinely.
+
+   Two different numbers live here and the panel keeps them apart:
+     price  -- the market price on the tape. This is "kaç dolardan aldı".
+     allIn  -- usd_amount / ounces, i.e. including the fee actually paid.
+   The panel shows the market price (that is the question asked) and compares
+   it to the current valuation price. Net-of-fee performance is already what
+   the panel's total P&L reports, so showing the fee twice would double-count
+   it. */
+function costBasisByStrategy(trades) {
+  const byKey = new Map();
+  for (const trade of trades) {
+    const key = `${trade.asset}|${trade.strategy}`;
+    const state = byKey.get(key) ?? { ounces: 0, marketCost: 0, allInCost: 0 };
+    const ounces = Number(trade.ounce_amount);
+    if (!Number.isFinite(ounces) || ounces <= 0) continue;
+    if (trade.side === "BUY") {
+      state.marketCost += Number(trade.price) * ounces;
+      state.allInCost += Number(trade.usd_amount);
+      state.ounces += ounces;
+    } else {
+      // Reduce at the running average so the average survives the sale.
+      const sold = Math.min(ounces, state.ounces);
+      if (state.ounces > 0) {
+        state.marketCost -= (state.marketCost / state.ounces) * sold;
+        state.allInCost -= (state.allInCost / state.ounces) * sold;
+      }
+      state.ounces -= sold;
+      // A fully closed position has no cost basis left to report.
+      if (state.ounces <= 1e-9) { state.ounces = 0; state.marketCost = 0; state.allInCost = 0; }
+    }
+    byKey.set(key, state);
+  }
+  const out = new Map();
+  for (const [key, s] of byKey) {
+    out.set(key, s.ounces > 0
+      ? { avgPrice: s.marketCost / s.ounces, avgAllIn: s.allInCost / s.ounces }
+      : { avgPrice: null, avgAllIn: null });
+  }
+  return out;
+}
+
 // Quantity of metal, not a price -- gold positions sit around 0.2 oz and
 // silver's around 15, so they need different precision to say anything. The
 // gram is shown alongside because that is the unit this is bought in locally.
@@ -573,7 +687,7 @@ function nextActionFor(state, price, exposure, value) {
   };
 }
 
-function renderStrategies(portfolios, price, asset) {
+function renderStrategies(portfolios, price, asset, costBasis) {
   const mine = portfolios.filter((p) => p.asset === currentAsset);
   const byKey = new Map(mine.map((p) => [p.strategy, p]));
   const benchmark = byKey.get("buyhold");
@@ -608,6 +722,13 @@ function renderStrategies(portfolios, price, asset) {
     // are what the question "did it actually buy any gold?" is asking. A
     // dashboard that only ever prints ratios cannot answer it.
     const action = nextActionFor(state, price, exposure, value);
+    // What the metal it still holds cost, and how the price has moved since.
+    // This is a PRICE comparison, not net P&L: the panel's own percentage
+    // above already carries the fees, and repeating them here would count
+    // them twice.
+    const basis = costBasis.get(`${currentAsset}|${strategy.key}`)
+      ?? { avgPrice: null, avgAllIn: null };
+    const sincePurchase = basis.avgPrice ? price / basis.avgPrice - 1 : null;
 
     return `
       <div class="strategy-panel${strategy.benchmark ? " benchmark" : ""}${strategy.follower ? " follower" : ""}">
@@ -631,6 +752,11 @@ function renderStrategies(portfolios, price, asset) {
             <span>${Number(state.ounces) > 0 ? fmtOunces(Number(state.ounces)) : "yok"}</span></div>
           <div class="row"><span>elindeki nakit</span>
             <span>${fmtUsd(state.cash_usd, 2)}</span></div>
+          ${basis.avgPrice === null ? "" : `
+          <div class="row"><span>aldığı fiyat</span>
+            <span>${fmtUsd(basis.avgPrice, asset.digits)}</span></div>
+          <div class="row"><span>o günden bu yana</span>
+            <span class="${sincePurchase >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(sincePurchase)}</span></div>`}
         </div>
         <div class="next-action ${action.kind}">Sonraki işlem: ${action.text}</div>
       </div>`;
@@ -730,6 +856,37 @@ function renderKanalFinans(mentions, themes) {
     + `<p class="muted small">${fmtDate(latest[0].published_at)} tarihli videodan.</p>`;
 }
 
+/* The price the portfolios are marked at.
+
+   Live COMEX futures when available, the stored close otherwise -- NEVER
+   spot, which would inject the futures-spot basis as a phantom loss (see the
+   TV_FUTURES note). Returns the provenance too, because a portfolio value
+   that moves intraday and one frozen at Friday's close are different claims
+   and the panel has to be able to say which it is showing. */
+function valuationPrice(assetKey) {
+  const stored = Number(cache.predictions[assetKey]?.[0]?.price_at_prediction);
+  const futures = cache.live?.futures?.[assetKey] ?? null;
+  if (futures) return { price: futures, live: true };
+  return { price: Number.isFinite(stored) ? stored : 0, live: false };
+}
+
+function renderValuationNote(asset, mark) {
+  const el = document.getElementById("valuation-note");
+  if (!el) return;
+  const row = cache.predictions[currentAsset]?.[0];
+  el.innerHTML = mark.live
+    ? `Değerleme fiyatı <strong>${fmtUsd(mark.price, asset.digits)}</strong> `
+      + `&mdash; ${currentAsset === "gold" ? "COMEX:GC1!" : "COMEX:SI1!"} vadeli, `
+      + `<strong>10 dakika gecikmeli</strong>, 5 saniyede bir yenileniyor. `
+      + `Spot değil vadeli kullanılıyor: portföyler vadeli fiyattan alındı ve vadeliden `
+      + `satılacak, spotla değerlemek ~%1'lik vadeli&ndash;spot bazını sahte bir zarar `
+      + `gibi yazardı.`
+    : `Değerleme fiyatı <strong>${fmtUsd(mark.price, asset.digits)}</strong> `
+      + `&mdash; canlı vadeli alınamadı, son COMEX kapanışı kullanılıyor`
+      + `${row?.created_at ? ` (${fmtDate(row.created_at)})` : ""}. `
+      + `Bu değerler kapanış anında donmuştur.`;
+}
+
 function renderAll() {
   const asset = ASSETS[currentAsset];
   // Repaints every asset-scoped card in the selected metal's colour. The
@@ -737,51 +894,43 @@ function renderAll() {
   // between the two assets, so this is the cue that they changed meaning.
   document.getElementById("app").dataset.asset = currentAsset;
   const row = cache.predictions[currentAsset]?.[0] ?? null;
-  const price = row ? Number(row.price_at_prediction) : 0;
+  const mark = valuationPrice(currentAsset);
 
   renderPrediction(row, asset);
   renderContext(row, asset);
   renderComponents(row, asset);
-  renderStrategies(cache.portfolios, price, asset);
+  renderStrategies(cache.portfolios, mark.price, asset, cache.costBasis);
+  renderValuationNote(asset, mark);
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
 }
 
 /* ------------------------------------------------------------------ load */
 
-async function load() {
+// Declared before its use in loadData rather than after: a `const` is in the
+// temporal dead zone until evaluated, so the current bottom-of-file call
+// order is the only thing that makes a later declaration work.
+const EMPTY_LIVE = { gold: null, silver: null, usdtry: null, futures: {}, delayed: false, source: "" };
+
+/* Supabase data. One row per trading day, so this stays on the slow cycle --
+   polling it every few seconds would re-download identical bytes. */
+async function loadData() {
   try {
-    // Every price call rides in the same Promise.all as the Supabase ones
-    // rather than in a second round trip, and each resolves to null on
-    // failure, so none of them can delay or break the rest of the page.
-    // Binance is fetched unconditionally rather than only when TradingView
-    // fails: it costs one small request and it means the fallback is already
-    // in hand instead of adding a second serial round trip at the worst
-    // possible moment.
-    const [gold, silver, portfolios, mentions, themes, tv, paxg, binanceFx] =
-      await Promise.all([
-        api("predictions?select=*&asset=eq.gold&order=target_date.desc&limit=30"),
-        api("predictions?select=*&asset=eq.silver&order=target_date.desc&limit=30"),
-        api("portfolios?select=*"),
-        api("kanal_finans_mentions?select=*&order=published_at.desc&limit=40"),
-        api("kanal_finans_themes?select=*&order=published_at.desc&limit=40"),
-        fetchTradingView(),
-        fetchBinance("PAXGUSDT"),
-        fetchBinance("USDTTRY"),
-      ]);
+    const [gold, silver, portfolios, trades, mentions, themes] = await Promise.all([
+      api("predictions?select=*&asset=eq.gold&order=target_date.desc&limit=30"),
+      api("predictions?select=*&asset=eq.silver&order=target_date.desc&limit=30"),
+      api("portfolios?select=*"),
+      // Ascending and complete: the average-cost replay has to see every fill
+      // in the order it happened, so this is the one query that pages.
+      apiAll("trades?select=asset,strategy,side,price,ounce_amount,usd_amount&order=created_at.asc"),
+      api("kanal_finans_mentions?select=*&order=published_at.desc&limit=40"),
+      api("kanal_finans_themes?select=*&order=published_at.desc&limit=40"),
+    ]);
 
-    // TradingView first because it is the only source that carries silver.
-    // Binance fills whatever it left null -- gold and FX only, since it has
-    // no silver at all -- and silver then falls through to its last COMEX
-    // close, labelled as such by the renderer.
-    const live = {
-      gold: tv?.gold ?? paxg,
-      silver: tv?.silver ?? null,
-      usdtry: tv?.usdtry ?? binanceFx,
-      delayed: tv?.delayed ?? false,
-      source: tv?.gold ? tv.source : "Binance",
-    };
-
-    cache = { predictions: { gold, silver }, portfolios, mentions, themes };
+    cache.predictions = { gold, silver };
+    cache.portfolios = portfolios;
+    cache.mentions = mentions;
+    cache.themes = themes;
+    cache.costBasis = costBasisByStrategy(trades);
 
     // The gold/silver ratio is not per-asset, so it renders outside the
     // per-asset block. Prefer the value predict.py stored (it comes from the
@@ -789,13 +938,75 @@ async function load() {
     // latest prices, which is right whenever both rows are from the same day
     // and quietly wrong when one metal's row is staler than the other's.
     renderRatio(gold[0], silver[0]);
-    renderLivePrices(live, gold[0], silver[0]);
-
+    // Renders the COMEX-close fallback if the fast loop has not landed yet,
+    // so the panel is never blank while prices are in flight.
+    renderLivePrices(cache.live ?? EMPTY_LIVE, gold[0], silver[0]);
     renderKanalFinans(mentions, themes);
     renderAll();
   } catch (error) {
     showError(error.message);
   }
+}
+
+/* Prices. Fast loop, and the only thing on the page that actually moves
+   intraday: the two live cards, every portfolio's value, and the next-order
+   line that depends on it. */
+async function refreshPrices() {
+  // A hidden tab renders to nobody. Skipping the fetch is what keeps a
+  // forgotten background tab from making 720 requests an hour at an
+  // undocumented endpoint.
+  if (document.hidden) { schedulePrices(); return; }
+
+  // Binance is fetched unconditionally rather than only when TradingView
+  // fails: it costs one small request and it means the fallback is already in
+  // hand instead of adding a serial round trip at the worst possible moment.
+  const [tv, paxg, binanceFx] = await Promise.all([
+    fetchTradingView(), fetchBinance("PAXGUSDT"), fetchBinance("USDTTRY"),
+  ]);
+
+  if (!tv && paxg === null && binanceFx === null) {
+    // Everything failed. Keep the last good prices on screen rather than
+    // blanking them, and back off before trying again.
+    priceFailures += 1;
+    schedulePrices();
+    return;
+  }
+  priceFailures = 0;
+
+  // TradingView first because it is the only source that carries silver.
+  // Binance fills whatever it left null -- gold and FX only, since it has no
+  // silver at all -- and silver then falls through to its last COMEX close,
+  // labelled as such by the renderer.
+  cache.live = {
+    gold: tv?.gold ?? paxg,
+    silver: tv?.silver ?? null,
+    usdtry: tv?.usdtry ?? binanceFx,
+    futures: tv?.futures ?? {},
+    delayed: tv?.delayed ?? false,
+    source: tv?.gold ? tv.source : "Binance",
+  };
+
+  const gold = cache.predictions.gold?.[0];
+  const silver = cache.predictions.silver?.[0];
+  renderLivePrices(cache.live, gold, silver);
+
+  // Portfolio value is ounces x price, so it moves on this tick too -- along
+  // with the exposure it implies and therefore the next order.
+  if (cache.portfolios.length) {
+    const asset = ASSETS[currentAsset];
+    const mark = valuationPrice(currentAsset);
+    renderStrategies(cache.portfolios, mark.price, asset, cache.costBasis);
+    renderValuationNote(asset, mark);
+  }
+  schedulePrices();
+}
+
+function schedulePrices() {
+  clearTimeout(priceTimer);
+  const delay = priceFailures === 0
+    ? PRICE_REFRESH_MS
+    : Math.min(PRICE_BACKOFF_MAX_MS, PRICE_REFRESH_MS * 2 ** priceFailures);
+  priceTimer = setTimeout(refreshPrices, delay);
 }
 
 document.getElementById("asset-tabs").addEventListener("click", (event) => {
@@ -809,11 +1020,19 @@ document.getElementById("asset-tabs").addEventListener("click", (event) => {
   renderAll();
 });
 
-load();
+loadData();
+refreshPrices();
 // The backend produces one row per trading day, so polling faster than this
 // would just re-fetch identical data. Five minutes keeps a left-open tab
-// current without hammering Supabase.
-setInterval(load, 5 * 60 * 1000);
+// current without hammering Supabase. Prices run their own loop.
+setInterval(loadData, DATA_REFRESH_MS);
+
+// Coming back to a backgrounded tab should not show a price up to five
+// seconds -- or, after a backoff, a minute -- old. Refreshing on the way in
+// also resets any backoff that accumulated while nobody was looking.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) { priceFailures = 0; refreshPrices(); }
+});
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});

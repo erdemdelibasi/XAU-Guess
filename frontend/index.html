@@ -238,6 +238,12 @@
           <dt>elindeki</dt>
           <dd>Kaç ons metali ve kaç doları var. &ldquo;Altın almış mı?&rdquo; sorusunun
               doğrudan cevabı burasıdır.</dd>
+          <dt>aldığı fiyat</dt>
+          <dd>Elindeki metali <strong>ortalama kaç dolardan</strong> aldığı. Birden fazla
+              alım varsa ons ağırlıklı ortalamadır; kısmi satış bu ortalamayı değiştirmez.
+              Yanındaki yüzde, o fiyattan bugüne <em>fiyatın</em> ne kadar oynadığını
+              gösterir &mdash; kutunun üstündeki kâr/zarar ise komisyonları da içeren
+              <em>gerçek</em> sonuçtur, o yüzden ikisi birebir tutmaz.</dd>
           <dt>sonraki işlem</dt>
           <dd>Pozisyon ile hedef arasındaki fark <strong>5 puandan</strong> büyükse
               strateji bir sonraki koşuda alım ya da satım yapar; küçükse hiçbir şey
@@ -247,6 +253,11 @@
         komisyona ödemenin en garanti yoludur.</p>
       </div>
     </details>
+
+    <!-- Which price the portfolios are marked at, and how fresh it is. A
+         value that moves intraday and one frozen at Friday's close are
+         different claims; the panel has to say which one is on screen. -->
+    <p class="muted small valuation-note" id="valuation-note">-</p>
 
     <div class="strategy-grid" id="strategy-panels"></div>
   </section>

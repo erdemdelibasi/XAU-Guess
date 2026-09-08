@@ -584,6 +584,73 @@ duyan satırlarda susturur.
 
 ---
 
+### Portföy değerlemesi SPOT değil VADELİ fiyatla yapılır
+
+Sayfa iki ayrı fiyat serisi çeker ve yanlış işe yanlış seriyi vermek sessiz
+bir ~%1 hatadır:
+
+| Seri | Ne | Tazelik | Nerede kullanılır |
+|---|---|---|---|
+| `TVC:GOLD` / `TVC:SILVER` | spot | `streaming` (gerçek zamanlı), 7/24 | Anlık Fiyatlar kartları |
+| `COMEX:GC1!` / `COMEX:SI1!` | ön vade vadeli | `delayed_streaming_600` (**10 dk gecikmeli**) | **portföy değerlemesi** |
+
+2026-09-08'de ölçüldü: kayıtlı kapanış 4476,60 · GC1! 4442,30 (−%0,77) ·
+TVC spot 4397,34 (−%1,77). Portföyleri **spotla** değerlemek her birine anında
+~%1 zarar yazardı — ve bu zararı hiçbir piyasa hareketi üretmemiştir. Vadeli–spot
+bazıdır (finansman + depolama), yani **birim değişimi**nin değer değişimi gibi
+görünmesidir. Backend GC=F ile işlem yapıyor, `trades`'teki her dolum vadeli
+fiyattan gerçekleşti ve gelecek her işlem de öyle olacak; değerleme de aynı
+seride kalmalı. 10 dakikalık gecikme bunun bedelidir ve ekranda yazılıdır.
+
+**`fetchTradingView` vadeli gelmezse spota DÜŞMEZ**, kayıtlı COMEX kapanışını
+kullanır ve "canlı vadeli alınamadı" der. Buradaki cazip hata "elimizde spot
+var, onu kullanalım"dır; test edildi ve $1000 yerine $983 gösteriyor.
+
+`delayed` bayrağı yalnızca **spot** tickerlarından hesaplanır. Vadeli bacaklar
+tanım gereği hep gecikmelidir; onları da hesaba katmak gerçek zamanlı spot
+kartlarını kalıcı olarak "gecikmeli" damgalar ve rozeti işe yaramaz hâle
+getirir.
+
+### İki döngü: fiyatlar 5 sn, Supabase 5 dk
+
+`refreshPrices` (5 sn) ve `loadData` (5 dk) ayrıdır. Supabase günde bir satır
+üretiyor; onu saniyede bir çekmek aynı baytları tekrar indirmektir. Gün içinde
+gerçekten kıpırdayan tek şey fiyattır — ve fiyat kıpırdayınca portföy değeri,
+ima ettiği pozisyon ve dolayısıyla "sonraki işlem" satırı da kıpırdar, o yüzden
+üçü aynı tikte yeniden çizilir.
+
+İki koruma var ve ikisi de bilinçli:
+- **Gizli sekme istek atmaz** (`document.hidden`). Unutulmuş bir arka plan
+  sekmesinin belgelenmemiş bir uç noktaya saatte 720 istek atmasını engeller.
+  Sekmeye dönüldüğünde anında tazelenir.
+- **Hata geometrik geri çekilir** (5→10→20→40→60 sn, tavan 60). Bu nezaket
+  değil: `kanal_finans.RETRY_SCHEDULE`'ın backend'de kaydettiği dersin aynısı —
+  bizi zaten reddeden bir uç noktayı dövmek, geçici engeli kalıcıya çevirmenin
+  en garanti yoludur. İlk başarı sayacı sıfırlar.
+
+### "Aldığı fiyat" ile "kâr/zarar" aynı sayı değildir ve fark komisyondur
+
+`costBasisByStrategy` `trades`'i baştan oynatır ve **ortalama maliyet yöntemi**
+kullanır: alış kendi fiyatından ons ekler, satış koşan ortalamadan ons düşer ve
+ortalamayı değiştirmez. FIFO başka bir soruyu cevaplar ve oynaklık hedefli
+portföyler kısmi satış yaptığı anda ayrışır.
+
+Kutuda iki yüzde var ve **birbirini tutmaması doğrudur**:
+- `o günden bu yana` = güncel fiyat / ortalama alış fiyatı − 1 (saf **fiyat**
+  hareketi)
+- üstteki büyük yüzde = gerçek kâr/zarar, **komisyon dahil**
+
+Canlı doğrulama (2026-09-08): altında fark tam 5,0 bp, gümüşte tam 10,0 bp —
+`assets.py`'deki `fee_rate` değerleriyle birebir. Gümüşte fiyat +%0,03 iken
+portföy −%0,07'dir; aradaki tek şey komisyondur. Tek bir yüzde göstermek bu
+ikisini karıştırır.
+
+`trades` sınırsız büyür, o yüzden `apiAll` ile **sayfalanarak** çekilir.
+Supabase ~1000 satırda sessizce keser; kesilmiş bir işlem defterinden hesaplanan
+ortalama maliyet eksik değil, **yanlış** olurdu.
+
+---
+
 ## Geliştirme notları
 
 - **Yeni bir varlık eklerken**: `assets.py`'ye giriş ekle, `research/panel.py`

@@ -264,6 +264,17 @@ td.num { font-variant-numeric: tabular-nums; }
    that a target date in the future never reads as a past one. */
 tr.pending td { background: var(--metal-tint); }
 
+/* Which price the portfolios are marked at. Sits directly above the panels
+   because every dollar figure in them depends on it. */
+.valuation-note {
+  margin: 10px 0 0;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: var(--card-2);
+  border-left: 3px solid var(--metal-2);
+  line-height: 1.5;
+}
+
 /* --- strategy panels --------------------------------------------------- */
 /* auto-fit grid, never a horizontal scroller: on a wide window every panel
    is visible at once, on a phone they stack. */
