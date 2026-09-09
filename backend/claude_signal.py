@@ -115,10 +115,16 @@ def _format_context(asset, price: float, tech: dict, macro: dict, context: dict,
         "",
         "Current levels:",
     ]
+    # Both metals are listed and only the COUNTERPART one is ever populated
+    # (see macro_signal.describe_context): gold's panel carries silver's
+    # close, silver's carries gold's. Naming only "silver" here -- as this
+    # dict did -- silently dropped the counterpart level from the silver
+    # prompt while leaving the gold/silver ratio in it, i.e. a ratio with
+    # neither of its legs on screen.
     labels = {
         "dxy": "US Dollar Index", "us10y": "US 10Y Treasury yield (%)",
-        "vix": "VIX", "silver": "Silver ($/oz)", "spx": "S&P 500",
-        "gold_silver_ratio": "Gold/Silver ratio",
+        "vix": "VIX", "gold": "Gold ($/oz)", "silver": "Silver ($/oz)",
+        "spx": "S&P 500", "gold_silver_ratio": "Gold/Silver ratio",
     }
     for key, label in labels.items():
         value = context.get(key)

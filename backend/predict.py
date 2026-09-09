@@ -96,9 +96,35 @@ def _number(value) -> float | None:
     Postgres `numeric` has no NaN and PostgREST serialises one as the JSON
     token `NaN`, which is not valid JSON: the insert fails for the whole row,
     so a warmup gap in one display column would cost the entire prediction.
+    And because `unique (asset, target_date)` makes a lost row unbackfillable,
+    "the whole prediction" means that session, permanently.
+
+    That risk is not hypothetical for the columns below: `trend_average` is a
+    200-session rolling mean and `realised_volatility` a 60-session one, so a
+    metal whose history came back short -- Yahoo serving a truncated series,
+    a newly added asset -- produces NaN in a column that is merely displayed
+    and takes the entire row down with it.
     """
-    number = float(value)
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
     return number if np.isfinite(number) else None
+
+
+def _column_value(frame: pd.DataFrame, column: str) -> float | None:
+    """Last value of `column`, or None when the column was never built.
+
+    `gs_ratio` needs the counterpart metal's series, which load_panel fetches
+    fail-soft: one dead Yahoo symbol leaves the column absent entirely, and a
+    bare frame["gs_ratio"] would then raise KeyError and lose the prediction
+    over a display-only number.
+    """
+    if column not in frame.columns or frame.empty:
+        return None
+    return _number(frame[column].iloc[-1])
 
 
 def safe_signal(fn, *args, label: str) -> dict:
@@ -296,7 +322,7 @@ def run_asset(db, asset) -> int:
           f"({ml_model.HORIZON_DAYS} islem gunu)")
 
     # ---- components -------------------------------------------------------
-    tech = safe_signal(technical_signal, features, label="technical")
+    tech = safe_signal(technical_signal, features, asset.price_scales, label="technical")
 
     model = ml_model.load_model(asset.key)
     model_version = "bootstrap"
@@ -340,6 +366,10 @@ def run_asset(db, asset) -> int:
     # this had to be fixed before the first fit rather than after.
     raw_confidence = {"technical": tech["confidence"], "ml": ml["confidence"],
                       "macro": macro["confidence"]}
+    # Kept as whole signals, not just their confidences, because the Claude
+    # prompt below needs the PRE-calibration read and `tech`/`macro` are about
+    # to be rebound to the calibrated ones.
+    tech_raw, macro_raw = dict(tech), dict(macro)
     tech = calibration.apply(calibrators.get("technical"), tech, asset.base_rate_up)
     ml = calibration.apply(calibrators.get("ml"), ml, asset.base_rate_up)
     macro = calibration.apply(calibrators.get("macro"), macro, asset.base_rate_up)
@@ -350,8 +380,15 @@ def run_asset(db, asset) -> int:
     # confidences are shrunk against the base rate and would read to a model
     # as "everything is neutral", which is a display convention rather than
     # information about the market.
-    claude = safe_signal(claude_module.claude_signal, asset, current_price, tech, macro,
-                         context, label="claude")
+    #
+    # It must be `tech_raw`/`macro_raw` and not `tech`/`macro`: those two names
+    # were rebound to the calibrated signals three lines up, so passing them
+    # here said the opposite of what this comment claims. Silent, too -- the
+    # prompt still rendered, just with every confidence pushed toward zero, and
+    # the first calibrator does not exist for another 180 resolved rows, so
+    # nothing would have looked wrong until long after it started mattering.
+    claude = safe_signal(claude_module.claude_signal, asset, current_price,
+                         tech_raw, macro_raw, context, label="claude")
 
     weights, records = get_component_records(db, asset.key)
     signals = {"technical": tech, "ml": ml, "macro": macro, "news": news, "claude": claude}
@@ -380,10 +417,11 @@ def run_asset(db, asset) -> int:
         # Stored per row so a later change to the constant cannot silently
         # rewrite how past rows should be read.
         "base_rate_used": final.get("base_rate", asset.base_rate_up),
-        "predicted_pct_change": estimate_pct_change(final["score"], horizon_vol),
-        "predicted_price": current_price * (1 + estimate_pct_change(final["score"], horizon_vol)),
-        "trend_average": trend_average,
-        "realised_volatility": volatility,
+        "predicted_pct_change": _number(estimate_pct_change(final["score"], horizon_vol)),
+        "predicted_price": _number(
+            current_price * (1 + estimate_pct_change(final["score"], horizon_vol))),
+        "trend_average": _number(trend_average),
+        "realised_volatility": _number(volatility),
         # The gold/silver ratio and its trailing 250-session z, stored so the
         # UI can show the number IN CONTEXT instead of a bare "67.1" that the
         # reader has no way to place. Display only: research/ratio.py measured
@@ -391,8 +429,8 @@ def run_asset(db, asset) -> int:
         # horizons and NONE of the 60 cells cleared the bar, so no strategy
         # and no component reads these two columns. They are here to stop the
         # ratio being silently mistaken for a signal, not to become one.
-        "gs_ratio": _number(features["gs_ratio"].iloc[-1]),
-        "gs_ratio_z": _number(features["gs_ratio_z"].iloc[-1]),
+        "gs_ratio": _column_value(features, "gs_ratio"),
+        "gs_ratio_z": _column_value(features, "gs_ratio_z"),
         "model_version": model_version,
         # Whether the blend had any component record to pool at all. Stored
         # because the weight_* columns mean different things either way: with
@@ -406,29 +444,35 @@ def run_asset(db, asset) -> int:
         pct = estimate_pct_change(signal["score"], horizon_vol)
         row[f"{prefix}_direction"] = signal["direction"]
         row[f"{prefix}_confidence"] = signal["confidence"]
-        row[f"{prefix}_pct_change"] = pct
-        row[f"{prefix}_price"] = current_price * (1 + pct)
+        row[f"{prefix}_pct_change"] = _number(pct)
+        row[f"{prefix}_price"] = _number(current_price * (1 + pct))
         row[f"weight_{component}"] = weights.get(component)
         if component in raw_confidence:
             row[f"{prefix}_confidence_raw"] = raw_confidence[component]
     if claude.get("reasoning"):
         row["claude_reasoning"] = claude["reasoning"]
 
-    row["target_exposure"] = trading.compute_target_exposure(
+    target_exposure = trading.compute_target_exposure(
         "ensemble", current_price, trend_average, volatility,
         final["direction"], final["confidence"], asset.target_volatility)
+    row["target_exposure"] = _number(target_exposure)
 
     inserted = insert_prediction(db, row)
     prediction_id = inserted.data[0]["id"] if inserted.data else None
 
+    # Printed from the LOCALS, not from `row`. Every numeric in `row` has now
+    # been through _number() and can legitimately be None, and a None inside an
+    # f-string format spec raises -- which would abort run_asset AFTER the insert
+    # had succeeded, skipping every portfolio over a formatting error.
+    predicted_price = current_price * (1 + estimate_pct_change(final["score"], horizon_vol))
     print(f"\n{target_date}: {final['direction']} "
           f"p_up={final.get('p_up', float('nan')):.3f} "
           f"(taban {asset.base_rate_up:.3f}, fark {final.get('edge_over_base', 0):+.3f}) "
-          f"-> ${row['predicted_price']:,.2f}")
+          f"-> ${predicted_price:,.2f}")
     for component, signal in signals.items():
         print(f"    {component:<10} {signal['direction']:<4} guven={signal['confidence']:.4f}")
     print(f"  oynaklik %{100 * volatility:.1f} yillik | 200s ort ${trend_average:,.2f} "
-          f"| harman hedef pozisyon %{100 * row['target_exposure']:.0f}")
+          f"| harman hedef pozisyon %{100 * target_exposure:.0f}")
 
     # ---- portfolios -------------------------------------------------------
     strategy_signal = {"technical": tech, "ml": ml, "macro": macro, "claude": claude}

@@ -119,17 +119,25 @@ def macro_signal(features: pd.DataFrame, drivers: tuple[str, ...] = ("tip", "ief
 
 
 def describe_context(features: pd.DataFrame) -> dict:
-    """Human-readable macro state for the UI and the daily mail.
+    """Human-readable macro state, for the UI and for claude_signal's prompt.
 
     Deliberately separate from the signal: these are levels a person wants to
     see (where is the dollar, where are real yields) and they are NOT what the
     component trades on -- it trades on daily CHANGES in three specific
     series. Mixing the two in one function is how a display value ends up
     quietly driving a decision.
+
+    BOTH metals are listed, and exactly one of them is present in any given
+    panel -- assets.macro_symbols_for() swaps an asset's own series out for
+    its counterpart, so gold's panel carries `silver` and silver's carries
+    `gold`. Asking only for "silver" (the original list) therefore handed the
+    SILVER prompt a context with no counterpart price in it at all: the one
+    number that puts the gold/silver ratio beside it, missing precisely on
+    the metal whose panel is built around that counterpart.
     """
     last = features.iloc[-1]
     out: dict[str, float | None] = {}
-    for key in ("dxy", "us10y", "vix", "silver", "spx"):
+    for key in ("dxy", "us10y", "vix", "silver", "gold", "spx"):
         value = last.get(key)
         out[key] = float(value) if pd.notna(value) else None
     gs = last.get("gs_ratio")
