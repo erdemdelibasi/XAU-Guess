@@ -21,9 +21,13 @@ const HEADERS = {
 // constants should not add a round trip; retrain.py is what watches for them
 // drifting away from reality. Each prediction row also stores the rate it
 // actually used (`base_rate_used`), which is what gets rendered when present.
+// `feeBps` is assets.Asset.fee_rate in basis points, ONE WAY. Display only --
+// the backend charges the real thing -- but it is the number that decides
+// whether a strategy could have kept what it earned, so the trade log prints
+// it next to the commission actually paid.
 const ASSETS = {
-  gold: { label: "Altın", baseRate: 0.557, unit: "ons", digits: 2 },
-  silver: { label: "Gümüş", baseRate: 0.539, unit: "ons", digits: 3 },
+  gold: { label: "Altın", baseRate: 0.557, unit: "ons", digits: 2, feeBps: 5 },
+  silver: { label: "Gümüş", baseRate: 0.539, unit: "ons", digits: 3, feeBps: 10 },
 };
 
 const COMPONENTS = [
@@ -56,6 +60,21 @@ const STRATEGIES = [
 ];
 
 const STARTING_CASH = 1000;
+
+// Resolved rows needed before the track-record panel is willing to rank the
+// model against "always UP". One trading quarter. Below that the two rates
+// swap places on noise alone, and printing a winner would be exactly the
+// overstatement backend/research/ablation.py exists to prevent.
+const MIN_ROWS_FOR_VERDICT = 60;
+
+// Rows shown in the trade log.
+const MAX_TRADE_ROWS = 15;
+
+// Mirrors ensemble.SHRINK_ALPHA. Below this many calls on one side, the
+// backend's own pooling still shrinks that side hard toward its
+// no-information rate, so the measured percentage is not yet a track record
+// -- the table prints it, and pointedly does not colour it.
+const THIN_RECORD_CALLS = 60;
 
 // Must match trading.REBALANCE_THRESHOLD. Duplicated for the same reason the
 // base rates are: this only decides a label ("sonraki işlem"), never a trade.
@@ -210,6 +229,7 @@ const KF_ASSET_LABEL = { ALTIN: "Altın", GUMUS: "Gümüş", GENEL: "Genel" };
 let currentAsset = "gold";
 let cache = {
   predictions: {}, portfolios: [], mentions: [], themes: [],
+  trades: [], records: [],
   costBasis: new Map(),
   // Filled by the fast price loop, not by the Supabase load.
   live: null,
@@ -280,6 +300,34 @@ const fmtPoints = (v, digits = 1) =>
     : `${fmtSigned(Number(v) * 100, digits)} puan`;
 
 const fmtDate = (v) => (v ? String(v).slice(0, 10) : "-");
+
+// A datetime, for the trade log: two trades on the same day are common (nine
+// portfolios rebalance off one signal) and a date column alone would print
+// them as nine identical rows.
+const fmtDateTime = (v) => {
+  if (!v) return "-";
+  const when = new Date(v);
+  return Number.isNaN(when.getTime())
+    ? fmtDate(v)
+    : `${fmtDate(v)} ${when.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}`;
+};
+
+/* Every string that reaches innerHTML and did NOT come from this file.
+
+   Most text on this page is written by the backend and safe, but three fields
+   are not: kanal_finans_mentions.summary, kanal_finans_themes.summary and the
+   video title are Claude's transcription of whatever a YouTube video said,
+   stored verbatim. A `<` in a spoken price range ("<4400") already breaks the
+   markup, and an `<img onerror=...>` in that text would execute -- innerHTML
+   does not run <script>, which is exactly why people assume it is safe and
+   then use an attribute handler instead.
+
+   textContent would also be safe but costs the per-cell markup these tables
+   are built from, so the escape happens at the value instead. */
+const esc = (v) =>
+  String(v ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
 function showError(message) {
   const box = document.createElement("div");
@@ -692,6 +740,145 @@ function renderComponents(row, asset) {
   reasoning.textContent = row.claude_reasoning ? `Claude: "${row.claude_reasoning}"` : "";
 }
 
+/* Each component's measured track record, per asset (`model_state`).
+
+   This is the evidence the "Etki" column above is derived from, and until now
+   it existed only in retrain.py's nightly console output -- i.e. nowhere a
+   person actually looks. It is the project's own named example of a failure
+   that produces no error: "a component that has said UP on 121 of 127
+   opportunities is not a signal, it is a constant, and on an asset that rises
+   54-56% of the time it will still post a respectable-looking accuracy."
+
+   WHAT IS DELIBERATELY NOT DONE HERE: recomputing the log-odds evidence.
+   ensemble.component_evidence() shrinks each side toward its own
+   no-information rate and caps the result, and a second copy of that
+   arithmetic in JavaScript would be a decision rule maintained in two places
+   -- the exact thing backend/backtest.py refuses to do by calling the live
+   functions directly. So this table shows the four RAW counters plus the rate
+   each side has to beat, and leaves the pooling to the backend. */
+function renderRecords(records, asset, row) {
+  const body = document.querySelector("#record-table tbody");
+  const note = document.getElementById("record-note");
+  const mine = new Map(
+    records.filter((r) => r.asset === currentAsset).map((r) => [r.component, r]));
+
+  const baseUp = Number(row?.base_rate_used ?? asset.baseRate);
+  let anyHistory = false;
+
+  body.innerHTML = COMPONENTS.map(({ key, label }) => {
+    // model_state keys components by their long name; the predictions table
+    // shortens "technical" to "tech". COMPONENTS carries the short one.
+    const component = key === "tech" ? "technical" : key;
+    const record = mine.get(component);
+    const upCalls = Number(record?.up_calls ?? 0);
+    const downCalls = Number(record?.down_calls ?? 0);
+    const total = upCalls + downCalls;
+    if (!total) {
+      return `<tr><td>${label}</td><td colspan="5" class="silenced">henüz çağrı yok</td></tr>`;
+    }
+    anyHistory = true;
+    const upRate = upCalls ? Number(record.up_correct) / upCalls : null;
+    const downRate = downCalls ? Number(record.down_correct) / downCalls : null;
+
+    // Each side beats a DIFFERENT bar. A component that always says UP is
+    // right at the base rate by construction; one that always says DOWN is
+    // right only when the metal falls, i.e. 1 - base rate. Shrinking both
+    // toward the same number is a bug this project already shipped once.
+    //
+    // A thin record is shown but NOT coloured. ensemble.SHRINK_ALPHA pulls a
+    // short history toward its no-information rate, so a component with five
+    // calls contributes essentially nothing to the blend no matter what those
+    // five did -- and painting "100%" green over one lucky call would say the
+    // opposite of what the backend is actually doing with it.
+    const cell = (rate, calls, bar) => {
+      if (rate === null) return `<td class="num silenced">-</td>`;
+      const thin = calls < THIN_RECORD_CALLS;
+      const tone = thin ? "silenced" : (rate > bar ? "up-text" : "silenced");
+      return `<td class="num ${tone}">${fmtPct(rate)}`
+        + `<span class="muted small"> / ${fmtPct(bar)}${thin ? " · az" : ""}</span></td>`;
+    };
+
+    // >90% on one side, with enough calls to mean it: a constant, not a
+    // forecast. retrain.py prints the same warning nightly.
+    const skew = Math.max(upCalls, downCalls) / total;
+    const oneSided = skew > 0.9 && total >= 30
+      ? `<td class="down-text">EVET &mdash; sabit gibi</td>`
+      : `<td class="silenced">hayır</td>`;
+
+    return `
+      <tr>
+        <td>${label}</td>
+        <td class="num">${upCalls}</td>
+        ${cell(upRate, upCalls, baseUp)}
+        <td class="num">${downCalls}</td>
+        ${cell(downRate, downCalls, 1 - baseUp)}
+        ${oneSided}
+      </tr>`;
+  }).join("");
+
+  // No suffix on a number whose reading changes with its value: "%55,7'yi"
+  // and "%44,3'ü" take different Turkish endings, and the numbers here come
+  // from the row. Phrased so the percentage is never inflected.
+  note.innerHTML = anyHistory
+    ? `İsabetin yanındaki ikinci sayı o tarafın <strong>bilgisizlik noktasıdır</strong> `
+      + `&mdash; YÜKSELİŞ çağrıları için ${fmtPct(baseUp)}, DÜŞÜŞ çağrıları için `
+      + `${fmtPct(1 - baseUp)}. Bu eşiğin altında kalan bir bileşen harmanda otomatik `
+      + `olarak susturulur ve yukarıda &ldquo;Etki %0&rdquo; görünür. `
+      + `&ldquo;az&rdquo; işareti ${THIN_RECORD_CALLS} çağrıdan az olan tarafı gösterir: `
+      + `harman böyle bir sicili zaten bilgisizlik noktasına doğru büzer, o yüzden `
+      + `oran ne olursa olsun karara katkısı yok denecek kadar azdır.`
+    : `Henüz hiçbir bileşenin çözülmüş çağrısı yok. Sicil, tahminlerin hedef seansı `
+      + `geldikçe (5 işlem günü) dolmaya başlar.`;
+}
+
+/* The trade log for the selected metal.
+
+   Already downloaded in full for the average-cost replay below, so this is
+   free. It answers the one question the portfolio cards cannot: whether the
+   backend actually fired, and when -- a card showing "%17 pozisyon" looks
+   identical whether it was set yesterday or three weeks ago. */
+function renderTrades(trades, asset) {
+  const body = document.querySelector("#trades-table tbody");
+  document.getElementById("trades-asset-name").textContent = asset.label;
+  const mine = trades.filter((t) => t.asset === currentAsset);
+  const note = document.getElementById("trades-note");
+
+  if (!mine.length) {
+    body.innerHTML = `<tr><td colspan="8" class="silenced">Bu varlıkta henüz işlem yok.</td></tr>`;
+    note.textContent = "";
+    return;
+  }
+
+  const labelFor = new Map(STRATEGIES.map((s) => [s.key, s.label]));
+  // Newest first here; the cost-basis replay upstream needs the opposite order
+  // and gets its own copy, so neither reverses the other's array in place.
+  const recent = [...mine].reverse().slice(0, MAX_TRADE_ROWS);
+  body.innerHTML = recent.map((t) => {
+    const buy = t.side === "BUY";
+    return `
+      <tr>
+        <td>${fmtDateTime(t.created_at)}</td>
+        <td>${labelFor.get(t.strategy) ?? esc(t.strategy)}</td>
+        <td><span class="action action-${buy ? "buy" : "sell"}">${buy ? "AL" : "SAT"}</span></td>
+        <td class="num">${fmtUsd(t.price, asset.digits)}</td>
+        <td class="num">${fmtNumber(t.ounce_amount, asset.digits === 3 ? 3 : 4)}</td>
+        <td class="num">${fmtUsd(t.usd_amount, 2)}</td>
+        <td class="num">${fmtUsd(t.fee_usd, 2)}</td>
+        <td class="summary-cell">${esc(t.reason ?? "")}</td>
+      </tr>`;
+  }).join("");
+
+  // Total commission paid is the number that decides whether any of this was
+  // worth doing: backend/backtest.py's whole cost ladder exists because the
+  // same strategy beats buy-and-hold at 2 bp and loses badly at 150 bp.
+  const fees = mine.reduce((sum, t) => sum + (Number(t.fee_usd) || 0), 0);
+  note.innerHTML =
+    `${mine.length} işlem, toplam <strong>${fmtUsd(fees, 2)}</strong> komisyon `
+    + `(on portföyün tamamı). En yenisi üstte. Komisyon oranı bu metal için `
+    + `tek yönde ${fmtNumber(asset.feeBps, 0)} baz puandır &mdash; bir stratejinin `
+    + `al-ve-tut'u geçip geçmediğini çoğu zaman sinyal değil bu sayı belirler.`;
+}
+
 /* Weighted-average purchase price per (asset, strategy), replayed from the
    trade log.
 
@@ -918,12 +1105,30 @@ function renderHistory(rows, asset) {
   const actualUp = resolved.filter((r) => r.actual_direction === "UP").length / resolved.length;
   // The honest scoreboard: accuracy alone is meaningless against a base rate
   // this far from 50%, so the comparison is printed with it, always.
-  const verdict = accuracy > actualUp
-    ? "hep-YÜKSELİŞ demekten iyi"
-    : "hep-YÜKSELİŞ demekten iyi DEĞİL";
-  summary.textContent =
+  const scoreboard =
     `${resolved.length} çözülmüş tahmin · isabet ${fmtPct(accuracy)} · ` +
-    `aynı dönemde fiyat ${fmtPct(actualUp)} oranında yükselmiş → model ${verdict}.`;
+    `aynı dönemde fiyat ${fmtPct(actualUp)} oranında yükselmiş`;
+
+  // A VERDICT needs enough rows to be one. At ~250 resolved rows a year, the
+  // first months of this table are a handful of coin flips, and "model
+  // hep-YÜKSELİŞ demekten iyi" printed over eight of them is the same
+  // overstatement this project spends its research bench refusing to make --
+  // research/ablation.py's whole discipline is reporting a test's POWER
+  // alongside its result. The two rates also differ by a point or two for a
+  // long time, so even at a decent sample a near-tie is not a ranking.
+  const GAP = Math.abs(accuracy - actualUp);
+  let verdict;
+  if (resolved.length < MIN_ROWS_FOR_VERDICT) {
+    verdict = ` → henüz hüküm vermek için çok az satır var (${resolved.length}/`
+      + `${MIN_ROWS_FOR_VERDICT}); bu iki sayı bu boyutta rahatlıkla yer değiştirir.`;
+  } else if (GAP < 0.02) {
+    verdict = " → ikisi arasındaki fark 2 puandan küçük, yani ayırt edilebilir değil.";
+  } else {
+    verdict = accuracy > actualUp
+      ? " → model hep-YÜKSELİŞ demekten iyi."
+      : " → model hep-YÜKSELİŞ demekten iyi DEĞİL.";
+  }
+  summary.textContent = scoreboard + verdict;
 }
 
 function renderKanalFinans(mentions, themes) {
@@ -933,16 +1138,20 @@ function renderKanalFinans(mentions, themes) {
   } else {
     body.innerHTML = mentions.slice(0, 12).map((m) => {
       const stanceClass = m.stance === "UP" ? "up-text" : m.stance === "DOWN" ? "down-text" : "silenced";
+      // Every field that is not one of this file's own constants goes through
+      // esc(): `summary` is Claude's transcription of speech and can contain
+      // anything a person said out loud, angle brackets included.
+      const action = String(m.action ?? "").toLowerCase();
       return `
         <tr>
           <td>${fmtDate(m.published_at)}</td>
-          <td>${KF_ASSET_LABEL[m.asset] ?? m.asset}</td>
-          <td class="${stanceClass}">${KF_STANCE[m.stance] ?? m.stance}</td>
-          <td><span class="action action-${m.action.toLowerCase()}">${KF_ACTION[m.action] ?? m.action}</span></td>
+          <td>${KF_ASSET_LABEL[m.asset] ?? esc(m.asset)}</td>
+          <td class="${stanceClass}">${KF_STANCE[m.stance] ?? esc(m.stance)}</td>
+          <td><span class="action action-${esc(action)}">${KF_ACTION[m.action] ?? esc(m.action)}</span></td>
           <td class="num">${m.ounce_target ? fmtUsd(m.ounce_target) : "-"}</td>
           <td class="num">${m.stop_loss_price ? fmtUsd(m.stop_loss_price) : "-"}</td>
           <td class="num">${m.resistance_price ? fmtUsd(m.resistance_price) : "-"}</td>
-          <td class="summary-cell">${m.summary}</td>
+          <td class="summary-cell">${esc(m.summary)}</td>
         </tr>`;
     }).join("");
   }
@@ -957,12 +1166,12 @@ function renderKanalFinans(mentions, themes) {
   const newestVideo = themes[0].video_id;
   const latest = themes.filter((t) => t.video_id === newestVideo);
   box.innerHTML = latest.map((t) => `
-    <div class="theme theme-${t.impact.toLowerCase()}">
+    <div class="theme theme-${esc(String(t.impact ?? "").toLowerCase())}">
       <div class="theme-head">
-        <span class="theme-name">${KF_THEME_LABEL[t.theme] ?? t.theme}</span>
-        <span class="theme-impact">madenlere etkisi: ${KF_IMPACT[t.impact] ?? t.impact}</span>
+        <span class="theme-name">${KF_THEME_LABEL[t.theme] ?? esc(t.theme)}</span>
+        <span class="theme-impact">madenlere etkisi: ${KF_IMPACT[t.impact] ?? esc(t.impact)}</span>
       </div>
-      <div class="theme-body">${t.summary}</div>
+      <div class="theme-body">${esc(t.summary)}</div>
     </div>`).join("")
     + `<p class="muted small">${fmtDate(latest[0].published_at)} tarihli videodan.</p>`;
 }
@@ -1013,8 +1222,10 @@ function renderAll() {
   renderPrediction(row, asset);
   renderContext(row, asset);
   renderComponents(row, asset);
+  renderRecords(cache.records, asset, row);
   renderStrategies(cache.portfolios, mark.price, asset, cache.costBasis);
   renderValuationNote(asset, mark);
+  renderTrades(cache.trades, asset);
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
 }
 
@@ -1029,19 +1240,27 @@ const EMPTY_LIVE = { gold: null, silver: null, usdtry: null, futures: {}, open: 
    polling it every few seconds would re-download identical bytes. */
 async function loadData() {
   try {
-    const [gold, silver, portfolios, trades, mentions, themes] = await Promise.all([
+    const [gold, silver, portfolios, trades, records, mentions, themes] = await Promise.all([
       api("predictions?select=*&asset=eq.gold&order=target_date.desc&limit=30"),
       api("predictions?select=*&asset=eq.silver&order=target_date.desc&limit=30"),
       api("portfolios?select=*"),
       // Ascending and complete: the average-cost replay has to see every fill
       // in the order it happened, so this is the one query that pages.
-      apiAll("trades?select=asset,strategy,side,price,ounce_amount,usd_amount&order=created_at.asc"),
+      // created_at/fee_usd/reason ride along for the trade log -- the rows
+      // were already being downloaded, so the log costs no extra round trip.
+      apiAll("trades?select=asset,strategy,side,price,ounce_amount,usd_amount,fee_usd,"
+             + "reason,created_at&order=created_at.asc"),
+      // Ten rows (five components x two metals). The evidence behind the
+      // "Etki" column, which retrain.py rebuilds from scratch every night.
+      api("model_state?select=*"),
       api("kanal_finans_mentions?select=*&order=published_at.desc&limit=40"),
       api("kanal_finans_themes?select=*&order=published_at.desc&limit=40"),
     ]);
 
     cache.predictions = { gold, silver };
     cache.portfolios = portfolios;
+    cache.trades = trades;
+    cache.records = records;
     cache.mentions = mentions;
     cache.themes = themes;
     cache.costBasis = costBasisByStrategy(trades);
