@@ -1133,10 +1133,16 @@ function renderHistory(rows, asset) {
 
 function renderKanalFinans(mentions, themes) {
   const body = document.querySelector("#kf-mentions-table tbody");
-  if (!mentions.length) {
+  // GENEL ("kıymetli madenler", neither metal named) applies to both tabs;
+  // ALTIN/GUMUS belong on their own tab only. Without this filter every tab
+  // showed the same mixed list and the "Varlık" column did the sorting a
+  // reader expects the tab strip itself to do.
+  const wanted = currentAsset === "gold" ? "ALTIN" : "GUMUS";
+  const filtered = mentions.filter((m) => m.asset === wanted || m.asset === "GENEL");
+  if (!filtered.length) {
     body.innerHTML = `<tr><td colspan="8" class="silenced">Henüz işlenmiş video yok.</td></tr>`;
   } else {
-    body.innerHTML = mentions.slice(0, 12).map((m) => {
+    body.innerHTML = filtered.slice(0, 12).map((m) => {
       const stanceClass = m.stance === "UP" ? "up-text" : m.stance === "DOWN" ? "down-text" : "silenced";
       // Every field that is not one of this file's own constants goes through
       // esc(): `summary` is Claude's transcription of speech and can contain
@@ -1227,6 +1233,7 @@ function renderAll() {
   renderValuationNote(asset, mark);
   renderTrades(cache.trades, asset);
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
+  renderKanalFinans(cache.mentions, cache.themes);
 }
 
 /* ------------------------------------------------------------------ load */
@@ -1274,7 +1281,6 @@ async function loadData() {
     // Renders the COMEX-close fallback if the fast loop has not landed yet,
     // so the panel is never blank while prices are in flight.
     renderLivePrices(cache.live ?? EMPTY_LIVE, gold[0], silver[0]);
-    renderKanalFinans(mentions, themes);
     renderAll();
   } catch (error) {
     showError(error.message);

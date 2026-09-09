@@ -89,7 +89,10 @@ SYSTEM_PROMPT_TEMPLATE = (
     "or making a point of diverging from it.\n\n"
     "Most of the time there is no real edge. Confidence above roughly 0.20 "
     "should be rare and should correspond to a concrete catalyst you can "
-    "point to. Respond only via the given schema."
+    "point to. Respond only via the given schema. The 'reasoning' field is "
+    "shown verbatim on a Turkish-language dashboard next to Turkish labels "
+    "for every other component, so write it in Turkish; 'direction' must "
+    "still be exactly 'UP' or 'DOWN' as the schema requires."
 )
 
 RESPONSE_SCHEMA = {
