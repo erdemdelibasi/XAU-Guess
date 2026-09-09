@@ -15,6 +15,8 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
   -> backend/predict.py       her iş günü 23:00 UTC (COMEX kapanışından sonra)
                               iki metal için de sırayla çalışır
   -> backend/retrain.py       her gün 01:30 UTC
+  -> backend/daily_report.py  her iş günü 06:00 UTC (09:00 TRT) -- günlük
+                              özet maili; hiçbir şey yazmaz, sadece okur
 
 Kullanıcının kendi bilgisayarı (Windows Task Scheduler -- GitHub Actions DEĞİL,
 bkz. aşağıdaki Kanal Finans notu)
@@ -571,6 +573,40 @@ denmişti ve model karıştırdı — gerçek bir pozisyonda ~%1,8 fazla zarar.
 **Yeni bir mention seviye vermezse önceki korunur.** Konuşmacı her videoda
 seviyeyi tekrar etmiyor; "eksik = değişmedi", "eksik = iptal" değil. Tersi
 her tekrar etmediği videoda zarar-kesi sessizce devre dışı bırakırdı.
+
+### Günlük mail: sayfayla aynı kuralları söylemek zorunda
+
+`daily_report.py` XRP-Guess'ten devralındı ama üç yeri **ölçüm yüzünden**
+farklı, ve üçü de bu projenin merkezî bulgusundan geliyor:
+
+1. **Başlık sayısı `edge_over_base`, isabet değil.** "YÜKSELİŞ, %62 güven"
+   ile açılan bir mail sistemi her sabah abartır — güven, prior yüksekken
+   zaten yüksektir. Ve en kötü hâl ayrı bir cümle alıyor: p_up 0,5'in üstünde
+   ama taban oranın altındaysa model yükseliş der ve hiçbir şey yapmamaktan
+   daha az iyimserdir. `frontend/app.js` ile **aynı üç durum**, aynı eşikler.
+2. **`buyhold` kendi sütununda.** XRP-Guess'in maili stratejileri birbirine
+   göre sıralayıp "bugün en çok kazanan"ı basıyordu — bu sessizce daha kolay
+   bir soruyu cevaplar. Burada her portföy al-ve-tut'a karşı raporlanıyor ve
+   **"HİÇBİRİ"** basılabilir, beklenen bir cevap.
+3. **Hüküm için örneklem şartı var.** XRP günde 96 satır çözüyordu; bu, metal
+   başına günde bir tane, üstelik 5 gün sonra. `MIN_ROWS_FOR_VERDICT = 60`
+   arayüzdeki sabitin aynısı — sayfa ile mailin "model çalışıyor mu"da
+   ayrışması ikisinden de kötü olurdu.
+
+**Değerleme yine VADELİ fiyatla** (`fetch_data.get_live_price` → GC=F/SI=F),
+spotla değil; `trades`'teki her dolum vadeli fiyattan gerçekleşti.
+
+**İki farklı referanslı yüzde yan yana basılamaz.** İlk sürüm "Giriş
+$4.395,90 / Şu an $4.442,50 (−%0,76)" yazıyordu: yüzde girişe göre değil, 24
+saat öncesine göreydi ve bir yükseliş düşüş gibi okunuyordu. Pencerenin
+başındaki fiyat normal bir sabah **bir önceki** seansın tahminidir (gecenin
+tahmini pencere kapandıktan sonra yazılır), yani gerçekten başka bir fiyat.
+Artık ikisi de kendi referansıyla ayrı satırda.
+
+Mail **hiçbir şey yazmıyor** (workflow `contents: read`) ve `GMAIL_ADDRESS`
+yoksa raporu basıp 0 ile çıkıyor — yani `python daily_report.py` yerel
+önizleme olarak da kullanılabiliyor, eksik bir isteğe bağlı secret bozuk bir
+boru hattı gibi görünmüyor.
 
 ### Abstain bir hata değil
 

@@ -1,0 +1,49 @@
+name: Daily Email Report
+
+# 06:00 UTC = 09:00 Turkey time (fixed UTC+3, no DST), seven hours after
+# predict.py's 23:00 UTC cron -- so the night's prediction is written,
+# resolved and traded on well before the mail is built.
+#
+# Weekdays only, because there is no weekend session to report on: the metals
+# do not trade, predict.py does not run, and a Sunday mail would repeat
+# Friday's numbers as if they were new. Monday's mail covers Friday night's
+# prediction, which is what the portfolios are still holding.
+on:
+  schedule:
+    - cron: "0 6 * * 1-5"
+  workflow_dispatch: {}
+
+# Read-only: this job sends a mail, it writes nothing back to the repo. Unlike
+# predict.yml and daily_retrain.yml it has no model to commit, so it has no
+# reason to hold write access.
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Send daily report email
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          # A Gmail App Password, never the account password. Without
+          # GMAIL_ADDRESS the script prints the report and exits 0 rather than
+          # failing the run -- a missing optional secret should not look like
+          # a broken pipeline.
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          REPORT_RECIPIENT: ${{ secrets.REPORT_RECIPIENT }}
+        run: python daily_report.py

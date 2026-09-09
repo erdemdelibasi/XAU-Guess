@@ -239,7 +239,22 @@ python fedcycle.py          # Fed faiz kararlari -- 32 test, 0 gecti
 python realrate.py          # gercek reel faiz vs vekil; merkez bankasi izi
 ```
 
-### 5. Kanal Finans (isteğe bağlı, yerel, iki parça)
+### 5. Günlük mail (isteğe bağlı)
+
+`backend/daily_report.py`, her iş günü **06:00 UTC** (09:00 TRT) Actions'ta
+koşar: gecenin tahmini, modelin taban orana kattığı fark, bileşenler, sicil,
+yirmi portföyün al-ve-tut'a karşı durumu ve Kanal Finans'ın son görüşü.
+Hiçbir şey yazmaz, sadece okur.
+
+Gereken GitHub Secrets: `GMAIL_ADDRESS`, `GMAIL_APP_PASSWORD`
+(Google **App Password**, hesap şifresi değil), `REPORT_RECIPIENT`.
+Yoksa iş yine başarılı biter — script raporu basıp çıkar. Yerelde önizleme:
+
+```bash
+cd backend && python daily_report.py    # GMAIL_ADDRESS yoksa sadece basar
+```
+
+### 6. Kanal Finans (isteğe bağlı, yerel, iki parça)
 
 Windows'ta **iki ayrı** zamanlanmış görev gerekir. Yerel olmasının sebebi
 (a) şıkkıdır: YouTube transkript isteklerini bulut IP'lerinden reddediyor.
