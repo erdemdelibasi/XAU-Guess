@@ -20,7 +20,7 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
 
 Kullanıcının kendi bilgisayarı (Windows Task Scheduler -- GitHub Actions DEĞİL,
 bkz. aşağıdaki Kanal Finans notu)
-  -> ../Kanal-Finans-Fetcher/fetcher.py    her 30 dk -- YouTube'dan TEK çekiş,
+  -> ../Kanal-Finans-Fetcher/fetcher.py    01:00/07:00/13:00/19:00 -- YouTube'dan TEK çekiş,
                               XRP-Guess'le PAYLAŞILAN sibling repo, iki projeye
                               de kendi şemasıyla yazar (bkz. o reponun README'si)
   -> backend/run_kanal_finans_hidden.vbs -> run_kanal_finans.ps1
@@ -521,11 +521,47 @@ olabilir (kesin nedensellik iddia edilemez, ama zamanlama örtüşüyor).
   çeker, sonra **iki ayrı** Claude çağrısıyla (bu projenin ALTIN/GUMUS/GENEL +
   tema şeması, XRP-Guess'in XRP/BTC/ETH/KRIPTO şeması — gerçekten farklı
   sorular, birleştirilecek ortak bir şema yok) her iki projenin **kendi**
-  Supabase'ine yazar. Her 30 dakikada bir çalışır. Geri çekilme artık **tek
+  Supabase'ine yazar. **Günde dört kez çalışır: 01:00, 07:00, 13:00, 19:00.**
+  Üç gündüz saati kanalın fiilen yayın yaptığı saatler, yani yeni video kör bir
+  yoklamayı beklemeden dakikalar içinde işleniyor; 01:00 gece gelenleri
+  topluyor. Eski takvim 30 dakikada birdi ve engelin sebebi olan tekrar
+  fırtınasının taşıyıcısı oydu — yeni takvim yoklama hızını tek başına 12 kat
+  düşürüyor. Koşu başına sınır bu yüzden 3'ten **8 videoya** çıkarıldı: RSS'ten
+  ölçüldüğünde kanal günde 1,67 video yayınlıyor ve hiçbir gün 3'ü geçmemiş,
+  ama artık koşular 30 dakika değil **6 saat** arayla, yani bir pencerede biriken
+  her şeyin tek koşuya sığması gerekiyor — sığmazsa sinyal 6 saat bekler ki bir
+  piyasa yorumu videosu için bu ömrünün çoğu demektir. Geri çekilme artık **tek
   ve gerçekten paylaşılan** bir sayaç (`state/backoff.json`, yerel dosya,
   Supabase'de değil) — eskiden iki proje aynı videonun geri çekilmesini
   birbirinden bağımsız sayıyordu, yani her ikisinin toplamı tek bir paylaşılan
   sayaçtan daha sık deniyordu.
+
+  **Transkript kaynağı 2026-09-09'da değişti ve önceki teşhis yanlıştı.**
+  Fetcher `youtube-transcript-api` kullanıyordu, iki gün boyunca 242 kez
+  `IpBlocked` aldı, **hiç** başarılı olmadı, ve dosyaya "bu makine tam engelli,
+  çözüm Webshare proxy" diye yazıldı. Aynı makineden yeniden ölçüldüğünde:
+  RSS **200** (10/10), izleme sayfası **200**, ses **200** (32 MB/s) — ve
+  altyazı (`youtube.com/api/timedtext`) **429**, her istekte. Yani IP engelli
+  değil, **tıkalı olan tek uç nokta altyazı**. Eski okumadaki 404'ler gerçekti
+  ama aralıklıydı (aynı URL 500 de döndürdü, bir kez DNS çözülemedi); geçici
+  bir yerel ağ arızası kalıcı bir yasak diye kaydedilmişti.
+
+  Sebep büyük ihtimalle kendi tekrar fırtınamız: her başarısızlık iki istek,
+  her koşu ~16 bekleyen videoyu yeniden deniyor — günde ~1.500 altyazı isteği.
+  **Proxy bunu çözmez, gizler**; limit yeni IP'ye de gelirdi. Çözüm tıkalı uç
+  noktaya hiç ihtiyaç duymamak: aynı IP'nin tam hızda verdiği **sesi** alıp
+  `faster-whisper` ile **yerelde** yazıya çevirmek. Anahtar yok, hesap yok,
+  proxy yok, ödenecek bir şey yok. Altyazı yine de video başına bir kez önce
+  deneniyor (çalıştığında konuşmacının kendi kelimeleri); Whisper yedek, ve
+  bugün fiilen çalışan yol o.
+
+  İki sayı bu projenin kendi disipliniyle ölçüldü: `WHISPER_PROMPT` olmadan
+  kanalın kendi konusu **"gümüş"**, 6 geçişin 2'sinde **"günmüş"** yazıldı —
+  yani bir yazım hatası değil, `assets.py`'nin ayırdığı iki metalden birinin
+  **kaybolmuş sinyali**; ipucuyla 6/6 doğru. Ve koşu başına **3 video /
+  15 dakika** sınırı var, çünkü transkripsiyon artık CPU dakikaları harcıyor
+  (6,4 dakikalık video = 147 sn) — sınır aynı zamanda fırtınayı bir daha
+  kazanmamanın asıl güvencesi. Ayrıntılı ölçüm tablosu o reponun README'sinde.
 - **`backend/kanal_finans.py`** (burada, değişti) — artık YouTube'a **hiç**
   gitmiyor. Tek işi: fetcher'ın yazdığı `kanal_finans_mentions` satırlarından
   `applied_at is null` olanları okuyup portföye uygulamak. Bu yüzden **eski
