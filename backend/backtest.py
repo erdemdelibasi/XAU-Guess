@@ -158,7 +158,8 @@ def compute_signal_path(df: pd.DataFrame, asset) -> pd.DataFrame:
         proba = model.predict_proba(block[features])[:, 1]
 
         for offset, ((_, row), p) in enumerate(zip(block.iterrows(), proba)):
-            tech = technical_signal(labelled.iloc[start + offset: start + offset + 1])
+            tech = technical_signal(labelled.iloc[start + offset: start + offset + 1],
+                                    asset.price_scales)
             ml_score = float(np.clip((p - 0.5) * 2, -1, 1))
             rows.append({
                 "time": row["time"], "close": float(row["close"]),

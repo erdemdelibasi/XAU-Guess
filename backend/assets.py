@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import fetch_data
+from indicators import PriceScales
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,12 @@ class Asset:
     # does not lead is not free -- it adds a weighted term that contributes
     # noise in place of evidence.
     leading_drivers: tuple[str, ...]
+    # The three technical scale constants that depend on how volatile this
+    # metal is (indicators.PriceScales). Measured as 1 / p90(|quantity|) on
+    # this metal's own 25-year panel so a 90th-percentile move maps to a full
+    # score -- see the block comment above indicators.BOND_SCALE for the table
+    # and for what gold's numbers did to silver before this was split.
+    price_scales: PriceScales
 
 
 GOLD = Asset(
@@ -69,6 +76,9 @@ GOLD = Asset(
     counterpart_key="silver",
     counterpart_symbol=fetch_data.SILVER_SYMBOL,
     leading_drivers=("tip", "ief", "vix"),
+    # p90 over 6022 sessions: macd_hist/close 0.00581, ema9/ema21-1 0.01940,
+    # close/sma200-1 0.15368. Saturation 10.6% / 4.7% / 4.7%.
+    price_scales=PriceScales(macd=172.0, ema_cross=51.5, sma200=6.5),
 )
 
 SILVER = Asset(
@@ -96,6 +106,14 @@ SILVER = Asset(
     # `ief` deliberately absent: t=+2.56 out of sample, under the |t|>3.29
     # Bonferroni bar it clears for gold. See research/compare.py section 4.
     leading_drivers=("tip", "vix"),
+    # Measured on SILVER's panel, not copied: p90 over 6024 sessions is
+    # macd_hist/close 0.01071 (1.84x gold's), ema9/ema21-1 0.03416 (1.76x),
+    # close/sma200-1 0.26876 (1.75x) -- silver's own 1.86x realised
+    # volatility, showing up exactly where a price-derived scale should feel
+    # it. Under gold's numbers silver's macd score saturated on 35.2% of
+    # sessions with a median |score| of 0.715, i.e. it had stopped grading
+    # and started voting. Nothing raised; the scoreboard just quietly moved.
+    price_scales=PriceScales(macd=93.4, ema_cross=29.3, sma200=3.72),
 )
 
 ASSETS = {GOLD.key: GOLD, SILVER.key: SILVER}

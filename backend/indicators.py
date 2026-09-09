@@ -32,6 +32,8 @@ insight.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 from ta.momentum import RSIIndicator
@@ -69,11 +71,49 @@ BOND_ETF_DURATION_YEARS = 7.5
 # 0.881) and real_yield on 49.1% (median 0.976). A score pinned at +-1 half
 # the time is a coin, not a measurement -- it throws away exactly the
 # gradation the ensemble is supposed to weigh.
-MACD_SCALE = 175.0        # of macd_hist / close
-EMA_CROSS_SCALE = 52.0    # of ema9 / ema21 - 1
-SMA200_SCALE = 6.5        # of close / sma200 - 1
-BOND_SCALE = 166.0        # of the tip/ief daily return
-VIX_SCALE = 2.4           # divisor on the daily VIX point change
+#
+# THE SPLIT BELOW IS THE POINT, and it was measured rather than assumed.
+# Three of these scale a PRICE-derived quantity and three scale a MACRO
+# series, and only the first three can differ between metals:
+#
+#   p90 of |quantity|, 6022/6024 sessions, 2001-2026     gold      silver
+#     macd_hist / close                                  0.00581   0.01071
+#     ema9/ema21 - 1                                     0.01940   0.03416
+#     close/sma200 - 1                                   0.15368   0.26876
+#     mean(tip, ief) daily return                        0.00609   0.00585
+#     VIX daily point change                             2.419     2.420
+#     one-day real-yield proxy change (pp)               0.0781    0.0781
+#
+# The macro rows are identical to three decimals -- they read the same
+# series in both panels -- so they stay module constants. The price rows are
+# 1.75-1.87x apart, which is silver's own 1.86x realised volatility showing
+# up exactly where it should, so they are per-ASSET and live in assets.py
+# like every other number that differs between the metals.
+#
+# Running gold's numbers on silver produced precisely the failure this whole
+# block exists to prevent: silver's macd score saturated on 35.2% of
+# sessions with a median |score| of 0.715 (gold: 10.6% and 0.388) and its
+# trend score on 14.9%. That is the 44.9% bug from the paragraph above,
+# reintroduced through the side door of a second asset -- no error, no
+# warning, just a component that had stopped grading and started voting.
+# With silver's own scales those become 10.0% / 0.382 and 4.6%, i.e. the two
+# metals' scorers finally behave identically.
+#
+# WHAT IT BUYS, MEASURED, because the honest answer is "not much yet".
+# A paired backtest over silver's 4897 walk-forward sessions (19.5 years,
+# identical ML path, only the technical leg re-scored) moved Calmar by
+# +0.002 for `technical` and -0.004 for `ensemble` at every rung of the cost
+# ladder, with turnover unchanged (715 -> 718 trades). The blended score
+# never saturated under EITHER setting (0.0% both ways), because seven
+# weighted terms rarely clip together -- the damage was to gradation INSIDE
+# the blend, which a Calmar column cannot see.
+#
+# So this is not a performance fix and must not be reported as one. It is a
+# correctness fix: the constants are documented as "p90 maps to ~1.0", that
+# statement was false for one of the two assets, and a component whose stated
+# calibration does not hold is one nobody can reason about later.
+BOND_SCALE = 166.0        # of the tip/ief daily return -- macro, shared
+VIX_SCALE = 2.4           # divisor on the daily VIX point change -- shared
 # Divisor on the ONE-DAY real-yield-proxy change, in percentage points. Its
 # p90 is 0.078pp, so dividing by 0.078 puts a p90 move at a full score
 # (saturation ~10%, median |score| ~0.36 -- in line with every other scorer
@@ -111,6 +151,29 @@ VIX_SCALE = 2.4           # divisor on the daily VIX point change
 # summary is the one this project keeps arriving at -- a real signal that is
 # expensive to act on (compare macro_signal.py's own docstring).
 REAL_YIELD_SCALE = 0.078
+
+
+@dataclass(frozen=True)
+class PriceScales:
+    """The three scale constants that depend on how volatile the ASSET is.
+
+    Lives here because the scorers that consume it live here; the VALUES live
+    in assets.py, one set per metal, alongside every other measured per-asset
+    number. Each is 1 / p90(|quantity|) on that metal's own 25-year panel, so
+    a 90th-percentile move maps to a full-scale score.
+
+    The defaults are gold's, so a caller that has no asset in hand (the
+    research bench, which studies gold) behaves exactly as before. That is a
+    convenience, not a licence: passing gold's scales to silver is the bug
+    documented above, and it raises nothing.
+    """
+    macd: float        # multiplier on macd_hist / close
+    ema_cross: float   # multiplier on ema9 / ema21 - 1
+    sma200: float      # multiplier on close / sma200 - 1
+
+
+# Measured on the gold panel (research/compare.py re-measures both metals).
+GOLD_PRICE_SCALES = PriceScales(macd=172.0, ema_cross=51.5, sma200=6.5)
 
 # Kept as features even though they don't lead on their own: they describe the
 # regime a prediction is being made in, which a tree model can condition on
@@ -293,24 +356,29 @@ def _score_rsi(rsi: float) -> float:
     return (50 - rsi) / 20.0
 
 
-def _score_macd(macd_hist: float, price: float) -> float:
+def _score_macd(macd_hist: float, price: float, scale: float = GOLD_PRICE_SCALES.macd) -> float:
     """MACD histogram as a fraction of price, so the scale survives gold going
     from $270 to $4400 -- an absolute histogram threshold would mean something
-    completely different at each end of this panel."""
+    completely different at each end of this panel.
+
+    Dividing by price removes the LEVEL but not the VOLATILITY: silver's
+    histogram is 1.84x gold's as a fraction of price, which is why `scale` is
+    the asset's own (see PriceScales)."""
     if pd.isna(macd_hist) or pd.isna(price) or price == 0:
         return 0.0
-    return float(np.clip((macd_hist / price) * MACD_SCALE, -1, 1))
+    return float(np.clip((macd_hist / price) * scale, -1, 1))
 
 
-def _score_trend(ema9_21: float, px_sma200: float) -> float:
+def _score_trend(ema9_21: float, px_sma200: float,
+                 scales: PriceScales = GOLD_PRICE_SCALES) -> float:
     """Trend agreement across two very different speeds. Gold trends hard --
     the 200-day is what separates its bull phases from its long dead zones --
     so a fast crossover that disagrees with the slow trend is discounted."""
     parts = []
     if pd.notna(ema9_21):
-        parts.append(float(np.clip(ema9_21 * EMA_CROSS_SCALE, -1, 1)))
+        parts.append(float(np.clip(ema9_21 * scales.ema_cross, -1, 1)))
     if pd.notna(px_sma200):
-        parts.append(float(np.clip(px_sma200 * SMA200_SCALE, -1, 1)))
+        parts.append(float(np.clip(px_sma200 * scales.sma200, -1, 1)))
     if not parts:
         return 0.0
     return float(np.mean(parts))
@@ -349,7 +417,18 @@ def _score_real_yield(real_yield_chg: float) -> float:
 def _score_bonds(tip_chg: float, ief_chg: float) -> float:
     """Bond ETFs up = yields down = supportive for gold. These are the two
     strongest measured leads (t=+6.6 and +5.2) so they get their own term
-    rather than being folded into the real-yield proxy."""
+    rather than being folded into the real-yield proxy.
+
+    ON SILVER THIS IS A ONE-LEG AVERAGE. `ief` is absent from silver's driver
+    set (t=+2.56, under the Bonferroni bar), so no `ief_chg` column exists in
+    its panel and only `tip_chg` arrives. That does NOT need its own scale:
+    measured on silver's own panel the term saturates on 8.9% of sessions with
+    a median |score| of 0.323, against gold's 10.5% and 0.372 -- inside the
+    band every other scorer here sits in, because both metals read the same
+    two bond ETFs. BOND_SCALE therefore stays shared, unlike the three
+    price-derived scales above, and that difference is the measurement rather
+    than a convention.
+    """
     parts = [v for v in (tip_chg, ief_chg) if pd.notna(v)]
     if not parts:
         return 0.0
@@ -367,7 +446,8 @@ WEIGHTS = {
 }
 
 
-def technical_signal(features: pd.DataFrame) -> dict:
+def technical_signal(features: pd.DataFrame,
+                     scales: PriceScales = GOLD_PRICE_SCALES) -> dict:
     """Latest row of `features` -> one directional call.
 
     Returns {"direction": "UP"/"DOWN", "confidence": 0..1, "score": -1..1,
@@ -375,13 +455,17 @@ def technical_signal(features: pd.DataFrame) -> dict:
     measured leads, NOT a fitted result -- research/edge.py is what says
     whether the whole thing clears the break-even wall, and nothing here
     should be read as tuned until it does.
+
+    `scales` must be THIS ASSET's own (assets.Asset.price_scales). Leaving it
+    at gold's on silver does not raise -- it just pins the macd term to +-1 on
+    35% of sessions instead of 11%, which converts a graded score into a vote.
     """
     last = features.iloc[-1]
 
     scores = {
         "rsi": _score_rsi(last.get("rsi14")),
-        "macd": _score_macd(last.get("macd_hist"), last.get("close")),
-        "trend": _score_trend(last.get("ema9_21"), last.get("px_sma200")),
+        "macd": _score_macd(last.get("macd_hist"), last.get("close"), scales.macd),
+        "trend": _score_trend(last.get("ema9_21"), last.get("px_sma200"), scales),
         "bollinger": _score_bollinger(last.get("bb_pct")),
         "vix": _score_vix(last.get("vix_chg")),
         "real_yield": _score_real_yield(last.get("real_yield_chg1")),
