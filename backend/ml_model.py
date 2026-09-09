@@ -126,7 +126,26 @@ def available_features(df: pd.DataFrame) -> list[str]:
 
 def train_model(panel: pd.DataFrame, horizon: int = HORIZON_DAYS,
                 drivers: tuple[str, ...] = LEADING_DRIVERS) -> tuple[HistGradientBoostingClassifier, dict]:
-    """Fits a classifier and reports holdout metrics on a time-ordered split."""
+    """Fits the production classifier on the FULL panel, plus a disposable
+    holdout fit purely to print a smoke-test metric.
+
+    These used to be the same fit: one model, trained on the first
+    TRAIN_FRACTION of the panel, both scored on the last slice AND saved as
+    the live model. That meant the deployed model permanently never saw its
+    own most recent ~15% of history -- for a 25-year panel, the newest 3-4
+    years, every single night, forever. The real out-of-sample validation
+    for this model lives in research/edge.py's walk-forward (refit on an
+    expanding window, scored strictly out of sample); a single static 85/15
+    split here was a *weaker* second validation that was quietly winning by
+    also controlling what got deployed.
+
+    So the two jobs are split. `holdout_model` is fit on the older
+    TRAIN_FRACTION and scored on the newer slice purely to print
+    `holdout_accuracy` -- a cheap smoke test retrain.py can eyeball for a
+    sudden regression, not the real measurement. The returned/saved `model`
+    is a separate fit on every row available. Fitting twice costs nothing
+    here (~0.66s each, see build_estimator's docstring).
+    """
     df = build_feature_frame(panel, horizon=horizon, drivers=drivers)
     features = available_features(df)
     if len(df) < 300:
@@ -135,9 +154,6 @@ def train_model(panel: pd.DataFrame, horizon: int = HORIZON_DAYS,
     split = int(len(df) * TRAIN_FRACTION)
     train_df, test_df = df.iloc[:split], df.iloc[split:]
 
-    model = build_estimator()
-    model.fit(train_df[features], train_df["label_up"])
-
     metrics = {
         "train_rows": len(train_df),
         "test_rows": len(test_df),
@@ -145,12 +161,18 @@ def train_model(panel: pd.DataFrame, horizon: int = HORIZON_DAYS,
         "horizon_days": horizon,
     }
     if len(test_df) > 0:
-        preds = model.predict(test_df[features])
+        holdout_model = build_estimator()
+        holdout_model.fit(train_df[features], train_df["label_up"])
+        preds = holdout_model.predict(test_df[features])
         metrics["holdout_accuracy"] = float((preds == test_df["label_up"]).mean())
         # The bar a directional model has to clear is not 50% -- both metals
         # rise more often than they fall, so "always UP" is a free baseline.
         # Reporting accuracy without it would flatter every model here.
         metrics["always_up_baseline"] = float(test_df["label_up"].mean())
+
+    model = build_estimator()
+    model.fit(df[features], df["label_up"])
+    metrics["production_rows"] = len(df)
     return model, metrics
 
 
