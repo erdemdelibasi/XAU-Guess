@@ -34,6 +34,7 @@ import math
 import os
 import sys
 import time
+from typing import Callable
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -68,24 +69,30 @@ ETF_ROUNDTRIP_BPS = 10
 HORIZONS = [1, 2, 3, 5, 7, 10, 15, 20]
 
 
-def _fit(train: pd.DataFrame, features: list[str], label: str) -> HistGradientBoostingClassifier:
-    """Same estimator the live model uses -- imported rather than redefined so
-    research can never drift from production without someone noticing."""
-    model = ml_model.build_estimator()
+def _fit(train: pd.DataFrame, features: list[str], label: str,
+        estimator_factory: Callable[[], HistGradientBoostingClassifier]) -> HistGradientBoostingClassifier:
+    """Same estimator the live model uses BY DEFAULT -- `estimator_factory`
+    defaults to `ml_model.build_estimator` so research can never drift from
+    production without someone noticing. research/hyperparams.py passes a
+    different factory to score a candidate hyperparameter set through this
+    exact loop rather than a second copy of it."""
+    model = estimator_factory()
     model.fit(train[features], train[label])
     return model
 
 
 def walk_forward(df: pd.DataFrame, horizon: int,
                  features: list[str] | None = None,
-                 label_values: pd.Series | np.ndarray | None = None) -> pd.DataFrame:
+                 label_values: pd.Series | np.ndarray | None = None,
+                 estimator_factory: Callable[[], HistGradientBoostingClassifier] | None = None) -> pd.DataFrame:
     """Out-of-sample probability for every row the walk-forward can reach.
 
-    `features` and `label_values` both default to what production uses. They
-    are parameters only so research/ratio.py and research/ablation.py can vary
-    exactly one thing against an identical refit schedule and identical rows.
-    Running two variants through two different walk-forward implementations
-    would measure the implementations.
+    `features`, `label_values` and `estimator_factory` all default to what
+    production uses. They are parameters only so research/ratio.py and
+    research/ablation.py can vary exactly one feature/label choice, and
+    research/hyperparams.py exactly one hyperparameter set, against an
+    identical refit schedule and identical rows. Running variants through two
+    different walk-forward implementations would measure the implementations.
 
     `label_values` must already be aligned to `df` and must be NaN wherever
     the outcome is unknown -- see build_feature_frame on why an unknown label
@@ -100,6 +107,7 @@ def walk_forward(df: pd.DataFrame, horizon: int,
 
     if features is None:
         features = ml_model.available_features(df)
+    factory = estimator_factory or ml_model.build_estimator
     usable = df.dropna(subset=features + [label]).reset_index(drop=True)
 
     rows = []
@@ -116,7 +124,7 @@ def walk_forward(df: pd.DataFrame, horizon: int,
         if len(train) < MIN_TRAIN_ROWS:
             start = stop
             continue
-        model = _fit(train, features, label)
+        model = _fit(train, features, label, factory)
         block = usable.iloc[start:stop]
         proba = model.predict_proba(block[features])[:, 1]
         for (_, row), p in zip(block.iterrows(), proba):
