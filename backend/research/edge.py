@@ -48,6 +48,7 @@ import assets as assets_module  # noqa: E402
 import ml_model  # noqa: E402
 import panel as panel_module  # noqa: E402
 from indicators import GOLD_PRICE_SCALES, PriceScales, build_features, technical_signal  # noqa: E402
+from macro_signal import macro_signal  # noqa: E402
 
 REFIT_EVERY = 63          # ~one quarter; ~50 refits across the test half
 MIN_TRAIN_ROWS = 750      # ~3 years before the first prediction is allowed
@@ -157,6 +158,35 @@ def technical_walk(df: pd.DataFrame, horizon: int,
         # growing prefix copies an ever-larger frame every iteration, which
         # made this loop quadratic (~13 GB of copying across 5500 rows).
         signal = technical_signal(df.iloc[i : i + 1], scales)
+        rows.append({
+            "time": df["time"].iloc[i], "close": df["close"].iloc[i], "label": labels[i],
+            "score": signal["score"], "confidence": signal["confidence"],
+            "direction": signal["direction"],
+        })
+    return pd.DataFrame(rows)
+
+
+def macro_walk(df: pd.DataFrame, horizon: int,
+               drivers: tuple[str, ...] = ("tip", "ief", "vix")) -> pd.DataFrame:
+    """The macro rule-based signal over the same rows -- technical_walk's
+    twin. macro_signal() abstains (confidence=0) on days it lacks enough
+    driver columns; those rows are kept, not dropped, so a caller can see and
+    count the abstention rather than have it silently vanish.
+
+    `drivers` must be the asset's OWN measured leads (assets.Asset.
+    leading_drivers) when `df` is not gold's panel -- see macro_signal.py's
+    module docstring on why `ief` only leads gold.
+    """
+    future_close = df["close"].shift(-horizon)
+    labels = np.where(future_close.notna(), (future_close > df["close"]).astype(float), np.nan)
+
+    rows = []
+    for i in range(MIN_TRAIN_ROWS, len(df)):
+        if not np.isfinite(labels[i]):
+            continue
+        # Same one-row-slice trick as technical_walk -- macro_signal also
+        # reads only .iloc[-1].
+        signal = macro_signal(df.iloc[i : i + 1], drivers)
         rows.append({
             "time": df["time"].iloc[i], "close": df["close"].iloc[i], "label": labels[i],
             "score": signal["score"], "confidence": signal["confidence"],

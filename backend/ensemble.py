@@ -109,9 +109,13 @@ def _logit(p: float) -> float:
 BASE_LOGODDS = _logit(BASE_RATE_UP)
 
 
-def directional_reliability(correct: int, total: int, no_information_rate: float) -> float:  # noqa: D401
+def directional_reliability(correct: int, total: int, no_information_rate: float,
+                            shrink_alpha: float | None = None) -> float:  # noqa: D401
     """P(the outcome matched | this component made this call), shrunk toward
-    `no_information_rate` by SHRINK_ALPHA pseudo-observations.
+    `no_information_rate` by `shrink_alpha` pseudo-observations (module
+    constant SHRINK_ALPHA, read at CALL time, when None -- the parameter
+    exists so research/ensemble_weights.py can score a candidate value
+    through this exact function rather than a copy).
 
     Shrinking toward the no-information rate rather than 0.5 is what makes
     thin evidence land on "says nothing" instead of on "coin flip" -- on an
@@ -126,12 +130,15 @@ def directional_reliability(correct: int, total: int, no_information_rate: float
     its DOWN calls a small POSITIVE evidence score (+0.024) and a 4.9% share
     of ensemble influence it had not earned.
     """
-    return (correct + SHRINK_ALPHA * no_information_rate) / (total + SHRINK_ALPHA)
+    if shrink_alpha is None:
+        shrink_alpha = SHRINK_ALPHA
+    return (correct + shrink_alpha * no_information_rate) / (total + shrink_alpha)
 
 
 def component_evidence(direction: str, up_record: tuple[int, int],
                        down_record: tuple[int, int],
-                       base_rate: float = BASE_RATE_UP) -> float:
+                       base_rate: float = BASE_RATE_UP,
+                       shrink_alpha: float | None = None) -> float:
     """Log-odds this component's current call is worth, above the base rate.
 
     `up_record` is (times it said UP and the metal rose, times it said UP).
@@ -149,7 +156,7 @@ def component_evidence(direction: str, up_record: tuple[int, int],
         correct, total = up_record
         if total <= 0:
             return 0.0
-        p_up_given_call = directional_reliability(correct, total, base_rate)
+        p_up_given_call = directional_reliability(correct, total, base_rate, shrink_alpha)
         evidence = _logit(p_up_given_call) - base_logodds
     else:
         correct, total = down_record
@@ -158,7 +165,7 @@ def component_evidence(direction: str, up_record: tuple[int, int],
         # For a DOWN call, `correct` counts times the metal actually fell, so
         # the no-information rate is 1 - base_rate and P(up | said DOWN) is
         # one minus the resulting reliability.
-        p_down_given_call = directional_reliability(correct, total, 1.0 - base_rate)
+        p_down_given_call = directional_reliability(correct, total, 1.0 - base_rate, shrink_alpha)
         evidence = base_logodds - _logit(1.0 - p_down_given_call)
 
     evidence = max(-LOGODDS_CAP, min(LOGODDS_CAP, evidence))
@@ -220,7 +227,9 @@ def _cold_start(signals: dict[str, dict], weights: dict[str, float],
 
 def combine(signals: dict[str, dict], weights: dict[str, float] | None = None,
             records: dict[str, dict] | None = None,
-            base_rate: float = BASE_RATE_UP) -> dict:
+            base_rate: float = BASE_RATE_UP,
+            correlation_damping: float | None = None,
+            shrink_alpha: float | None = None) -> dict:
     """Pool the components into one call.
 
     `records` maps a component to
@@ -231,7 +240,14 @@ def combine(signals: dict[str, dict], weights: dict[str, float] | None = None,
     base_rate_up. It is the prior the pool starts from AND the reference every
     component's evidence is measured against, so a gold number used on silver
     biases both at once.
+
+    `correlation_damping` and `shrink_alpha` default to the module constants
+    (read at CALL time, when None). They are parameters only so
+    research/ensemble_weights.py can score a candidate pair through this
+    exact function -- production never passes them explicitly.
     """
+    if correlation_damping is None:
+        correlation_damping = CORRELATION_DAMPING
     weights = weights or DEFAULT_WEIGHTS
     usable = {c: r for c, r in (records or {}).items()
               if c in signals and (r.get("up", (0, 0))[1] > 0 or r.get("down", (0, 0))[1] > 0)}
@@ -247,10 +263,10 @@ def combine(signals: dict[str, dict], weights: dict[str, float] | None = None,
         record = usable[name]
         evidence_total += component_evidence(
             signal["direction"], record.get("up", (0, 0)), record.get("down", (0, 0)),
-            base_rate,
+            base_rate, shrink_alpha,
         )
 
-    logodds = _logit(base_rate) + evidence_total * CORRELATION_DAMPING
+    logodds = _logit(base_rate) + evidence_total * correlation_damping
     p_up = 1.0 / (1.0 + math.exp(-logodds))
     # Signed edge in -1..1, which is what indicators.estimate_pct_change and
     # trading.compute_target_exposure both expect.

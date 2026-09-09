@@ -172,7 +172,8 @@ def trend_scale(price: float, trend_average: float) -> float:
 
 def compute_target_exposure(strategy: str, price: float, trend_average: float,
                             volatility: float, direction: str, confidence: float,
-                            target_volatility: float = TARGET_VOLATILITY) -> float:
+                            target_volatility: float = TARGET_VOLATILITY,
+                            disagreement: float = 0.0, disagreement_tilt: float = 0.0) -> float:
     """Fraction of the portfolio that should be in the metal, in [0, MAX_EXPOSURE].
 
     Pure -- no DB, no clock, no network -- so backtest.py replays the live
@@ -180,6 +181,13 @@ def compute_target_exposure(strategy: str, price: float, trend_average: float,
     the ASSET's own budget (assets.Asset.target_volatility), never a global:
     see that field for why gold's number applied to silver is a different
     strategy wearing the same name.
+
+    `disagreement` (0..1, how much of today's voting components point away
+    from the pooled direction) and `disagreement_tilt` (how hard to react to
+    it) both default to 0.0, which multiplies exposure by exactly 1.0 -- every
+    existing caller is unaffected. They exist so research/ensemble_weights.py
+    can score a candidate tilt through this exact function; see that script
+    before ever passing a nonzero disagreement_tilt from anywhere else.
     """
     if strategy == "buyhold":
         return MAX_EXPOSURE
@@ -204,6 +212,7 @@ def compute_target_exposure(strategy: str, price: float, trend_average: float,
     # visible rather than buried under the volatility scaler.
     if strategy == "ensemble":
         base *= vol_scale(volatility, target_volatility) * trend_scale(price, trend_average)
+        base *= 1.0 - disagreement_tilt * disagreement
     return float(np.clip(base + tilt, 0.0, MAX_EXPOSURE))
 
 
