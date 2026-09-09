@@ -60,6 +60,7 @@ if hasattr(sys.stdout, "reconfigure"):
 import assets as assets_module  # noqa: E402
 import ensemble  # noqa: E402
 import fetch_data  # noqa: E402
+import health  # noqa: E402
 import trading  # noqa: E402
 from db import get_client  # noqa: E402
 
@@ -376,6 +377,11 @@ def build_asset_report(db, asset, start: datetime, end: datetime) -> dict:
         "just_resolved": just_resolved,
         "books": books, "beat_benchmark": beat,
         "kanal_finans": kanal_finans_view(db, asset.key),
+        # Silent-failure signals (health.py): predict.py's or retrain.py's
+        # cron having simply stopped, with nothing else here able to notice
+        # since this mail is the one channel that reaches a person daily.
+        "health": health.check(asset, health.fetch_recent(db, asset.key),
+                                health.fetch_model_state_updates(db, asset.key)),
     }
 
 
@@ -389,7 +395,9 @@ def build_report(db) -> dict:
             # other's section down with it; they share only the DB client.
             print(f"WARNING: {asset.key} section failed ({type(exc).__name__}: {exc})")
     ratio_row = next((a["row"] for a in per_asset if a["row"] and a["row"].get("gs_ratio")), None)
-    return {"start": start, "end": end, "assets": per_asset, "ratio_row": ratio_row}
+    health_warnings = [line for a in per_asset for line in a.get("health", [])]
+    return {"start": start, "end": end, "assets": per_asset, "ratio_row": ratio_row,
+            "health_warnings": health_warnings}
 
 
 # --------------------------------------------------------------------------
@@ -494,6 +502,10 @@ def render_text(report: dict) -> str:
                   + (f" · 250 seans z {fmt_num(float(ratio_row['gs_ratio_z']), 2)}"
                      if ratio_row.get("gs_ratio_z") is not None else ""),
                   f"  {RATIO_NOTE}"]
+
+    health_warnings = report.get("health_warnings")
+    if health_warnings:
+        lines += ["", "SİSTEM SAĞLIĞI"] + [f"  {w}" for w in health_warnings]
 
     lines += ["", "Bu bir yatırım tavsiyesi değildir. Tüm portföyler sanaldır."]
     return "\n".join(lines)
@@ -662,6 +674,18 @@ def render_html(report: dict) -> str:
                            f'{fmt_num(float(z), 2)}</span>' if z is not None else ""))
             + f'<tr><td colspan="2" style="padding:6px 16px 12px;font-size:11px;color:{MUTED};'
               f'line-height:1.45;">{RATIO_NOTE}</td></tr></table>')
+
+    health_warnings = report.get("health_warnings")
+    if health_warnings:
+        health_rows = "".join(
+            f'<tr><td style="padding:6px 16px;font-size:12px;color:{DOWN};line-height:1.45;'
+            f'border-top:1px solid {BORDER};">{w}</td></tr>' for w in health_warnings)
+        body += (
+            f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            f'style="background:{CARD};border-radius:10px;overflow:hidden;margin:0 0 14px;'
+            f'border:1px solid {BORDER};border-left:3px solid {DOWN};">'
+            f'<tr><td style="padding:9px 16px;background:{CARD_HEAD};font-size:12px;'
+            f'font-weight:700;color:{TEXT};">SİSTEM SAĞLIĞI</td></tr>{health_rows}</table>')
 
     return f"""\
 <!doctype html>

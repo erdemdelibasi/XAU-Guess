@@ -39,6 +39,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 import assets as assets_module
 import calibration
 import ensemble
+import health
 import ml_model
 import predict as predict_module
 import trading
@@ -240,6 +241,23 @@ def refit_calibrators(asset, resolved: list[dict]) -> None:
                   f"vs esik {threshold:.4f}   {status}")
 
 
+def report_health(db, asset) -> None:
+    """Silent-failure signals -- see health.py's module docstring. Runs
+    regardless of whether this asset has any resolved history yet, and
+    regardless of whether the branches above succeeded, so it is called from
+    a single place at the end of run_asset rather than duplicated into both
+    the cold-start and normal paths."""
+    recent = health.fetch_recent(db, asset.key)
+    model_state_rows = health.fetch_model_state_updates(db, asset.key)
+    warnings = health.check(asset, recent, model_state_rows)
+    if warnings:
+        print("\n" + "=" * 82)
+        print(f"SAGLIK KONTROLU ({asset.label})")
+        print("=" * 82)
+        for line in warnings:
+            print(f"  {line}")
+
+
 def run_asset(db, asset) -> None:
     print(f"\n{'#' * 82}\n### {asset.label} ({asset.symbol})\n{'#' * 82}")
     resolved = fetch_resolved(db, asset.key)
@@ -248,12 +266,13 @@ def run_asset(db, asset) -> None:
     if not resolved:
         print("Henuz cozulmus tahmin yok -- sadece model yeniden egitilecek.")
         refit_model(asset)
-        return
+    else:
+        records = rebuild_component_records(db, asset, resolved)
+        report_records(asset, records, resolved)
+        refit_model(asset)
+        refit_calibrators(asset, resolved)
 
-    records = rebuild_component_records(db, asset, resolved)
-    report_records(asset, records, resolved)
-    refit_model(asset)
-    refit_calibrators(asset, resolved)
+    report_health(db, asset)
 
 
 def main() -> int:
