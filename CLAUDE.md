@@ -561,7 +561,15 @@ olabilir (kesin nedensellik iddia edilemez, ama zamanlama örtüşüyor).
   **kaybolmuş sinyali**; ipucuyla 6/6 doğru. Ve koşu başına **3 video /
   15 dakika** sınırı var, çünkü transkripsiyon artık CPU dakikaları harcıyor
   (6,4 dakikalık video = 147 sn) — sınır aynı zamanda fırtınayı bir daha
-  kazanmamanın asıl güvencesi. Ayrıntılı ölçüm tablosu o reponun README'sinde.
+  kazanmamanın asıl güvencesi.
+
+  **Transkript gelmiyorsa `../Kanal-Finans-Fetcher/youtube.md`'ye bak** — o
+  konudaki tek doğruluk kaynağı orası: ölçüm tablosu, daha önce yapılmış iki
+  yanlış teşhis (ve neden ikisinin de ikna edici göründüğü), belirti→çözüm
+  listesi. İlk adım her zaman `python diagnose_youtube.py`: dört uç noktayı
+  aynı koşuda ölçüp hüküm basıyor, çünkü bu projenin yaptığı iki yanlış
+  teşhisin ikisi de "bir uç nokta patladı, demek ki IP engelli" biçimindeydi
+  ve o ikisini ayıran tek şey uç noktaları yan yana ölçmek.
 - **`backend/kanal_finans.py`** (burada, değişti) — artık YouTube'a **hiç**
   gitmiyor. Tek işi: fetcher'ın yazdığı `kanal_finans_mentions` satırlarından
   `applied_at is null` olanları okuyup portföye uygulamak. Bu yüzden **eski
