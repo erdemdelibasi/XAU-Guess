@@ -1,12 +1,22 @@
 # Runs kanal_finans.py from THIS machine, on a Windows Task Scheduler trigger.
 #
-# Why not GitHub Actions: YouTube refuses transcript requests from Azure IP
-# ranges outright (verified in XRP-Guess, 15/15 videos on two separate manual
-# runs). The local machine is only intermittently blocked, which is better but
-# not solved -- see kanal_finans.py's module docstring, and note that this is
-# a deliberate departure from the project's otherwise serverless design. If
-# the machine is asleep at the trigger time that run is skipped; main() is
-# idempotent, so the next run catches up on its own.
+# Why here and not GitHub Actions -- and note the reason is NOT the one it
+# used to be. This script no longer touches YouTube at all; the transcript
+# fetch moved to ../Kanal-Finans-Fetcher on 2026-09-08 (see kanal_finans.py's
+# module docstring). What is left reads `kanal_finans_mentions` rows the
+# fetcher wrote and applies them, which any host could do.
+#
+# It stays local because the FETCHER is local -- YouTube refuses transcript
+# requests from Azure IP ranges outright (verified in XRP-Guess, 15/15 videos
+# on two separate manual runs), so new mentions only ever appear while this
+# machine is awake. Running the applier beside it on the same 15-minute tick
+# is what makes a fresh mention reach the portfolio within minutes; a cloud
+# cron would be waking up to find nothing new by construction.
+#
+# If the machine is asleep at the trigger time that run is skipped; main() is
+# idempotent and `applied_at is null` is the queue, so the next run catches
+# up on its own. The one thing that must NOT wait for this machine -- the
+# kanalfinans stop-loss -- is watched from predict.py's daily Actions run.
 #
 # Task Scheduler does not load a shell profile, so backend/.env is read here
 # and pushed into the process environment by hand.

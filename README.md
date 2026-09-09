@@ -94,7 +94,7 @@ GitHub Actions (cron)
 | Bileşen | Nereden | Backtest edilebilir mi |
 |---|---|---|
 | `technical` | RSI, MACD, EMA, Bollinger, Donchian (günlük) | evet |
-| `ml` | Gradient boosting, 27 özellik, 5 günlük etiket | evet |
+| `ml` | Gradient boosting, 27 (altın) / 25 (gümüş) özellik, 5 günlük etiket | evet |
 | `macro` | TIP / IEF / VIX — ölçülmüş öncü sürücüler | evet |
 | `news` | Google News RSS, metal başına ayrı sorgu ve sözlük | hayır (arşiv yok) |
 | `claude` | Claude'un bağımsız yargısı (metal başına günde 1 çağrı) | hayır |
@@ -103,6 +103,12 @@ Bileşenler **log-odds uzayında**, beyan ettikleri güvene göre değil
 **ölçülmüş sicillerine** göre havuzlanır. O metalin taban oranından (altın
 %55,7, gümüş %53,9) daha iyisini yapamamış bir bileşen otomatik olarak
 susturulur.
+
+O sicil arayüzde **Bileşen sicili** tablosunda duruyor: her bileşenin
+YÜKSELİŞ ve DÜŞÜŞ çağrıları **ayrı ayrı**, yanlarında o tarafın geçmesi
+gereken oran (YÜKSELİŞ için taban, DÜŞÜŞ için 1−taban). Tek bir isabet
+yüzdesi bu piyasada yeterli değildir — "hep yükselir" demek zaten %55
+tutturur — ve tek yönlü davranan bir bileşen tabloda açıkça işaretlenir.
 
 ### Portföyler
 
@@ -115,6 +121,13 @@ susturulur.
 | `ensemble` | Tüm sinyaller + risk kuralları |
 | `technical` / `ml` / `macro` / `claude` | Tek sinyal, tek portföy |
 | `kanalfinans` | Tunç Şatıroğlu ne derse o. Tam giriş/çıkış, zarar-kes takipli |
+
+Portföy kartlarının altında **Son işlemler** defteri var: her dolumun
+tarihi, fiyatı, miktarı, komisyonu ve gerekçesi. Bir kartın "%17 pozisyon"
+yazması, o pozisyonun dün mü üç hafta önce mi ayarlandığını söylemez;
+defter söyler. Altındaki toplam komisyon satırı da tesadüf değil —
+`backtest.py`'nin maliyet merdiveni tam olarak bu sayının stratejileri
+sıraladığını gösteriyor.
 
 ### Kanal Finans TŞ
 
@@ -228,8 +241,13 @@ python realrate.py          # gercek reel faiz vs vekil; merkez bankasi izi
 
 ### 5. Kanal Finans (isteğe bağlı, yerel, iki parça)
 
-GitHub Actions'ta çalışmaz (YouTube bulut IP'lerini engelliyor). Windows'ta,
-**iki ayrı** zamanlanmış görev gerekir:
+Windows'ta **iki ayrı** zamanlanmış görev gerekir. Yerel olmasının sebebi
+(a) şıkkıdır: YouTube transkript isteklerini bulut IP'lerinden reddediyor.
+(b) şıkkı YouTube'a hiç gitmez ve teknik olarak Actions'ta da koşabilir —
+ama yeni bir görüş zaten ancak (a) çalıştığında ortaya çıkar, yani bu
+makine uyanıkken; o yüzden ikisi yan yana durur. Bu makineyi *bekleyemeyecek*
+tek şey olan `kanalfinans` zarar-kesi, `predict.py`'nin günlük Actions
+koşusundan ayrıca izleniyor.
 
 **a) Paylaşılan çekiş** (`../Kanal-Finans-Fetcher` — bu reponun DIŞINDA,
 XRP-Guess ile paylaşılan sibling repo; ayrıntı o reponun README'si):

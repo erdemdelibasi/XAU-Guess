@@ -178,6 +178,10 @@ create index if not exists trades_asset_strategy_idx on trades (asset, strategy,
 -- nothing. ensemble.component_evidence() needs the UP and DOWN records
 -- SEPARATELY to measure a component against the base rate rather than against
 -- a coin flip -- and per ASSET, because the two base rates differ.
+-- Read by the FRONTEND as well as by predict.py: the "Bileşen sicili" table
+-- on the page renders these four counters directly, because an influence
+-- percentage cannot show that a component has said UP on 121 of 127
+-- opportunities. Public SELECT is already granted below.
 create table if not exists model_state (
     asset           text    not null,
     component       text    not null,
@@ -219,6 +223,15 @@ create table if not exists kanal_finans_videos (
 -- this, a transcript that YouTube is IP-blocking would be retried on every
 -- run against the very endpoint already refusing us -- the surest way to turn
 -- a temporary block into a lasting one.
+--
+-- NOTHING IN THIS REPO HAS WRITTEN TO IT SINCE 2026-09-08. The transcript
+-- fetch moved to Kanal-Finans-Fetcher, and the backoff moved with it -- into
+-- a LOCAL file (state/backoff.json) rather than a table, because the whole
+-- point of the split was that XAU-Guess and XRP-Guess share one counter, and
+-- two Supabase projects cannot. The table is kept rather than dropped: it is
+-- harmless, it holds whatever history it accumulated, and dropping a table
+-- that a sibling repo might still reference is not a change to make blind.
+-- If you are looking for why a video keeps failing, look in the fetcher.
 create table if not exists kanal_finans_fetch_attempts (
     video_id        text primary key,
     attempts        int not null default 0,

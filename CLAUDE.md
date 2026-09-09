@@ -144,6 +144,9 @@ farklı olabilecek her şey orada ve **her sayısı ölçülmüştür**
 | `target_volatility` | %15 | %28 | gümüş 1,86 kat oynak (ölçüldü) |
 | `fee_rate` | 5 bp | 10 bp | gümüşün spread'i fiyatının daha büyük bir oranı |
 | `leading_drivers` | tip, ief, vix | tip, vix | **`ief` gümüşü öncülemiyor** (t=2,56 vs eşik 3,29) |
+| `price_scales.macd` | 172 | 93,4 | gümüşün `macd_hist/close` p90'ı 1,84 kat büyük |
+| `price_scales.ema_cross` | 51,5 | 29,3 | aynı sebep (1,76 kat) |
+| `price_scales.sma200` | 6,5 | 3,72 | aynı sebep (1,75 kat) |
 | model dosyası | `xau_model.joblib` | `xag_model.joblib` | farklı özellik seti, değiştirilemezler |
 
 **"Varlık ekle" tek satırlık bir ayar değişikliği gibi görünüp öyle
@@ -156,6 +159,32 @@ bu ikisini kilitliyor.
 Ölçülen tablo şu: **gümüş 25 yılda altınla neredeyse aynı getiriyi
 (%11,7 vs %11,8) iki katı acıyla veriyor** — oynaklık %33,7 vs %18,1,
 maksimum düşüş %75,8 vs %44,4, al-ve-tut Sharpe'ı 0,25 vs 0,56.
+
+**Fiyat türevli ölçekler 2026-09-08'de bu tabloya taşındı ve bu bir hata
+düzeltmesidir.** `indicators.py`'nin yedi skorlayıcısından üçü fiyat türevli
+bir niceliği sıkıştırıyor ve o niceliğin dağılımı metale bağlı. Sabitler
+yalnızca altın panelinde ölçülmüştü; gümüş onları ödünç alıyordu. Sonuç,
+bu dosyanın "Ölçek sabitleri tahmin edilmez, ölçülür" bölümünde anlatılan
+**tam olarak aynı arıza**, ikinci varlık kapısından geri girmiş hâli:
+
+| | altın | gümüş (eski) | gümüş (yeni) |
+|---|---|---|---|
+| `macd` doyma | %10,6 | **%35,2** | %10,0 |
+| `macd` medyan \|skor\| | 0,388 | **0,715** | 0,382 |
+| `trend` doyma | %4,7 | %14,9 | %4,6 |
+
+Makro kaynaklı üç ölçek (`BOND_SCALE`, `VIX_SCALE`, `REAL_YIELD_SCALE`) iki
+panelde de üçüncü haneye kadar aynı çıktı — aynı serileri okuyorlar — o yüzden
+modül sabiti olarak kaldılar. Bölünmenin nerede olması gerektiğini tahmin
+etmeye gerek kalmadı, ölçüm söyledi.
+
+**Bedeli ölçüldü ve bir performans kazancı DEĞİL:** eşleştirilmiş backtest'te
+(gümüş, 4897 seans, 19,5 yıl, aynı ML yolu) Calmar `technical` için +0,002,
+`ensemble` için −0,004 oynadı, işlem sayısı değişmedi (715 → 718). Harman skoru
+zaten hiçbir ayarda doymuyordu (%0,0), çünkü yedi ağırlıklı terim aynı anda
+nadiren kırpılır — hasar **harmanın içindeki derecelendirmedeydi** ve bir Calmar
+sütunu onu göremez. Yani bu bir doğruluk düzeltmesi: sabitlerin belgelenmiş
+iddiası ("p90 ≈ 1,0") iki varlıktan biri için yanlıştı.
 
 İki incelik:
 - **Panelde varlığın kendisi makro kolonu olamaz.** `assets.macro_symbols_for`
@@ -600,6 +629,28 @@ diğerini unutmak, ekranda "ALACAK" yazarken hiçbir şey yapmayan bir sayfa ür
 AL/SAT ile çalışır (`kanal_finans_trading.decide_on_mention`), o yüzden kendi
 metnini alır.
 
+**Bileşen sicili ve işlem defteri ekranda — ikisi de zaten vardı, sadece
+görünmüyordu.** `model_state`'in dört sayacı (UP çağrı/doğru, DOWN çağrı/doğru)
+yalnızca `retrain.py`'nin gece konsolunda basılıyordu, yani kimsenin bakmadığı
+yerde; oysa bu dosyanın kendi ifadesiyle "121 çağrının 121'i UP diyen bir
+bileşen sinyal değil sabittir" ve bunu bir etki yüzdesinden göremezsiniz.
+Tablo **ham sayaçları** ve her tarafın geçmesi gereken **bilgisizlik oranını**
+(UP için taban, DOWN için 1−taban) gösteriyor; log-odds aritmetiği **bilerek**
+JS'e kopyalanmadı — havuzlanmış sonucun zaten bir sütunu var ("Etki") ve bir
+karar kuralını iki yerde tutmak `backtest.py`'nin var olma sebebinin tam tersi.
+
+İşlem defteri bedava: `trades` ortalama maliyet için zaten sayfalanarak
+**tamamen** indiriliyordu ve o hesaptan sonra atılıyordu. Cevapladığı soru
+başka hiçbir panelde yok — "sistem son zamanlarda gerçekten bir şey yaptı mı".
+Bir portföy kartı, pozisyonu dün de üç hafta önce de ayarlanmış olsa aynı
+görünür.
+
+**Sicil özeti artık örneklem küçükken hüküm vermiyor.** "Model hep-YÜKSELİŞ
+demekten iyi" cümlesi 8 satırın üzerine basıldığında bir ölçüm değil bir yazı
+turadır. Eşik 60 çözülmüş satır (~bir çeyrek), ve iki oran arasındaki fark
+2 puandan küçükse "ayırt edilebilir değil" yazıyor. Aynı disiplin:
+`research/ablation.py` negatif sonucun yanına testin gücünü yazıyor.
+
 Ayrıca: `cold_start` kolonu 2026-09-08 migration'ından **önce** yazılmış
 satırlarda NULL'dur ve o satırlar tanım gereği sicilin en eskisi, yani tam da
 soğuk başlangıç dönemidir. Bu yüzden uyarı `row.cold_start !== false` ile
@@ -759,11 +810,16 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   ile panelini kur, **`research/compare.py`'yi çalıştır** ve çıkan sayıları
   `assets.py`'ye işle. Ölçmeden sabit kopyalama. Ayrıca `supabase/schema.sql`
   içindeki `portfolios` ve `model_state` seed'lerine o varlığı ekle.
-- **Testler** (`backend/tests/`, pytest): DB'siz saf karar fonksiyonlarını
-  kapsıyor. `cd backend && python -m pytest tests/ -v`. Çoğu test bir
-  **ölçümü** kilitliyor — hangi bulguyu koruduğu docstring'inde yazılı.
-  Canlı sinyal üreten kodun testi yok; o `backtest.py` + canlı izlemeyle
-  doğrulanıyor.
+- **Testler** (`backend/tests/`, pytest): `cd backend && python -m pytest tests/ -v`.
+  Çoğu test bir **ölçümü** kilitliyor — hangi bulguyu koruduğu docstring'inde
+  yazılı. Ağ/DB gerektiren hiçbir şey yok, hepsi Actions'ta sırsız koşuyor.
+  `test_predict_flow.py` istisna gibi görünür ama değil: `run_asset`'in
+  **bağlantılarını** test ediyor, bileşenleri değil — sentetik bir panel ve
+  sahte bir Supabase ile. Sebebi, oradaki hata sınıfının başka bekçisi
+  olmaması: bir değerin yanlış tüketiciye verilmesi hiçbir istisna üretmez,
+  kod incelemesinde doğru okunur ve (kalibrasyon örneğinde) görünür hâle
+  gelmesi 180 çözülmüş satır sürer. Canlı sinyal *üreten* kodun testi hâlâ
+  yok; o `backtest.py` + canlı izlemeyle doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
   oku.** Orada ölçülüp elenmiş **on bir** hipotez duruyor — oranla ilgili
   bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve

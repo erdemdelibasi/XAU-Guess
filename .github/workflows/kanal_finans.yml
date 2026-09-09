@@ -1,19 +1,32 @@
 name: Kanal Finans
 
-# NO `schedule:` TRIGGER, deliberately.
+# NO `schedule:` TRIGGER, and the reason CHANGED on 2026-09-08 without the
+# conclusion changing -- which is worth stating, because the old reason is no
+# longer true and would mislead the next person to read it.
 #
-# YouTube refuses transcript requests from GitHub Actions' Azure IP range --
-# verified in XRP-Guess with two separate manual runs, 15 of 15 videos
-# failing with RequestBlocked each time. There is no alternate public host for
-# this the way data-api.binance.vision exists for Binance.
+# THE OLD REASON: this job fetched YouTube transcripts, and YouTube refuses
+# them from Actions' Azure IP range (verified in XRP-Guess, 15 of 15 videos
+# blocked on two separate manual runs). That is why WEBSHARE_PROXY_* used to
+# be passed in here.
 #
-# The real schedule lives on the user's own machine: Windows Task Scheduler ->
-# backend/run_kanal_finans_hidden.vbs -> run_kanal_finans.ps1, every 15
-# minutes. See backend/kanal_finans.py and CLAUDE.md.
+# WHAT CHANGED: the YouTube half moved out of this repo entirely, into
+# ../Kanal-Finans-Fetcher (a sibling repo shared with XRP-Guess, so each
+# transcript is fetched once instead of twice). backend/kanal_finans.py now
+# makes ZERO requests to YouTube -- it only reads the mentions the fetcher
+# wrote and applies them -- so this workflow would run perfectly well on a
+# cron today. The proxy secrets are gone because nothing reads them.
 #
-# This workflow is kept for manual testing, and so the migration back to a
-# cron is a one-line change if a residential proxy (WEBSHARE_PROXY_*) ever
-# becomes usable from the corporate network.
+# WHY IT STAYS MANUAL ANYWAY: new mentions only ever appear when the fetcher
+# runs, and the fetcher runs on the user's own machine because that is where
+# a residential IP is. A cloud cron would therefore wake up to apply mentions
+# that, by construction, only exist when the local machine is already awake
+# and applying them itself every 15 minutes. The one thing that genuinely
+# must not wait for that machine -- the kanalfinans stop-loss -- is watched
+# from predict.py's daily Actions run instead (kanal_finans_trading.
+# maybe_check_stop_loss), which touches only Supabase.
+#
+# So: manual trigger for testing and for catching up after the machine has
+# been off. See backend/kanal_finans.py and CLAUDE.md.
 on:
   workflow_dispatch:
 
@@ -32,15 +45,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt
 
-      - name: Fetch and extract
+      # Applies pending mentions to the paper portfolios. No YouTube, no
+      # Anthropic -- the extraction happens in Kanal-Finans-Fetcher, so the
+      # only credential this needs is the one that writes to Supabase.
+      - name: Apply pending mentions
         working-directory: backend
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Optional: a residential proxy is the only known fix for the block
-          # described above. Unset means a direct connection, which is what
-          # runs locally today.
-          WEBSHARE_PROXY_USERNAME: ${{ secrets.WEBSHARE_PROXY_USERNAME }}
-          WEBSHARE_PROXY_PASSWORD: ${{ secrets.WEBSHARE_PROXY_PASSWORD }}
         run: python kanal_finans.py
