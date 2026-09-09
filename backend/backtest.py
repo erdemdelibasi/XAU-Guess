@@ -7,9 +7,19 @@ system ends up with a backtest that passes and a live path that doesn't.
 
 WHAT THIS CAN AND CANNOT TEST
 -----------------------------
-Testable: buyhold, voltarget, trend, defensive, technical, ml, ensemble --
-everything derived from price and the macro panel, both of which have deep
-history.
+Testable: buyhold, voltarget, trend, defensive, technical, ml, macro,
+ensemble -- everything derived from price and the macro panel, both of which
+have deep history.
+
+The `ensemble` row here is NOT the live 5-signal blend under the same name in
+`trading.STRATEGIES` / the frontend's "Harman" portfolio. It is a plain
+average of `ml_score` and `tech_score` (see compute_signal_path) -- macro and
+news are excluded from the blend (macro gets its own separate row instead)
+and `claude` cannot appear at all. The live ensemble instead pools every
+component through `ensemble.combine()`, weighted by base-rate-relative
+likelihood, not a flat average. Read this row as "does a naive tech+ml blend
+plus the same risk rules beat buy-and-hold", not as a backtested track record
+for the portfolio the dashboard shows under the same name.
 
 Not testable: `claude`. Replaying a paid LLM call across 6000 historical days
 would cost real money for a signal research/edge.py already suggests is worth
@@ -214,6 +224,15 @@ SCORE_COLUMN = {
     "ml": "ml_score", "macro": "macro_score",
 }
 
+# Display-only relabelling for the report table. Printing the bare string
+# "ensemble" next to Sharpe/Calmar numbers invites reading it as a backtested
+# track record for the live 5-signal "Harman" portfolio; it is actually a
+# flat ml+technical average (see compute_signal_path and the module
+# docstring's "WHAT THIS CAN AND CANNOT TEST" section). The row name itself
+# has to carry that caveat because a reader scanning the table will not
+# necessarily reach the footer warning.
+DISPLAY_NAME = {"ensemble": "ensemble(ml+tech)"}
+
 
 def simulate(path: pd.DataFrame, fee_rate: float, asset) -> dict[str, Portfolio]:
     """Replay every strategy over `path` at one cost level."""
@@ -259,17 +278,18 @@ def run_asset(asset, panel_module) -> None:
         print("=" * 100)
         print(f"MALIYET SENARYOSU: {label}  (tek yon {one_way_bps:.0f} bp){marker}")
         print("=" * 100)
-        print(f"{'strateji':<14}{'son deger':>12}{'YBG':>9}{'oynak':>9}{'Sharpe':>9}"
+        print(f"{'strateji':<19}{'son deger':>12}{'YBG':>9}{'oynak':>9}{'Sharpe':>9}"
               f"{'maks dusus':>12}{'Calmar':>9}{'islem':>8}{'komisyon':>11}{'vs al-tut':>12}")
         for name, m in sorted(results.items(), key=lambda kv: -kv[1].get("calmar", -99)):
             if not m:
                 continue
             delta = "" if name == "buyhold" else f"{m['calmar'] - benchmark['calmar']:+.2f} Calmar"
-            print(f"{name:<14}${m['final']:>11,.0f}{100 * m['cagr']:>8.1f}%{100 * m['vol']:>8.1f}%"
+            display = DISPLAY_NAME.get(name, name)
+            print(f"{display:<19}${m['final']:>11,.0f}{100 * m['cagr']:>8.1f}%{100 * m['vol']:>8.1f}%"
                   f"{m['sharpe']:>9.2f}{100 * m['max_dd']:>11.1f}%{m['calmar']:>9.2f}"
                   f"{books[name].trades:>8}${books[name].fees_paid:>10,.0f}{delta:>12}")
 
-        beat = [n for n, m in results.items()
+        beat = [DISPLAY_NAME.get(n, n) for n, m in results.items()
                 if n != "buyhold" and m.get("calmar", -99) > benchmark["calmar"]]
         print(f"\n  Al-ve-tut'u Calmar'da gecen: {', '.join(beat) if beat else 'HICBIRI'}")
         print()
@@ -290,6 +310,13 @@ def main() -> int:
     print("  ucretli bir LLM cagrisiyla tekrar oynatmak hem pahali hem anlamsiz olurdu")
     print("  (model o tarihleri zaten biliyor); ikincisi bir insanin video arsivine bagli")
     print("  ve o arsiv tutulmuyor. Ikisi de yalnizca canli degerlendirilebilir.")
+    print()
+    print("  Tablodaki 'ensemble(ml+tech)' satiri da canlidaki 5 bilesenli 'Harman'")
+    print("  portfoyunun gecmis performansi DEGIL -- sadece ml_score ile tech_score'un")
+    print("  duz ortalamasi (macro/news disarida, claude zaten yok). Canli ensemble")
+    print("  ensemble.combine() ile taban-orana gore olabilirlik oranlariyla havuzluyor,")
+    print("  duz ortalama degil. Bu satiri 'ayni risk kurallariyla naif bir ml+teknik")
+    print("  karisimi al-ve-tut'u geciyor mu' sorusunun cevabi olarak oku.")
     print()
     print("  Buradaki hicbir sonuc 'gelecekte de boyle olur' demek degildir. Ozellikle")
     print("  al-ve-tut'un guclu gorunmesi, panelin 25 yilinin her iki metal icin de")
