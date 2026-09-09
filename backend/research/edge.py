@@ -43,14 +43,29 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from sklearn.ensemble import HistGradientBoostingClassifier  # noqa: E402
 
+import assets as assets_module  # noqa: E402
 import ml_model  # noqa: E402
 import panel as panel_module  # noqa: E402
-from indicators import build_features, technical_signal  # noqa: E402
+from indicators import GOLD_PRICE_SCALES, PriceScales, build_features, technical_signal  # noqa: E402
 
 REFIT_EVERY = 63          # ~one quarter; ~50 refits across the test half
 MIN_TRAIN_ROWS = 750      # ~3 years before the first prediction is allowed
+# Gold's ETF/CFD rung (research/wall.py): fee_rate=0.0005 one-way, 10bp round
+# trip. Kept as the default so gold's numbers here are unchanged; silver's own
+# 20bp (assets.SILVER.fee_rate) is passed explicitly in main() -- reusing
+# gold's 10bp for silver would understate its wall by exactly the margin
+# assets.py's fee_rate split exists to capture.
 ETF_ROUNDTRIP_BPS = 10
-HORIZONS = [1, 5, 20]
+# research/wall.py's break-even table sweeps [1,2,3,5,10,20,60] -- but that is
+# pure arithmetic (base rate vs. cost), no model involved. This is the one
+# place that actually walk-forward-tests whether a fitted model clears the
+# wall, and until 2026-09 it only ever checked 3 of wall.py's 7 points (the
+# ones either side of the eventual HORIZON_DAYS=5 choice). That leaves gaps
+# an honest search should not leave: no evidence either way for 2, 3, 7, 10 or
+# 15 days. 60 stays out -- MIN_TRAIN_ROWS-sized refits already leave few
+# non-overlapping windows at 20; at 60 there would be barely a handful, and
+# wall.py's arithmetic already covers it well enough as a reference point.
+HORIZONS = [1, 2, 3, 5, 7, 10, 15, 20]
 
 
 def _fit(train: pd.DataFrame, features: list[str], label: str) -> HistGradientBoostingClassifier:
@@ -113,9 +128,15 @@ def walk_forward(df: pd.DataFrame, horizon: int,
     return pd.DataFrame(rows)
 
 
-def technical_walk(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
+def technical_walk(df: pd.DataFrame, horizon: int,
+                   scales: PriceScales = GOLD_PRICE_SCALES) -> pd.DataFrame:
     """The rule-based signal over the same rows. No fitting, so no refits --
-    but it is scored on exactly the same slice for a fair comparison."""
+    but it is scored on exactly the same slice for a fair comparison.
+
+    `scales` must be the asset's OWN price scales (assets.Asset.price_scales)
+    when `df` is not gold's panel -- see indicators.py's block comment on why
+    a price-derived scale measured on one metal saturates on the other.
+    """
     future_close = df["close"].shift(-horizon)
     labels = np.where(future_close.notna(), (future_close > df["close"]).astype(float), np.nan)
 
@@ -127,7 +148,7 @@ def technical_walk(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
         # nothing else, so the two are identical in result -- but slicing a
         # growing prefix copies an ever-larger frame every iteration, which
         # made this loop quadratic (~13 GB of copying across 5500 rows).
-        signal = technical_signal(df.iloc[i : i + 1])
+        signal = technical_signal(df.iloc[i : i + 1], scales)
         rows.append({
             "time": df["time"].iloc[i], "close": df["close"].iloc[i], "label": labels[i],
             "score": signal["score"], "confidence": signal["confidence"],
@@ -137,7 +158,8 @@ def technical_walk(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
 
 
 def report(name: str, predicted_up: np.ndarray, labels: np.ndarray, horizon: int,
-           mean_move: float, proba: np.ndarray | None = None) -> dict:
+           mean_move: float, proba: np.ndarray | None = None,
+           roundtrip_bps: float = ETF_ROUNDTRIP_BPS) -> dict:
     n = len(labels)
     if n == 0:
         print(f"  {name}: veri yok")
@@ -145,7 +167,7 @@ def report(name: str, predicted_up: np.ndarray, labels: np.ndarray, horizon: int
     accuracy = float(np.mean(predicted_up == labels))
     base_up = float(np.mean(labels))
     always_up = max(base_up, 1 - base_up)
-    wall = 0.5 + ((ETF_ROUNDTRIP_BPS / 10_000.0) / 2.0) / mean_move
+    wall = 0.5 + ((roundtrip_bps / 10_000.0) / 2.0) / mean_move
 
     se = math.sqrt(0.25 / n)
     z_chance = (accuracy - 0.5) / se
@@ -172,11 +194,22 @@ def report(name: str, predicted_up: np.ndarray, labels: np.ndarray, horizon: int
     return {"accuracy": accuracy, "always_up": always_up, "wall": wall, "n": n}
 
 
-def main() -> int:
-    raw = panel_module.load().reset_index(drop=True)
-    df = build_features(raw)
+def run_for_asset(asset) -> None:
+    # `drivers` and `scales` are the asset's OWN measured values (assets.py),
+    # never gold's -- see indicators.py's block comment and assets.py's
+    # module docstring for what silently reusing gold's numbers on silver
+    # does to a scoreboard. `roundtrip_bps` is likewise the asset's own
+    # fee_rate, not gold's ETF rung: silver's spread is a wider fraction of
+    # its price (assets.SILVER.fee_rate = 0.0010 vs gold's 0.0005), so
+    # scoring it against gold's 10bp wall would understate what it actually
+    # costs to trade.
+    roundtrip_bps = asset.fee_rate * 2 * 10_000.0
+    raw = panel_module.load(asset.key).reset_index(drop=True)
+    df = build_features(raw, drivers=asset.leading_drivers)
+    print(f"\n{'#' * 78}\n### {asset.label.upper()} ({asset.symbol})\n{'#' * 78}")
     print(f"Panel: {len(df)} gun ({df['time'].iloc[0].date()} -> {df['time'].iloc[-1].date()})")
     print(f"Ozellik sayisi: {len(ml_model.available_features(df))}")
+    print(f"Maliyet duvari: {roundtrip_bps:.1f}bp gidis-donus ({asset.label}'in kendi fee_rate'i)")
     print(f"Yurüyen-ileri: her {REFIT_EVERY} gunde bir yeniden fit, ilk {MIN_TRAIN_ROWS} satir sadece egitim\n")
 
     for horizon in HORIZONS:
@@ -192,13 +225,14 @@ def main() -> int:
         ml_out = walk_forward(df, horizon)
         if not ml_out.empty:
             report("ML (gradient boosting)", (ml_out["proba_up"] >= 0.5).to_numpy().astype(float),
-                   ml_out["label"].to_numpy(), horizon, mean_move, ml_out["proba_up"].to_numpy())
+                   ml_out["label"].to_numpy(), horizon, mean_move, ml_out["proba_up"].to_numpy(),
+                   roundtrip_bps)
 
-        tech_out = technical_walk(df, horizon)
+        tech_out = technical_walk(df, horizon, asset.price_scales)
         if not tech_out.empty:
             common = tech_out[tech_out["time"].isin(ml_out["time"])] if not ml_out.empty else tech_out
             report("Teknik kural", (common["direction"] == "UP").to_numpy().astype(float),
-                   common["label"].to_numpy(), horizon, mean_move)
+                   common["label"].to_numpy(), horizon, mean_move, roundtrip_bps=roundtrip_bps)
 
             # Blend: average the two directional scores. Deliberately the
             # simplest possible combination -- anything cleverer would be a
@@ -207,17 +241,22 @@ def main() -> int:
                 merged = ml_out.merge(common[["time", "score"]], on="time", how="inner")
                 blend = (merged["proba_up"] - 0.5) * 2 + merged["score"]
                 report("Harman (ML + teknik)", (blend >= 0).to_numpy().astype(float),
-                       merged["label"].to_numpy(), horizon, mean_move)
+                       merged["label"].to_numpy(), horizon, mean_move, roundtrip_bps=roundtrip_bps)
 
         # Non-overlapping subset -- the conservative reading.
         if not ml_out.empty and horizon > 1:
             sparse = ml_out.iloc[::horizon]
             report(f"ML, ortusmesiz (her {horizon}. gun)",
                    (sparse["proba_up"] >= 0.5).to_numpy().astype(float),
-                   sparse["label"].to_numpy(), 1, mean_move, sparse["proba_up"].to_numpy())
+                   sparse["label"].to_numpy(), 1, mean_move, sparse["proba_up"].to_numpy(),
+                   roundtrip_bps)
 
         print(f"\n  ({time.time() - t0:.0f} saniye)\n")
 
+
+def main() -> int:
+    for asset in assets_module.ASSETS.values():
+        run_for_asset(asset)
     return 0
 
 
