@@ -44,6 +44,7 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 | `fedcycle.py` | Fed faiz kararları: olay, rejim ve sürpriz — üçü ayrı ayrı |
 | `realrate.py` | Gerçek reel faiz (FRED DFII10) vs TIP/IEF vekili; merkez bankası alımının ölçülebilir izi |
 | `impliedvol.py` | GVZ (altının ima edilen oynaklığı) gerçekleşen oynaklığı üretimdeki tahminciden daha iyi kestiriyor mu, ve bu Calmar'a çevrilebiliyor mu |
+| `vixterm.py` | `vix3m` `vix`'in yerini almali mi -- ML ozelligi ve makro bileseni ayri ayri, eslestirilmis A/B |
 
 ```bash
 cd backend/research
@@ -61,6 +62,7 @@ python ablation.py          # ~12 dk (16 yuruyen-ileri kosusu)
 python fedcycle.py          # ~4 dk  (FRED gerekir)
 python realrate.py          # ~6 dk  (FRED gerekir)
 python impliedvol.py        # ~30 sn (GVZ; panel yeniden kurulmus olmali)
+python vixterm.py           # ~6 dk  (vix3m vix'in yerini almali mi)
 ```
 
 `panel.py` argümansız çalıştırılınca **her iki metal için de** panel kurar
@@ -853,3 +855,66 @@ neresinde ölüyor, (c) `edge.walk_forward`'ın eşleştirilmiş A/B'sinde üret
 
 Bu, `README`'deki on iki bölümün **yön tarafında güçlü şekilde pozitif çıkan
 ilki** — ve tam da bu yüzden en şüpheli davranılması gereken bulgu.
+
+### Ek: `vix3m` `vix`'in yerini almalı mı? — hayır (`vixterm.py`)
+
+Yukarıdaki tarama beklenmedik bir yan ürün verdi: `^VIX3M` **iki metalde de**
+`vix`'ten daha yüksek t aldı (altın −3,68 vs −3,58; gümüş −4,95 vs −4,57).
+Yeni bir sürücü değil — lag profili `vix`'inkiyle aynı şekilde, işareti aynı,
+hikâyesi aynı. Makul okuma, aynı sinyalin daha az gürültüyle ölçülmüş hâli
+olmasıydı: 30 günlük ima edilen oynaklığa yakın vadede ne varsa o hâkim,
+90 günlüğe çok daha az.
+
+Yani soru "vix3m ekleyelim mi" değil, "**vix3m, vix'in yerini almalı mı**"ydı —
+ve bu bir takas, yani eşleştirilmiş A/B gerektirir.
+
+**İki tüketici ayrı ayrı test edildi**, çünkü `vix` bu sistemde iki ayrı yerde
+yaşıyor: `ml_model.FEATURE_COLUMNS`'ta bir kolon (`vix_chg`, `vix_chg5`) ve
+`macro_signal`'da ağırlıklı bir oy. Biri iyileşip diğeri kötüleşebilirdi ve
+tek bir harman sayı bunu gizlerdi.
+
+Ufuk **5 gün** (üretimde çalışan ufuk), her iki kol da ortak pencerede
+(2006-07 → 2026-09) ve **aynı satırlarda**:
+
+| varlık | kol | üretim IC | aday IC | fark | p |
+|---|---|---|---|---|---|
+| altın | ML özelliği | +0,0239 | +0,0229 | −0,0010 | 0,910 |
+| altın | makro bileşeni | +0,0412 | +0,0426 | +0,0014 | 0,771 |
+| gümüş | ML özelliği | +0,0060 | +0,0097 | +0,0038 | 0,804 |
+| gümüş | makro bileşeni | +0,0472 | +0,0471 | −0,0001 | 0,956 |
+
+**Dört hücrenin dördü de ayırt edilemiyor**, ve işaretler hücreler arasında
+çelişiyor (altın ML'de aday daha kötü, altın makroda daha iyi; gümüşte tam
+tersi). Bu, gürültünün imzasıdır.
+
+`drivers.py`'deki üstünlüğün neden çevrilmediği de açık: orada ölçülen
+**1 günlük** ham korelasyondu; burada ölçülen, üretimin fiilen kullandığı
+**5 günlük** ufukta, gerçek tüketicilerin içinden geçen katkı.
+
+**İki bedel ayrıca ölçüldü ve ikisi de takasın aleyhine:**
+
+- **Geçmiş.** `^VIX3M` 2006-07'de başlıyor, `^VIX` panelin tamamını kapsıyor.
+  Ve `ml_model.prepare_training_frame` NaN taşıyan satırı **düşürüyor** — yani
+  takas her eğitim koşusundan **1205 seansı (%19,2)** sessizce çıkarırdı.
+  Ayırt edilemeyen bir IC farkının yanında bu net bir kayıptır, ve
+  `ablation.py`'nin kendi sonucu bu projede bağlayıcı kısıtın **bağımsız
+  gözlem sayısı** olduğunu söylüyor.
+- **Ölçek.** `VIX_SCALE` sabitleri VIX'in kendi günlük değişim dağılımında
+  ölçülmüş. 3 aylık endeks tanım gereği günde daha az oynuyor: eğitim
+  yarısında p90 `vix_chg`=2,617 iken `vix3m_chg`=1,787. Ham takas, ağırlıklı
+  bir terimi 1,46 kat sessizleştirirdi — `real_yield_chg`'in üçüncü kez
+  düzeltilmesine yol açan arızanın aynısı. (Testte bu, `vix3m_chg`'i VIX'in
+  ölçeğine taşıyıp **gerçek** `_vix_score`'u değiştirmeden çalıştırarak
+  giderildi; girdi ikame edildi, kod değil.)
+
+**Testin gücü de yazılı:** bu örneklemin sıfırdan ayırt edebileceği en küçük
+IC 0,0879, ölçülen farklar ise 0,001-0,004. Yani çalışma "fark yok" demiyor,
+"**varsa bu örneklemin göremeyeceği kadar küçük**" diyor — ve %19,2 geçmiş
+kaybı karşılığında alınacak bir şey değil.
+
+Tek üretim değişikliği bir doğruluk düzeltmesi oldu: `indicators.LEVEL_SERIES`.
+Seviye serilerinin farkı, fiyat serilerinin getirisi alınır; bu ayrım daha önce
+`("vix", "us10y")` diye gömülü bir listeydi, yani `vix3m` istense **yüzde
+değişimi** hesaplanırdı — bir oynaklık endeksinin yüzde değişimi başka bir
+niceliktir ve VIX için ölçülmüş bir sabitle puanlanırdı. Üretimin gördüğü
+kolonlar değişmedi (altın 27, gümüş 25 özellik).

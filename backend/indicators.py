@@ -188,6 +188,18 @@ GOLD_PRICE_SCALES = PriceScales(macd=172.0, ema_cross=51.5, sma200=6.5)
 # gratuitously incompatible and their feature-count guards asymmetric.
 CONTEXT_DRIVERS = ("dxy", "us10y", "silver", "gold", "spx")
 
+# Series quoted as a LEVEL in points or percent, where the change is a
+# difference rather than a return. Getting this wrong is not a rounding error:
+# the percentage change of a volatility index is a different quantity with a
+# different distribution, and it would be scored by a constant measured for
+# the other one. This project has already paid for that mistake once, in
+# `real_yield_chg`'s unit mismatch -- see the block above BOND_ETF_DURATION_YEARS.
+#
+# `vix3m` is listed even though nothing in production reads it yet, because a
+# candidate driver measured with the wrong transform is measured wrong (see
+# research/vixterm.py).
+LEVEL_SERIES = ("vix", "vix3m", "us10y", "us5y", "us30y", "gvz", "move")
+
 
 def add_indicator_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Append price-derived indicator columns to a daily OHLCV frame."""
@@ -256,7 +268,7 @@ def add_macro_columns(df: pd.DataFrame, drivers: tuple[str, ...] = LEADING_DRIVE
     for name in tuple(drivers) + CONTEXT_DRIVERS:
         if name not in out.columns:
             continue
-        if name in ("vix", "us10y"):
+        if name in LEVEL_SERIES:
             # Already a level in percent/points -- a difference is the change.
             out[f"{name}_chg"] = out[name].diff()
             out[f"{name}_chg5"] = out[name].diff(5)

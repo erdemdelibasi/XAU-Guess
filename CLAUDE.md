@@ -397,6 +397,25 @@ gün altın için **kötü**, aynı gün ilişkisi ise sıfır. Standart açıkl
 zorunlu likidasyon. `indicators._score_vix` negatif işaretli; "güvenli
 liman" sezgisiyle düzeltmeye kalkma, ölçüm bunu söylüyor.
 
+**`vix3m` denendi ve `vix`'in yerini ALMADI.** 2026-09-10'daki aday
+taramasında `^VIX3M` iki metalde de `vix`'ten yüksek t aldı (altın −3,68 vs
+−3,58; gümüş −4,95 vs −4,57) — aynı şekil, aynı işaret, daha az gürültülü bir
+ölçüm gibi duruyordu. `research/vixterm.py` takası **iki tüketici için ayrı
+ayrı** sınadı (ML özelliği ve `macro_signal`'ın oyu), üretimin gerçek 5 günlük
+ufkunda ve ortak pencerede: **dört hücrenin dördü de ayırt edilemedi**
+(p=0,77..0,96) ve işaretler hücreler arasında çelişti. `drivers.py`'deki
+üstünlük 1 GÜNLÜK ham korelasyondu; 5 günde, gerçek tüketicilerin içinden
+geçince kalmıyor. Üstelik takasın iki bedeli var: `^VIX3M` 2006'da başlıyor ve
+`prepare_training_frame` NaN satırı düşürdüğü için her eğitimden **%19,2
+seans** silinirdi, ve `VIX_SCALE` VIX'in kendi dağılımında ölçülü olduğu için
+ham takas ağırlıklı bir terimi 1,46 kat sessizleştirirdi.
+
+> Bundan çıkan tek üretim değişikliği `indicators.LEVEL_SERIES` oldu: seviye
+> serilerinin **farkı**, fiyat serilerinin **getirisi** alınır ve bu ayrım
+> `("vix", "us10y")` diye gömülü bir listeydi. Bir aday seriyi yanlış
+> dönüşümle ölçmek onu ölçmemektir — `real_yield_chg`'in birim tutarsızlığının
+> aynı ailesi. Üretimin gördüğü kolonlar değişmedi.
+
 ### Ölçek sabitleri tahmin edilmez, ölçülür
 
 `indicators.py`'deki yedi skorlayıcının hepsi bir ham büyüklüğü −1..1'e
