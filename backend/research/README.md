@@ -45,6 +45,7 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 | `realrate.py` | Gerçek reel faiz (FRED DFII10) vs TIP/IEF vekili; merkez bankası alımının ölçülebilir izi |
 | `impliedvol.py` | GVZ (altının ima edilen oynaklığı) gerçekleşen oynaklığı üretimdeki tahminciden daha iyi kestiriyor mu, ve bu Calmar'a çevrilebiliyor mu |
 | `vixterm.py` | `vix3m` `vix`'in yerini almali mi -- ML ozelligi ve makro bileseni ayri ayri, eslestirilmis A/B |
+| `pooled.py` | Bağlayıcı kısıt gözlem sayısıysa: iki metali havuzlayıp eğitmek IC'yi artırıyor mu — üç kollu (üretim / normalleştirilmiş / havuz) |
 
 ```bash
 cd backend/research
@@ -63,6 +64,7 @@ python fedcycle.py          # ~4 dk  (FRED gerekir)
 python realrate.py          # ~6 dk  (FRED gerekir)
 python impliedvol.py        # ~30 sn (GVZ; panel yeniden kurulmus olmali)
 python vixterm.py           # ~6 dk  (vix3m vix'in yerini almali mi)
+python pooled.py            # ~25 dk (havuzlanmis cok-varlikli egitim)
 ```
 
 `panel.py` argümansız çalıştırılınca **her iki metal için de** panel kurar
@@ -918,3 +920,112 @@ Seviye serilerinin farkı, fiyat serilerinin getirisi alınır; bu ayrım daha �
 değişimi** hesaplanırdı — bir oynaklık endeksinin yüzde değişimi başka bir
 niceliktir ve VIX için ölçülmüş bir sabitle puanlanırdı. Üretimin gördüğü
 kolonlar değişmedi (altın 27, gümüş 25 özellik).
+
+---
+
+## 13. Bağlayıcı kısıta saldırı: havuzlanmış çok-varlıklı eğitim (`pooled.py`)
+
+9. bölümün sonucu bu deponun en çok alıntılanan ama en az üzerine gidilen
+cümlesiydi: **"çözüm daha çok özellik değil, daha çok bağımsız gözlem."**
+Ondan sonraki her hipotez — GVZ ve GDX dahil — yine **özellik** tarafındaydı.
+Bu bölüm kısıtın kendisine bakıyor.
+
+Aritmetik ölçüldü, varsayılmadı: altın 5706, gümüş 5707 eğitilebilir satır.
+5 günlük ufukta örtüşme yüzünden etkin bağımsız gözlem varlık başına ~1141;
+havuzlanınca ~2282. Tespit tabanı **0,0895 → 0,0634**.
+
+### Ön şart: özelliklerin 10'u varlık ölçeğine bağlıydı
+
+Havuzlanmış bir ağaç ancak bir eşik iki metalde aynı şeyi ifade ediyorsa
+bölebilir. p90 |değer| oranı (gümüş/altın):
+
+| uyuşan | oran | UYUŞMAYAN | oran |
+|---|---|---|---|
+| `rsi14`, `bb_pct`, `donchian_pct`, `vol_ratio` | 0,98-1,02 | `macd_hist` | **0,03** |
+| tüm makro kolonlar | **1,00** | `ema9_21`, `px_sma200`, `px_ema50` | 1,74-1,79 |
+| | | `return_1d/5d/20d/60d` | 1,81-1,84 |
+| | | `vol_20d` | 1,93 |
+| | | `counterpart_chg` | 0,55 |
+
+Uyuşmayanlar **tek bir sayıyla** ayrışıyor (~1,8) ve o sayı `assets.py`'nin
+zaten ölçtüğü "gümüş 1,86 kat oynak"tır. `macd_hist` ise 0,03, çünkü ham fiyat
+biriminde (altın ~$4400, gümüş ~$66) — bugün zararsız çünkü her metalin kendi
+modeli var, havuzda ölümcül.
+
+Bu yüzden havuz özellik seti her fiyat türevli kolonu o varlığın **kendi**
+kayan oynaklığına (`vol_60d`) bölüyor. **Bu, `assets.py`'nin kuralını
+çiğnemiyor, uyguluyor**: yasak olan altının sayısını gümüşe kopyalamak; burada
+yapılan her varlığı kendi ölçüsüyle ortak zemine taşımak.
+
+**Varlık kimliği bilerek özellik yapılmadı.** Ağacın ondan öğreneceği ilk şey
+"altınsa daha çok YUKARI de" olurdu — yani 9. bölümün "öğrenilebilir olan tek
+şey" dediği taban oranı havuzun içine geri sokmak.
+
+### Üç kol, ve ortadaki pazarlık konusu değil
+
+| kol | özellikler | eğitim verisi |
+|---|---|---|
+| A | üretim | sadece hedef |
+| B | normalleştirilmiş | sadece hedef |
+| C | normalleştirilmiş | hedef + diğer metal |
+
+B olmadan C−A farkı "havuzlama" ile "normalleştirme"yi karıştırırdı.
+
+| hedef | kol | n | IC | t | isabet |
+|---|---|---|---|---|---|
+| altın | A üretim/tek | 4893 | +0,0596 | +1,87 | %51,99 |
+| altın | B normal/tek | 4892 | **+0,1040** | **+3,27** | %51,94 |
+| altın | C normal/HAVUZ | 4892 | +0,0713 | +2,23 | %50,96 |
+| gümüş | A üretim/tek | 4894 | −0,0160 | −0,50 | %50,88 |
+| gümüş | B normal/tek | 4892 | +0,0065 | +0,20 | %50,37 |
+| gümüş | C normal/HAVUZ | 4892 | +0,0046 | +0,14 | %51,10 |
+
+Eşleştirilmiş karşılaştırmalar (aynı satırlar, örtüşme düzeltmeli):
+
+| soru | altın | gümüş |
+|---|---|---|
+| B vs A (normalleştirme zarar mı) | +0,0444, p=0,122 | +0,0225, p=0,423 |
+| **C vs B (HAVUZLAMA ekliyor mu)** | **−0,0327, p=0,101** | **−0,0019, p=0,937** |
+| C vs A (paket üretimi geçiyor mu) | +0,0117, p=0,826 | +0,0206, p=0,529 |
+
+### Cevap: havuzlama eklemedi
+
+Asıl soruda işaret **iki metalde de negatif** (altında −0,033, gümüşte
+−0,002). Yani 2 kat gözlem IC'yi artırmadı; altında düşürdü.
+
+**Ve "modeli aç bıraktık" mazereti önceden kapatıldı.** Havuz kolu 2 kat
+veriyle eğitiliyor ama kapasitesi `hyperparams.py`'de **sadece altın**
+üzerinde seçilmişti. Tek bir ön-kayıtlı teşhis koşusu (arama değil,
+`max_depth=4`) her iki metalde de **kötüleştirdi**: altın +0,0713 → +0,0609
+(p=0,965), gümüş +0,0046 → +0,0042 (p=0,985). Havuzun başarısızlığı bir
+kapasite sorunu değil.
+
+Doğru okuma: **9. bölümün "daha çok gözlem" tezi 2x'te doğrulanmadı.** Bu
+tezi çürütmüyor — tespit tabanı 0,063'e indi ama ölçülen farklar hâlâ onun
+çok altında — ama "sadece daha fazla satır ver" biçiminin işe yaramadığını
+söylüyor. Gümüşün satırları altın hakkında yeni bir şey öğretmiyor; iki metal
+zaten aynı gün r=+0,78 hareket ediyor, yani **bağımsız gözlem eklemiyorlar,
+büyük ölçüde aynı gözlemi tekrar ediyorlar.** Bu, ölçülmeden önce görülebilir
+bir itirazdı ve şimdi sayısı var.
+
+### Beklenmedik yan bulgu: normalleştirmenin kendisi (ve neden yine de alınmadı)
+
+Altında B kolu, IC'yi +0,0596'dan **+0,1040**'a çıkardı — t=+3,27, yani hem
+çoklu-test eşiğini (2,807) hem de tespit tabanını (0,0895) **tek başına**
+geçiyor, ve bu deponun altında ölçtüğü en yüksek IC.
+
+Yine de üretime alınmadı, iki ayrı sebeple ve ikisi de yeterli:
+
+1. **Eşleştirilmiş fark anlamlı değil** (p=0,122). B'nin IC'sinin sıfırdan
+   ayrılması ile B'nin A'dan ayrılması **farklı iki sorudur**; ikincisi
+   geçmedi.
+2. **Gümüşte tekrar etmiyor** (+0,0065, t=+0,20). Bir metalde çıkıp diğerinde
+   çıkmayan sonuç `gs_ratio_z`'nin çelişkisiyle aynı kategoridedir.
+
+Ayrıca gümüş için B kolu yalnızca normalleştirmeyi değil, sürücü
+**birleşimini** de taşıyor (`ief_chg` gümüşün üretim setinde yok, havuz tek
+bir ortak özellik vektörü gerektiriyor) — yani o hücrede B vs A saf bir
+normalleştirme testi bile değil. C vs B ikisinden de arınmış.
+
+**Bu, ileride güçlü bir örneklemle tekrar sorulmaya değer tek açık uçtur.**
+Ama p=0,12 ve tek metal, bu tezgâhta bir karar değildir.

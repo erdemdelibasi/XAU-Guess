@@ -85,19 +85,30 @@ def _fit(train: pd.DataFrame, features: list[str], label: str,
 def walk_forward(df: pd.DataFrame, horizon: int,
                  features: list[str] | None = None,
                  label_values: pd.Series | np.ndarray | None = None,
-                 estimator_factory: Callable[[], HistGradientBoostingClassifier] | None = None) -> pd.DataFrame:
+                 estimator_factory: Callable[[], HistGradientBoostingClassifier] | None = None,
+                 extra_training_frames: list[pd.DataFrame] | None = None) -> pd.DataFrame:
     """Out-of-sample probability for every row the walk-forward can reach.
 
-    `features`, `label_values` and `estimator_factory` all default to what
-    production uses. They are parameters only so research/ratio.py and
-    research/ablation.py can vary exactly one feature/label choice, and
-    research/hyperparams.py exactly one hyperparameter set, against an
+    `features`, `label_values`, `estimator_factory` and `extra_training_frames`
+    all default to what production uses. They are parameters only so
+    research/ratio.py and research/ablation.py can vary exactly one
+    feature/label choice, research/hyperparams.py exactly one hyperparameter
+    set, and research/pooled.py exactly one training population, against an
     identical refit schedule and identical rows. Running variants through two
     different walk-forward implementations would measure the implementations.
 
     `label_values` must already be aligned to `df` and must be NaN wherever
     the outcome is unknown -- see build_feature_frame on why an unknown label
     must never quietly become a False.
+
+    `extra_training_frames` carries OTHER assets' rows into the training set
+    and nowhere else. Nothing about which rows get predicted, when the model
+    refits, or where the block boundaries fall changes, so a pooled arm and a
+    single-asset arm are scored on exactly the same rows -- which is what makes
+    "did pooling help" a paired question rather than two separate studies.
+    Each extra frame is cut at the SAME moment the target's own training set
+    is cut (see the leak note in the loop); applying a weaker rule to the other
+    asset would leak its future in through a side door.
     """
     label = "label_up"
     if label_values is None:
@@ -110,6 +121,18 @@ def walk_forward(df: pd.DataFrame, horizon: int,
         features = ml_model.available_features(df)
     factory = estimator_factory or ml_model.build_estimator
     usable = df.dropna(subset=features + [label]).reset_index(drop=True)
+
+    # Prepared once, outside the loop: each extra frame gets the same label
+    # construction and the same NaN drop the target frame just got, so a pooled
+    # training set is not quietly a differently-cleaned one.
+    extra_pool = []
+    for frame in extra_training_frames or []:
+        pooled = frame.copy()
+        if label not in pooled.columns:
+            future = pooled["close"].shift(-horizon)
+            pooled[label] = np.where(
+                future.notna(), (future > pooled["close"]).astype(float), np.nan)
+        extra_pool.append(pooled.dropna(subset=features + [label]).reset_index(drop=True))
 
     rows = []
     start = MIN_TRAIN_ROWS
@@ -125,6 +148,14 @@ def walk_forward(df: pd.DataFrame, horizon: int,
         if len(train) < MIN_TRAIN_ROWS:
             start = stop
             continue
+        # The warmup test above deliberately counts the TARGET's rows only.
+        # Letting a pooled arm start earlier because another asset had already
+        # supplied enough rows would change the refit schedule, and then the
+        # two arms would no longer be predicting the same days.
+        if extra_pool:
+            cutoff = train["time"].max()
+            train = pd.concat([train] + [f[f["time"] <= cutoff] for f in extra_pool],
+                              ignore_index=True)
         model = _fit(train, features, label, factory)
         block = usable.iloc[start:stop]
         proba = model.predict_proba(block[features])[:, 1]

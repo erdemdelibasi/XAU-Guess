@@ -276,6 +276,22 @@ diyebiliyor, "IC = 0" **diyemiyor**. Doğru okuma "burada bir şey yok" değil,
 "büyük bir şey yok; küçük bir şey varsa 25 yıllık günlük veri onu
 kanıtlayamaz". Çözüm daha çok özellik değil, **daha çok bağımsız gözlem**.
 
+**Ve "daha çok gözlem" 2x'te denendi — işe yaramadı** (`research/pooled.py`).
+Altın ve gümüş havuzlanıp tek modelde eğitildi (etkin bağımsız gözlem ~1141 →
+~2282, tespit tabanı 0,0895 → 0,0634). Havuzlamanın katkısı **iki metalde de
+negatif** (altın −0,033 p=0,101, gümüş −0,002 p=0,937), ve "kapasiteyi aç
+bıraktık" mazereti ön-kayıtlı bir teşhisle kapatıldı (`max_depth=4` ikisini de
+kötüleştirdi). Sebep muhtemelen basit: **iki metal aynı gün r=+0,78 hareket
+ediyor**, yani gümüşün satırları bağımsız gözlem eklemiyor, büyük ölçüde aynı
+gözlemi tekrarlıyor. Tez çürümedi, ama "sadece daha fazla satır ver" biçimi
+çürüdü — gereken şey *bağımsız* gözlem, ve ikinci bir metal onu vermiyor.
+
+> Aynı çalışmanın yan bulgusu açık uçlu duruyor: fiyat türevli özellikleri
+> varlığın kendi oynaklığına bölmek altında IC'yi +0,0596'dan **+0,1040**'a
+> çıkardı (t=+3,27, tespit tabanının üstünde). Alınmadı, çünkü eşleştirilmiş
+> fark anlamlı değil (p=0,122) **ve** gümüşte tekrar etmiyor (+0,0065). Bu
+> tezgâhta bir metalde çıkıp diğerinde çıkmayan sonuç benimsenmez.
+
 ### Taban oran her yere sızar ve düzeltilmezse her şeyi bozar
 
 Altın %55,7, gümüş %53,9 ihtimalle yükseliyor. XRP ~%50/%50 bir yazı-turaydı.
@@ -938,10 +954,11 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   gelmesi 180 çözülmüş satır sürer. Canlı sinyal *üreten* kodun testi hâlâ
   yok; o `backtest.py` + canlı izlemeyle doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
-  oku.** Orada ölçülüp elenmiş **on iki** hipotez duruyor — oranla ilgili
+  oku.** Orada ölçülüp elenmiş **on üç** hipotez duruyor — oranla ilgili
   bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve
   merkez bankası alımıyla ilgili olan 11. bölümde, yeni bir veri kaynağı
-  eklemekle ilgili olan 12. bölümde büyük ihtimalle zaten var.
+  eklemekle ilgili olan 12. bölümde, "daha çok veriyle eğitelim" ile ilgili
+  olan 13. bölümde büyük ihtimalle zaten var.
 - **Yeni bir seri denemek isteyince `fetch_data.MACRO_SYMBOLS`'e EKLEME.**
   O sözlük canlı yolu da besliyor (`predict.py` her koşuda her girdiyi
   çekiyor), yani kapıdan geçmemiş bir seri oraya konunca günlük bir istek ve
