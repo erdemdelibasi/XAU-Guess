@@ -1254,3 +1254,86 @@ Mevcut bir test bu işi yaparken **gerçek bir hata yakaladı**:
 `test_daily_report.test_every_portfolio_that_exists_is_reported` kırmızı
 yandı — yeni portföy günlük mailden sessizce düşecekti. Tam olarak o testin
 var olma sebebi.
+
+---
+
+## 15. Sabit komisyon: cevabı sinyal değil, hesap büyüklüğü belirliyor (`backtest.py`)
+
+Bu depodaki her maliyet sayısı **baz puan** cinsindeydi, yani işlem büyüklüğüyle
+orantılı. Gerçek bir ETF aracı kurumu ise çoğu zaman **işlem başına sabit dolar**
+alır, ve bu bambaşka bir şeklin maliyetidir: oransal ücret hesap büyüklüğüne
+görünmezdir, sabit ücret ise **başka hiçbir şeye** bağlı değildir.
+
+`backtest.Portfolio.step` artık isteğe bağlı bir `flat_fee` alıyor (varsayılan
+0,0, yani yukarıdaki hiçbir sayı değişmedi) ve `flat_fee_ladder()` bunu
+**işlem başına $1,50 + 1 bp makas** ile hesap büyüklüğüne karşı süpürüyor.
+
+**Süpürmenin neden tam olduğu:** bu simülasyonda sabit ücret dışındaki her şey
+ölçek-değişmezdir — yeniden dengeleme kararı bir **oran** okur, işlem
+büyüklükleri defterin bir kesridir, oransal ücret işlemin bir kesridir.
+Dolayısıyla $N nakitle ve $1,50 ücretle koşmak, standart $1000'lık defteri
+$1,50 × 1000/N ücretle koşmakla **birebir aynıdır**. Kod ücreti süpürüyor,
+başlangıç nakdini değil, böylece her özkaynak eğrisi raporun geri kalanıyla
+aynı birimde kalıyor.
+
+### Altın, 19,5 yıl, Calmar
+
+| strateji | $1.000 | $5.000 | $25.000 | $100.000 | $500.000 |
+|---|---|---|---|---|---|
+| **`miners`** | **İFLAS** | 0,235 | **0,350** | **0,370** | **0,375** |
+| `macro` | **İFLAS** | 0,186 | 0,257 | 0,270 | 0,273 |
+| `voltarget` | 0,216 | 0,237 | 0,241 | 0,242 | 0,242 |
+| `ml` | 0,172 | 0,231 | 0,243 | 0,245 | 0,246 |
+| **`buyhold`** | **0,231** | 0,231 | 0,231 | 0,231 | 0,231 |
+| `technical` | 0,118 | 0,215 | 0,232 | 0,236 | 0,237 |
+| *efektif bp (tek yön)* | *170,6* | *11,7* | *2,6* | *1,4* | *1,1* |
+
+Gümüş aynı şekli veriyor: `miners` $1.000'de iflas, $5.000'de 0,197 (al-tut
+0,115), $25.000'de 0,254.
+
+**`buyhold` her sütunda aynı** — bir kez işlem yapıyor, yani komisyon ona
+dokunmuyor. Kıyas ölçütünün sabit kalması bu tablonun okunabilmesinin sebebi.
+
+### İki tuzak, ikisi de ölçülerek yakalandı
+
+**1. `nan` bir veri eksikliği değil, bir iflastır.** Sabit ücret bir defteri
+**eksiye** düşürebilir — küçük bir satışta $1,50 gelirin kendisini aşar — ve
+hiçbir oransal basamak bunu yapamaz. `metrics()` orada `nan` döndürüyordu
+(negatif bir oranın kesirli kuvveti) ve `nan` basmak, silinmiş bir hesabı
+"veri yok" diye raporlamak olurdu. `BUST` sentinel'i bunun için var, ve
+`nan`-güvenli `_beats()` olmadan tablo "`miners` hiçbir yerde geçmiyor"
+diyordu — geçtiği apaçık görünürken.
+
+**2. Sezgisel bp çevirisi YANLIŞ, ve üç kat yanlış.** $1,50'yi mümkün olan
+**en küçük** işleme bölmek cazip: `REBALANCE_THRESHOLD` %5, yani $5.000'lik
+hesapta en küçük işlem $250, $1,50/$250 = 60 bp. Bu hesaba göre `miners`
+$5.000'de al-ve-tut'a **kaybetmeliydi** (oransal merdivende 20 bp tek yönde
+kaybediyor). Ölçüldüğünde efektif maliyet **11,7 bp**. Sebep: işlemler o
+tabanda kalmıyor — pozisyon 0,70 ile 1,00 arasında salınıyor **ve defter
+19,5 yılda bileşikleniyor**, yani geç işlemler çok daha büyük. Tablo bu yüzden
+efektif bp'yi kendisi basıyor: okuyucunun bu çıkarımı yapmasına bırakılamaz.
+
+### Doğrulama: iki merdiven aynı yerde buluşuyor
+
+$500.000'de efektif maliyet 1,1 bp, yani neredeyse maliyetsiz — ve oradaki
+`miners` Calmar'ı **0,375**, oransal merdivenin COMEX 2bp basamağındaki
+**0,38** ile aynı. İki bağımsız maliyet modeli aynı sınıra yakınsıyor;
+yakınsamasaydı biri hatalı olurdu.
+
+### Sonuç
+
+**Bu bir sinyal eşiği değil, bir hesap büyüklüğü eşiğidir.** Aynı sinyal,
+aynı 3225 işlem, aynı 19,5 yıl:
+
+- **$1.000** — komisyon defteri yiyor, **iflas**. `macro` da aynı kaderi
+  paylaşıyor; ikisi de bu sistemin en çok işlem yapan stratejileri.
+- **$5.000** — kıl payı geçiyor (0,235 vs 0,231). Alınmaya değmez.
+- **$25.000** — net (0,350 vs 0,231).
+- **$100.000+** — maliyetsiz sınıra oturuyor.
+
+Ve buradan çıkan asıl iş sinyali iyileştirmek değil: `miners` yılda **165 kez**
+işlem yapıyor ve bu sayının kendisi ölçülmüş bir tercih değil,
+`REBALANCE_THRESHOLD = 0,05`'in yan ürünü. Maliyet-farkında bir yeniden
+dengeleme eşiği — işlem beklenen kazancından pahalıysa işlem yapma — bu
+tablonun tamamını sola kaydırırdı. Ölçülmedi, ve ölçülene kadar iddia
+edilmiyor.

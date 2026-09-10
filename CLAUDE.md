@@ -553,7 +553,7 @@ ama `trading.VOL_LOOKBACK_DAYS` 60. Yani canlıdan **farklı, daha gürültülü
 bir strateji test ediliyordu — kolon adının içine saklanmış bir sapma.
 Düzeltince `voltarget` 440 işlemden **158'e** düştü ve Calmar 0,22→0,24.
 
-### Maliyet tek bir sayı değil
+### Maliyet tek bir sayı değil -- ve hepsi oransal da değil
 
 `backtest.py` dört senaryoyu birden basar (2/10/40/150 bp gidiş-dönüş).
 Fark belirleyici: ETF maliyetinde `voltarget`, `technical`, `ml` ve `macro`
@@ -561,6 +561,26 @@ al-ve-tut'u Calmar'da geçiyor; **banka gram altın maliyetinde (150 bp)
 hiçbiri geçmiyor.** `macro` bileşeni bunun en net örneği — 19,5 yılda 2288
 işlem yapıyor, 2 bp'de Calmar 0,27 (al-ve-tut 0,23), 150 bp'de 0,03.
 Gerçek bir sinyal, üzerine para koymanın pahalı olduğu bir sinyal.
+
+**Ve bu merdivenin tamamı ORANSAL maliyettir; gerçek bir ETF aracı kurumu
+çoğu zaman işlem başına sabit dolar alır.** Bu bambaşka bir şekildir: oransal
+ücret hesap büyüklüğüne görünmezdir, sabit ücret ise başka hiçbir şeye bağlı
+değildir. `backtest.flat_fee_ladder` işlem başına $1,50'yi hesap büyüklüğüne
+karşı süpürüyor ve cevap bir **hesap büyüklüğü eşiği**: `miners` ve `macro`
+$1.000'lik defteri **iflas ettiriyor** (efektif 170 bp tek yön), $25.000'de
+al-ve-tut'u net geçiyor (0,350 vs 0,231), $500.000'de maliyetsiz sınıra
+oturuyor. Süpürme tamdır çünkü sabit ücret dışındaki her şey ölçek-değişmezdir
+-- $N nakit + $1,50 ücret, standart $1000'lık defter + $1,50×1000/N ücretle
+birebir aynıdır.
+
+**Sabit ücreti sezgiyle baz puana çevirme, üç kat yanılırsın.** $1,50'yi
+mümkün olan en küçük işleme (`REBALANCE_THRESHOLD` × defter) bölmek $5.000'de
+60 bp verir; ölçülen **11,7 bp**'dir, çünkü işlemler o tabanda kalmaz ve
+defter bileşiklenir. `flat_fee_ladder` efektif bp'yi kendisi basıyor.
+Ayrıca sabit ücret bir defteri **eksiye** düşürebilir (küçük bir satışta ücret
+gelirin kendisini aşar); `metrics()` orada `nan` döndürür ve onu basmak
+silinmiş bir hesabı "veri yok" diye raporlamak olur -- `BUST` sentinel'i ve
+`_beats()` bunun için var. `research/README.md` 15. bölüm.
 
 ### Claude bileşeni backtest edilemez
 
@@ -1000,12 +1020,12 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   gelmesi 180 çözülmüş satır sürer. Canlı sinyal *üreten* kodun testi hâlâ
   yok; o `backtest.py` + canlı izlemeyle doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
-  oku.** Orada ölçülüp elenmiş **on dört** hipotez duruyor — oranla ilgili
+  oku.** Orada ölçülüp elenmiş **on beş** hipotez duruyor — oranla ilgili
   bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve
   merkez bankası alımıyla ilgili olan 11. bölümde, yeni bir veri kaynağı
   eklemekle ilgili olan 12. bölümde, "daha çok veriyle eğitelim" ile ilgili
-  olan 13. bölümde, altın madencileriyle ilgili olan 14. bölümde büyük
-  ihtimalle zaten var.
+  olan 13. bölümde, altın madencileriyle ilgili olan 14. bölümde,
+  komisyon/hesap büyüklüğüyle ilgili olan 15. bölümde büyük ihtimalle zaten var.
 - **Yeni bir seri denemek isteyince `fetch_data.MACRO_SYMBOLS`'e EKLEME.**
   O sözlük canlı yolu da besliyor (`predict.py` her koşuda her girdiyi
   çekiyor), yani kapıdan geçmemiş bir seri oraya konunca günlük bir istek ve

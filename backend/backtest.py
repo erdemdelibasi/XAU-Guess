@@ -93,18 +93,27 @@ class Portfolio:
     def value(self, price: float) -> float:
         return self.cash + self.ounces * price
 
-    def step(self, price: float, target: float, fee_rate: float) -> None:
+    def step(self, price: float, target: float, fee_rate: float,
+             flat_fee: float = 0.0) -> None:
+        """One session. `flat_fee` is a per-trade charge in DOLLARS.
+
+        Defaults to 0.0, so every existing caller and every number already in
+        research/README.md is unchanged. It exists because a proportional fee
+        and a flat one are not the same shape of cost and the difference is
+        not a detail: a percentage fee is invisible to account size, a flat
+        one is a function of nothing else. See flat_fee_ladder().
+        """
         decision = trading.compute_rebalance(self.cash, self.ounces, price, target)
         if decision["action"] == "BUY":
             gross = decision["usd_amount"]
-            fee = gross * fee_rate
+            fee = gross * fee_rate + flat_fee
             self.cash -= gross
             self.ounces += (gross - fee) / price
             self.trades += 1
             self.fees_paid += fee
         elif decision["action"] == "SELL":
             gross = decision["ounce_amount"] * price
-            fee = gross * fee_rate
+            fee = gross * fee_rate + flat_fee
             self.cash += gross - fee
             self.ounces -= decision["ounce_amount"]
             self.trades += 1
@@ -243,7 +252,8 @@ SCORE_COLUMN = {
 DISPLAY_NAME = {"ensemble": "ensemble(ml+tech)"}
 
 
-def simulate(path: pd.DataFrame, fee_rate: float, asset) -> dict[str, Portfolio]:
+def simulate(path: pd.DataFrame, fee_rate: float, asset,
+             flat_fee: float = 0.0) -> dict[str, Portfolio]:
     """Replay every strategy over `path` at one cost level."""
     books = {s: Portfolio(s) for s in trading.STRATEGIES if s != "claude"}
     for _, row in path.iterrows():
@@ -256,9 +266,155 @@ def simulate(path: pd.DataFrame, fee_rate: float, asset) -> dict[str, Portfolio]
                 name, price, row["sma200"], row["vol"], direction, abs(score),
                 asset.target_volatility,
             )
-            book.step(price, target, fee_rate)
+            book.step(price, target, fee_rate, flat_fee)
     return books
 
+
+# Sentinel for a book that went to zero or below. Distinct from nan, which
+# would read as "no data" for what is actually a definite and severe result.
+BUST = object()
+
+
+def _beats(value, reference) -> bool:
+    """Comparison that treats BUST and nan as "no", not as "unknown"."""
+    if value is BUST or reference is BUST:
+        return value is not BUST and reference is BUST
+    return bool(np.isfinite(value) and np.isfinite(reference) and value > reference)
+
+
+FLAT_FEE_USD = 1.50
+# A liquid gold ETF's bid/ask is not zero even when the commission is flat, so
+# the spread is carried alongside rather than pretended away. 1 bp one-way is
+# COST_LADDER_BPS' cheapest rung; it is an ASSUMPTION, unlike the commission,
+# and it is small enough that the flat fee dominates every line below.
+FLAT_FEE_SPREAD_BPS = 1.0
+
+# Account sizes to price the flat fee against. $1000 is what every other
+# number in this file assumes (trading.STARTING_CASH).
+ACCOUNT_SIZES = (1_000, 5_000, 25_000, 100_000, 500_000)
+
+
+def flat_fee_ladder(path: pd.DataFrame, asset, years: float) -> None:
+    """What a per-trade commission in DOLLARS does, by account size.
+
+    WHY THIS IS A DIFFERENT LADDER AND NOT ANOTHER RUNG
+    ---------------------------------------------------
+    COST_LADDER_BPS is proportional: every rung costs the same fraction of
+    every trade, so the answer is independent of how much money is in the
+    account. A flat commission is the opposite -- it is independent of the
+    TRADE and therefore entirely a function of the account. The two cannot
+    share a ladder without one of them lying.
+
+    The arithmetic that makes this urgent: trading.REBALANCE_THRESHOLD is
+    0.05, and compute_rebalance trades only as far as the target, so the
+    SMALLEST trade this system makes is about 5% of the book. On $1000 that is
+    ~$50, and $1.50 on $50 is 300 bp one-way -- four times the bank gram gold
+    rung, which research/README.md already measured as the level where every
+    strategy here loses to buy-and-hold.
+
+    HOW THE SWEEP WORKS, AND WHY IT IS EXACT RATHER THAN APPROXIMATE
+    ----------------------------------------------------------------
+    Everything in this simulation except a flat fee is scale-invariant: the
+    rebalance decision reads an EXPOSURE (a ratio), trade sizes are a fraction
+    of book value, and a proportional fee is a fraction of a trade. So running
+    with $N of starting cash and a $1.50 fee is exactly equivalent -- up to the
+    overall factor N/1000 -- to running the standard $1000 book with a fee of
+    1.50 * 1000/N. This sweeps the fee instead of the starting cash so that
+    every equity curve stays in the same units as the rest of the report and
+    the two ladders remain readable side by side.
+
+    Read it as: buy-and-hold trades once, so it is untouched by the
+    commission and its Calmar is the same in every row. Everything else pays
+    per decision.
+    """
+    print("=" * 100)
+    print(f"SABIT KOMISYON MERDIVENI: islem basina ${FLAT_FEE_USD:.2f} "
+          f"+ {FLAT_FEE_SPREAD_BPS:.0f}bp makas (tek yon)")
+    print("=" * 100)
+    print("  Oransal merdivenden AYRI, cunku sabit ucret islem buyuklugunden")
+    print("  bagimsizdir -- yani cevabi hesap buyuklugu belirler, sinyal degil.")
+    print(f"  En kucuk islem defterin ~%{100 * trading.REBALANCE_THRESHOLD:.0f}'i "
+          f"(REBALANCE_THRESHOLD), yani $1.000'lik hesapta ~$50:")
+    print(f"  ${FLAT_FEE_USD:.2f} / $50 = %3,0 = 300bp tek yon.")
+    print()
+
+    spread_rate = FLAT_FEE_SPREAD_BPS / 10_000.0
+    names = [s for s in trading.STRATEGIES if s != "claude"]
+    header = f"{'strateji':<19}" + "".join(f"{'$' + format(n, ','):>13}" for n in ACCOUNT_SIZES)
+    rows: dict[str, list] = {}
+    trades: dict[str, int] = {}
+    effective: list[float] = []
+
+    for size in ACCOUNT_SIZES:
+        # See the docstring: sweeping the fee is exactly equivalent to sweeping
+        # the starting cash, and keeps every printed dollar in the same units.
+        scaled = FLAT_FEE_USD * trading.STARTING_CASH / size
+        books = simulate(path, spread_rate, asset, flat_fee=scaled)
+        for name in names:
+            book = books[name]
+            # A flat fee can take a book NEGATIVE, which no proportional rung
+            # can: on a small sale the $1.50 exceeds the proceeds. metrics()
+            # would hand back a nan there (a fractional power of a negative
+            # ratio), and printing nan would report a wiped-out account as
+            # missing data. It is not missing; it is the answer.
+            if min(book.equity) <= 0:
+                rows.setdefault(name, []).append(BUST)
+            else:
+                m = metrics(book.equity, book.exposure, years)
+                rows.setdefault(name, []).append(m.get("calmar", float("nan")))
+            trades[name] = book.trades
+            if name == "miners":
+                # Convert the flat fee into the unit the rest of this file
+                # speaks, by dividing total fees by the dollar volume that
+                # actually changed hands. Printed because the intuitive
+                # conversion is WRONG: it is tempting to divide $1.50 by the
+                # smallest possible trade (REBALANCE_THRESHOLD * book) and
+                # conclude the cost is enormous, but trades are typically far
+                # larger than that minimum -- and the book compounds, so late
+                # trades are bigger still. Measured, that reasoning is off by
+                # a factor of three at $5,000.
+                volume = (book.fees_paid - book.trades * scaled) / max(spread_rate, 1e-12)
+                effective.append(10_000 * book.fees_paid / volume
+                                 if volume > 0 else float("nan"))
+
+    print(f"{'':<19}{'HESAP BUYUKLUGU (Calmar)':^65}")
+    print(header)
+    print("-" * len(header))
+    benchmark = rows["buyhold"]
+    for name in sorted(names, key=lambda n: -rows[n][-1]):
+        display = DISPLAY_NAME.get(name, name)
+        cells = "".join(f"{'IFLAS':>13}" if c is BUST else f"{c:>13.3f}"
+                        for c in rows[name])
+        print(f"{display:<19}{cells}")
+    print("-" * len(header))
+    print(f"{'-- miners: efektif bp (tek yon), olculen islem hacmine gore --':<19}")
+    print(f"{'':<19}" + "".join(f"{e:>13.1f}" for e in effective))
+
+    print("\n  Al-ve-tut'u Calmar'da gecen stratejiler, hesap buyuklugune gore:")
+    for i, size in enumerate(ACCOUNT_SIZES):
+        beat = [DISPLAY_NAME.get(n, n) for n in names
+                if n != "buyhold" and _beats(rows[n][i], benchmark[i])]
+        print(f"    ${size:>9,}: {', '.join(beat) if beat else 'HICBIRI'}")
+
+    # The single number a person with an account actually needs.
+    miners = rows["miners"]
+    crossover = None
+    for i in range(1, len(ACCOUNT_SIZES)):
+        # nan-safe on purpose: `IFLAS` and nan are both "does not beat", and a
+        # bare `<=` against either is False, which would silently report "never
+        # crosses" for a strategy that plainly does.
+        if not _beats(miners[i - 1], benchmark[i - 1]) and _beats(miners[i], benchmark[i]):
+            crossover = (ACCOUNT_SIZES[i - 1], ACCOUNT_SIZES[i])
+    print()
+    if crossover:
+        print(f"  `miners` al-ve-tut'u ${crossover[0]:,} ile ${crossover[1]:,} arasinda geciyor.")
+        print(f"  Bu bir sinyal esigi DEGIL, bir hesap buyuklugu esigi: ayni sinyal,")
+        print(f"  kucuk hesapta komisyon altinda kaliyor, buyuk hesapta kalmiyor.")
+    elif _beats(miners[0], benchmark[0]):
+        print("  `miners` en kucuk hesapta bile al-ve-tut'u geciyor.")
+    else:
+        print("  `miners` bu araligin HICBIR yerinde al-ve-tut'u gecmiyor.")
+    print()
 
 def run_asset(asset, panel_module) -> None:
     print("\n" + "#" * 100)
@@ -302,6 +458,8 @@ def run_asset(asset, panel_module) -> None:
                 if n != "buyhold" and m.get("calmar", -99) > benchmark["calmar"]]
         print(f"\n  Al-ve-tut'u Calmar'da gecen: {', '.join(beat) if beat else 'HICBIRI'}")
         print()
+
+    flat_fee_ladder(path, asset, years)
 
 
 def main() -> int:
