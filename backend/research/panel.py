@@ -59,6 +59,38 @@ import fetch_data  # noqa: E402
 
 YEARS = 25
 
+# Series that are CANDIDATES, not drivers. Deliberately NOT in
+# fetch_data.MACRO_SYMBOLS: that dict feeds the live path too (predict.py
+# fetches every entry on every run), so putting an unproven series there buys a
+# daily request and a silent failure surface in exchange for nothing. A series
+# graduates to MACRO_SYMBOLS only after it clears research/drivers.py's
+# Bonferroni bar AND research/lags.py's alignment scan.
+#
+# Each is here for a stated reason, and history depth is part of the reason --
+# a series that starts in 2014 can only ever be measured on a third of this
+# panel. GLD/SLV are deliberately absent: they are the metal itself, so they
+# would add no information and only inflate the multiple-testing count.
+CANDIDATE_SYMBOLS = {
+    "gvz": "^GVZ",        # 2008-06. CBOE gold implied volatility -- the market's
+                          # own forward view of how much gold will move. Unlike
+                          # every other column here it is not derived from price
+                          # history, which is the entire point.
+    "move": "^MOVE",      # 2002-11. Bond implied volatility. Gold is a rates
+                          # asset, so this is VIX's counterpart on the side that
+                          # actually drives it.
+    "gdx": "GDX",         # 2006-05. Gold miners ETF -- the widely repeated
+                          # "miners lead the metal" claim, never tested here.
+    "hui": "^HUI",        # 2001-09. The same claim at full panel depth, without
+                          # GDX's ETF-era truncation.
+    "cny": "CNY=X",       # 2001-09. The largest physical buyer's currency.
+    "inr": "INR=X",       # 2003-12. The second largest.
+    "hyg": "HYG",         # 2007-04. High-yield credit -- risk appetite of a kind
+                          # the VIX level does not capture.
+    "vix3m": "^VIX3M",    # 2006-07. With vix, the term structure slope, which is
+                          # a cleaner fear measure than either level alone.
+    "btc": "BTC-USD",     # 2014-09. The "digital gold" substitution claim.
+}
+
 
 def panel_path(asset_key: str) -> Path:
     return Path(__file__).parent / f"panel_{asset_key}.json"
@@ -92,8 +124,9 @@ def build(asset_key: str = "gold", years: int = YEARS) -> pd.DataFrame:
     # The asset's own series is swapped out for its counterpart metal --
     # otherwise silver's panel would carry a `silver` column identical to its
     # own close (see assets.macro_symbols_for).
-    wanted = assets_module.macro_symbols_for(asset)
-    print(f"Makro seriler cekiliyor ({len(wanted)} seri)...", flush=True)
+    wanted = {**assets_module.macro_symbols_for(asset), **CANDIDATE_SYMBOLS}
+    print(f"Makro seriler cekiliyor ({len(wanted)} seri, "
+          f"{len(CANDIDATE_SYMBOLS)}'i aday -- canli yolda degil)...", flush=True)
     macro = {}
     for name, symbol in wanted.items():
         try:

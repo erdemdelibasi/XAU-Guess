@@ -77,6 +77,24 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
    fark 9-13 puan, ölçülen ise 3,9 puan — yani "etki yok" değil, "varsa
    göremiyoruz". Politika duruşunu kolon olarak eklemek de reddedildi
    (p=0,947 ve p=0,377).
+9. **Piyasanın kendi oynaklık tahmini bizimkinden belirgin şekilde iyi — ama
+   bu Calmar'a çevrilemedi.** GVZ (`^GVZ`, altının ima edilen oynaklığı)
+   gelecek 60 günün gerçekleşen oynaklığını r=0,588 / RMSE 5,34p ile
+   kestiriyor; üretimin geçmişe bakan rv60'ı r=0,501 / 6,29p. Kapsama
+   testinde (örtüşmeyen alt örneklem) GVZ t=+3,12 alırken **rv60 onun yanında
+   hiçbir şey katmıyor** (t=+0,14). Buna rağmen `trading.py` DEĞİŞMEDİ:
+   ağırlık ızgarasını eğitim ve test yarıları **tam ters** sıralıyor
+   (Spearman −1,00), yani bölme soruyu çözmedi, bir rejim değişimini ikiye
+   ayırdı. `research/README.md` 12. bölüm.
+10. **Altın madencileri metali öncülüyor gibi görünüyor — AÇIK bir bulgu,
+    üretimde değil.** `GDX`/`^HUI` her iki metalde de örneklem dışı
+    Bonferroni eşiğini geçti (t=+5,5..+6,1) ve dört öldürme denemesinden sağ
+    çıktı: hizalama taraması, gümüş kontrol serisi, metalin kendi getirisi
+    (kontrol edilince ilişki zayıflamıyor **güçleniyor**: r=+0,109 → kısmi
+    +0,179) ve düz mum artefaktı. **Ama ölçülen 1 GÜNLÜK bir korelasyondur**;
+    bu sistemin ufku 5 gün ve `wall.py` 1 günlük duvarı %56,2 diye ölçmüştü.
+    Duvarı aştığı gösterilmedi. Bu tezgâhta yön tarafında güçlü pozitif çıkan
+    ilk bulgu, ve tam bu yüzden en şüpheli davranılması gereken bulgu.
 
 Madde 5'in madde 3'ü **kurtarmadığını** anlamak kritik: oynaklık hedefleme
 hiçbir şey tahmin etmiyor, gerçekleşen oynaklığa tepki veriyor ve oynaklık
@@ -901,9 +919,16 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   gelmesi 180 çözülmüş satır sürer. Canlı sinyal *üreten* kodun testi hâlâ
   yok; o `backtest.py` + canlı izlemeyle doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
-  oku.** Orada ölçülüp elenmiş **on bir** hipotez duruyor — oranla ilgili
+  oku.** Orada ölçülüp elenmiş **on iki** hipotez duruyor — oranla ilgili
   bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve
-  merkez bankası alımıyla ilgili olan 11. bölümde büyük ihtimalle zaten var.
+  merkez bankası alımıyla ilgili olan 11. bölümde, yeni bir veri kaynağı
+  eklemekle ilgili olan 12. bölümde büyük ihtimalle zaten var.
+- **Yeni bir seri denemek isteyince `fetch_data.MACRO_SYMBOLS`'e EKLEME.**
+  O sözlük canlı yolu da besliyor (`predict.py` her koşuda her girdiyi
+  çekiyor), yani kapıdan geçmemiş bir seri oraya konunca günlük bir istek ve
+  sessiz bir arıza yüzeyi satın alınmış olur. Adaylar
+  `research/panel.CANDIDATE_SYMBOLS` içinde yaşar ve terfi yolu tektir:
+  `drivers.py`'nin Bonferroni eşiği **ve** `lags.py`'nin hizalama taraması.
 - **`supabase/schema.sql` değiştiysen migration'ı kullanıcıya ver.** Repo
   kendi migration'ını uygulayamaz. Yeni bir kolon ekliyorsan
   `predict.PENDING_MIGRATION_COLUMNS`'a da ekle: PostgREST bilinmeyen bir

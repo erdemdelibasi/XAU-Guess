@@ -37,17 +37,36 @@ import os
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np  # noqa: E402
+
+import assets as assets_module  # noqa: E402
 import drivers  # noqa: E402
 import panel as panel_module  # noqa: E402
 
 LAGS = list(range(-5, 6))
-# The three drivers.py flagged, plus dxy/silver as controls: their relationship
-# with gold is known to be contemporaneous, so they show what "correctly
-# aligned and not predictive" is supposed to look like on this scan.
-WATCH = ["tip", "ief", "vix", "dxy", "silver", "us10y"]
+# The three drivers.py flagged originally, plus dxy/silver as controls: their
+# relationship with gold is known to be contemporaneous, so they show what
+# "correctly aligned and not predictive" is supposed to look like on this scan.
+#
+# The 2026-09 batch appended: gdx/hui/vix3m cleared the Bonferroni bar on BOTH
+# metals, and gdx/hui arrive here under heavy suspicion. Their same-day
+# correlation with gold is +0.67, which is the exact shape this file exists to
+# interrogate. Two things separate the honest reading from the flattering one:
+#
+#   * NEGATIVE lags. Miners are US equities closing at 16:00 New York, an hour
+#     BEFORE COMEX gold settles at 17:00. So gold's close contains strictly
+#     fresher information than the miners' does, and the mechanically expected
+#     shape is gold LEADING the miners. Weight at lag -1 would say the lag +1
+#     reading is that same effect bouncing back.
+#   * The silver control. Silver's same-day correlation with gold is +0.78 --
+#     LARGER than the miners' -- and its lag +1 is -0.016. A huge
+#     contemporaneous relationship does not on its own manufacture a next-day
+#     tail, which is why silver is the series that settles the argument.
+WATCH = ["tip", "ief", "vix", "dxy", "silver", "us10y",
+         "gdx", "hui", "vix3m", "gvz", "vrp"]
 
 
 def scan(driver_change: np.ndarray, gold_return: np.ndarray) -> dict[int, tuple[float, float, int]]:
@@ -72,8 +91,8 @@ def bar(r: float, scale: float) -> str:
     return ("+" if r > 0 else "-") * max(width, 0)
 
 
-def main() -> int:
-    df = panel_module.load().reset_index(drop=True)
+def run_for_asset(asset_key: str) -> None:
+    df = panel_module.load(asset_key).reset_index(drop=True)
     gold_ret = df["close"].pct_change().to_numpy(dtype=float)
     changes = drivers.build_changes(df)
 
@@ -111,6 +130,20 @@ def main() -> int:
     print("  biliniyor. Onlarin tepesi lag 0'da cikiyorsa takvim hizalamasi dogrudur,")
     print("  ve o zaman tip/ief/vix'in lag +1 okumalari gercek birer oncu sinyaldir.")
     print("  Tepe lag 0 yerine +1'e kaymissa, sorun veride degil birlestirmededir.")
+    print()
+    print("  gdx/hui icin ek soru: NEGATIF laglarda agirlik var mi? Madenciler 16:00")
+    print("  New York'ta, altin 17:00'da kapaniyor -- yani altinin kapanisi daha TAZE.")
+    print("  Altin madenciyi onculuyorsa, lag +1 okumasi ayni etkinin geri yansimasidir.")
+
+
+def main() -> int:
+    keys = [a for a in sys.argv[1:] if not a.startswith("--")] or list(assets_module.ASSETS)
+    for key in keys:
+        asset = assets_module.get(key)
+        print("\n" + "#" * 84)
+        print(f"### {asset.label.upper()} ({asset.symbol})")
+        print("#" * 84)
+        run_for_asset(key)
     return 0
 
 

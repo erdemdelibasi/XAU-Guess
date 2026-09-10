@@ -34,18 +34,59 @@ import os
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+
+import assets as assets_module  # noqa: E402
 import panel as panel_module  # noqa: E402
 
-# How each driver is turned into a daily "change". Yields are already in
-# percent, so a difference is the natural change; prices get a return.
-LEVEL_DIFF = {"us10y", "us5y", "us30y", "vix"}   # diff of the level
-PRICE_RETURN = {"dxy", "spx", "silver", "copper", "oil", "eurusd", "usdjpy", "tip", "ief"}
+# The 2026-09 batch, plus the two series derived from it. Tracked separately
+# from the established drivers so the power report below can single out the
+# columns whose history is short enough for "did not pass" to be ambiguous.
+CANDIDATE_COLUMNS = set(panel_module.CANDIDATE_SYMBOLS) | {"vrp", "vix_term"}
 
-# Derived series that encode a gold-specific relationship rather than a raw
+# How each driver is turned into a daily "change". Yields and volatility
+# indices are already quoted in points, so a difference is the natural change;
+# prices get a return.
+#
+# The second line of each set is the 2026-09 candidate batch (see
+# research/panel.CANDIDATE_SYMBOLS). Those series are in the research panel
+# only; they reach the live path solely by clearing the bar measured here.
+LEVEL_DIFF = {"us10y", "us5y", "us30y", "vix",
+              "gvz", "move", "vix3m"}
+PRICE_RETURN = {"dxy", "spx", "silver", "gold", "copper", "oil", "eurusd", "usdjpy", "tip", "ief",
+                "gdx", "hui", "cny", "inr", "hyg", "btc"}
+
+TRADING_DAYS = 252
+
+# Derived series computed as a SPREAD rather than a ratio, so their change is a
+# difference. Naming them explicitly beats the prefix match this used to do: a
+# ratio that straddles zero (the variance risk premium does, routinely) turns
+# pct_change into a division by almost nothing, and the resulting spikes look
+# like enormous driver moves that never happened.
+DERIVED_DIFF = {"real_yield_proxy", "curve_10y5y", "vrp"}
+
+
+def _gold_and_counterpart(df: pd.DataFrame) -> tuple[pd.Series, pd.Series] | None:
+    """(gold, silver) closes, whichever panel this is.
+
+    Both metals' panels carry the other one as a macro column (see
+    assets.macro_symbols_for), so `close` is gold in one and silver in the
+    other. Computing `close / counterpart` blindly gives the gold/silver ratio
+    in one panel and its RECIPROCAL in the other -- same name, inverted sign.
+    indicators.py separates these explicitly for exactly this reason.
+    """
+    if "silver" in df.columns:
+        return df["close"], df["silver"]
+    if "gold" in df.columns:
+        return df["gold"], df["close"]
+    return None
+
+
+# Derived series that encode a metals-specific relationship rather than a raw
 # market. Each is a ratio or spread practitioners actually watch.
 def derived(df: pd.DataFrame) -> dict[str, pd.Series]:
     out: dict[str, pd.Series] = {}
@@ -57,17 +98,31 @@ def derived(df: pd.DataFrame) -> dict[str, pd.Series]:
         # is the real yield. This is a proxy for the SHAPE, not the level.
         breakeven_proxy = (df["tip"] / df["ief"])
         out["real_yield_proxy"] = df["us10y"] - 100.0 * (breakeven_proxy / breakeven_proxy.iloc[0] - 1.0)
-    if {"silver"} <= set(df.columns):
-        out["gold_silver_ratio"] = df["close"] / df["silver"]
-    if {"copper"} <= set(df.columns):
-        out["copper_gold_ratio"] = df["copper"] / df["close"]
+    pair = _gold_and_counterpart(df)
+    if pair is not None:
+        gold_close, silver_close = pair
+        out["gold_silver_ratio"] = gold_close / silver_close
+        if "copper" in df.columns:
+            out["copper_gold_ratio"] = df["copper"] / gold_close
     if {"us10y", "us5y"} <= set(df.columns):
         out["curve_10y5y"] = df["us10y"] - df["us5y"]
+    if "gvz" in df.columns:
+        # Variance risk premium: implied volatility minus what has actually
+        # been realised. This, not the bare GVZ level, is the form implied
+        # volatility is claimed to predict returns in -- the level mostly
+        # tracks realised volatility (measured r=0.85 on this panel), so a
+        # level test would largely be re-testing realised volatility.
+        realised = df["close"].pct_change().rolling(60).std() * np.sqrt(TRADING_DAYS)
+        out["vrp"] = df["gvz"] - 100.0 * realised
+    if {"vix3m", "vix"} <= set(df.columns):
+        # Equity volatility term structure. Above 1 is the normal, calm shape;
+        # inversion marks acute stress far more sharply than the VIX level.
+        out["vix_term"] = df["vix3m"] / df["vix"]
     return out
 
 
 def build_changes(df: pd.DataFrame) -> pd.DataFrame:
-    """One column per driver, each as its daily change, aligned to gold."""
+    """One column per driver, each as its daily change, aligned to the asset."""
     changes = pd.DataFrame(index=df.index)
     for col in df.columns:
         if col in LEVEL_DIFF:
@@ -75,8 +130,7 @@ def build_changes(df: pd.DataFrame) -> pd.DataFrame:
         elif col in PRICE_RETURN:
             changes[col] = df[col].pct_change()
     for name, series in derived(df).items():
-        # Ratios and spreads: use the change in the ratio itself.
-        changes[name] = series.diff() if name.startswith("curve") or name.startswith("real") else series.pct_change()
+        changes[name] = series.diff() if name in DERIVED_DIFF else series.pct_change()
     return changes
 
 
@@ -94,9 +148,24 @@ def _corr_t(x: np.ndarray, y: np.ndarray) -> tuple[float, float, int]:
     return r, t, n
 
 
-def main() -> int:
-    df = panel_module.load().reset_index(drop=True)
-    gold_ret = df["close"].pct_change()
+def min_detectable_r(n: int, threshold: float) -> float:
+    """Smallest |r| that would clear `threshold` at this sample size.
+
+    Inverts t = r*sqrt((n-2)/(1-r^2)). Printed next to every negative result
+    because "nothing passed" and "the test could not have seen it" call for
+    opposite next moves -- the same discipline ablation.min_detectable_ic
+    applies to that study's null result. It matters more than usual here: the
+    candidate series start as late as 2014, so some columns are tested on a
+    third of the sample the established drivers get.
+    """
+    if n <= 2:
+        return float("nan")
+    return float(threshold / math.sqrt(n - 2 + threshold * threshold))
+
+
+def run_for_asset(asset_key: str) -> None:
+    df = panel_module.load(asset_key).reset_index(drop=True)
+    own_ret = df["close"].pct_change()
     changes = build_changes(df)
 
     n = len(df)
@@ -106,16 +175,17 @@ def main() -> int:
     print(f"TEST  yarisi  : satir {split}..{n}   ({df['time'].iloc[split].date()} -> {df['time'].iloc[-1].date()})")
     print()
 
-    # today's driver change vs today's gold return  (explains, can't trade)
-    same_day = gold_ret
-    # today's driver change vs TOMORROW's gold return (leads, can trade)
-    next_day = gold_ret.shift(-1)
+    # today's driver change vs today's own return  (explains, can't trade)
+    same_day = own_ret
+    # today's driver change vs TOMORROW's own return (leads, can trade)
+    next_day = own_ret.shift(-1)
 
-    print("=" * 96)
+    print("=" * 108)
     print("SURUCU ETKISI: esZAMANLI (aciklar) vs ONCU (tahmin eder)")
-    print("=" * 96)
-    print(f"{'surucu':>20} | {'ESZAMANLI r':>12} {'t':>8} | {'ONCU r (egitim)':>16} {'t':>7} | {'ONCU r (TEST)':>14} {'t':>7} | {'isaret':>6}")
-    print("-" * 96)
+    print("=" * 108)
+    print(f"{'surucu':>20} | {'ESZAMANLI r':>12} {'t':>8} | {'ONCU r (egitim)':>16} {'t':>7} | "
+          f"{'ONCU r (TEST)':>14} {'t':>7} {'n':>6} | {'isaret':>6}")
+    print("-" * 108)
 
     rows = []
     for col in changes.columns:
@@ -128,9 +198,12 @@ def main() -> int:
         if not np.isfinite(r_tr) or not np.isfinite(r_te):
             continue
         consistent = "EVET" if (r_tr * r_te > 0) else "hayir"
-        rows.append((col, r_same, t_same, r_tr, t_tr, r_te, t_te, consistent))
+        rows.append((col, r_same, t_same, r_tr, t_tr, r_te, t_te, consistent, n_te))
+        # `n` is per-column, not shared: a candidate that starts in 2014 is
+        # scored on far fewer rows than dxy, and a table without it invites
+        # the reader to compare t-statistics as though the samples matched.
         print(f"{col:>20} | {r_same:>+12.3f} {t_same:>8.1f} | {r_tr:>+16.4f} {t_tr:>7.2f} | "
-              f"{r_te:>+14.4f} {t_te:>7.2f} | {consistent:>6}")
+              f"{r_te:>+14.4f} {t_te:>7.2f} {n_te:>6d} | {consistent:>6}")
 
     print()
     print("=" * 96)
@@ -155,12 +228,32 @@ def main() -> int:
     print(f"\n  Egitim->test isaret tutarliligi: "
           f"{sum(1 for r in rows if r[7] == 'EVET')}/{len(rows)}")
 
+    # Power, printed for the CANDIDATES specifically: they are the columns
+    # whose short history makes "did not pass" ambiguous.
+    candidates = [r for r in rows if r[0] in CANDIDATE_COLUMNS]
+    if candidates:
+        print(f"\n  Aday serilerin gucu -- bu n ile |t|>{bonf:.2f} esigini gecebilecek EN KUCUK |r|:")
+        for r in sorted(candidates, key=lambda z: z[0]):
+            floor = min_detectable_r(r[8], bonf)
+            seen = "GORULEBILIRDI" if abs(r[5]) >= floor else "goremezdik"
+            print(f"     {r[0]:>20}: n={r[8]:>5d}  en kucuk gorulebilir |r|={floor:.4f}  "
+                  f"olculen |r|={abs(r[5]):.4f}  -> {seen}")
+
     print()
     print("  Yorum sablonu:")
     print("   - Esamanli buyuk + oncu sifir  = iliski gercek ama ALINAMAZ (etkin piyasa).")
     print("   - Oncu t esigi geciyor + isaret tutarli = uzerinde calisilmaya deger.")
     print("   - Sadece egitimde guclu = asiri uydurma; XRP'de kesitsel momentum boyleydi.")
 
+
+def main() -> int:
+    keys = [a for a in sys.argv[1:] if not a.startswith("--")] or list(assets_module.ASSETS)
+    for key in keys:
+        asset = assets_module.get(key)
+        print("\n" + "#" * 108)
+        print(f"### {asset.label.upper()} ({asset.symbol})")
+        print("#" * 108)
+        run_for_asset(key)
     return 0
 
 

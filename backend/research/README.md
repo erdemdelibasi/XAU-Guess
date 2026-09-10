@@ -30,9 +30,9 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 
 | Dosya | Ne yapar |
 |---|---|
-| `panel.py` | Her metal için 25 yıllık + 13 makro serilik günlük panel kurar, `panel_<varlık>.json`'a önbelleğe alır (~30 sn, gitignore'da) |
+| `panel.py` | Her metal için 25 yıllık + 13 makro + 9 **aday** serilik günlük panel kurar, `panel_<varlık>.json`'a önbelleğe alır (~1 dk, gitignore'da). Adaylar (`CANDIDATE_SYMBOLS`) canlı yolda **yok** — 12. bölüm |
 | `wall.py` | Başabaş duvarı: ufka ve maliyete göre gereken yön isabeti |
-| `drivers.py` | 16 makro serinin eşzamanlı (açıklayan) vs öncü (tahmin eden) etkisi |
+| `drivers.py` | 26 serinin eşzamanlı (açıklayan) vs öncü (tahmin eden) etkisi, **her iki metal için**; negatiflerin yanına testin gücünü de basar |
 | `lags.py` | Bir "öncü" sürücü gerçekten öncü mü, yoksa takvim kayması mı |
 | `edge.py` | Yürüyen-ileri yön testi: 1/5/20 günlük ufuklarda, üç ölçüte karşı |
 | `defense.py` | Yön tahmin etmeden düşüşü azaltabilir miyiz (trend + oynaklık kuralları) |
@@ -43,6 +43,7 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 | `ablation.py` | ML bileşeni taban orana neden takılıyor — etiket mi, özellikler mi |
 | `fedcycle.py` | Fed faiz kararları: olay, rejim ve sürpriz — üçü ayrı ayrı |
 | `realrate.py` | Gerçek reel faiz (FRED DFII10) vs TIP/IEF vekili; merkez bankası alımının ölçülebilir izi |
+| `impliedvol.py` | GVZ (altının ima edilen oynaklığı) gerçekleşen oynaklığı üretimdeki tahminciden daha iyi kestiriyor mu, ve bu Calmar'a çevrilebiliyor mu |
 
 ```bash
 cd backend/research
@@ -59,6 +60,7 @@ python ratio.py             # ~4 dk (icinde 4 yuruyen-ileri kosusu var)
 python ablation.py          # ~12 dk (16 yuruyen-ileri kosusu)
 python fedcycle.py          # ~4 dk  (FRED gerekir)
 python realrate.py          # ~6 dk  (FRED gerekir)
+python impliedvol.py        # ~30 sn (GVZ; panel yeniden kurulmus olmali)
 ```
 
 `panel.py` argümansız çalıştırılınca **her iki metal için de** panel kurar
@@ -714,3 +716,140 @@ bankası alımıyla **uyumludur**; onu **kanıtlamaz**.
 soruldu: 8 hücrenin **0'ı** geçti (en yükseği altın 60g: r=+0,145, t=+1,00).
 "Artık büyümüş" bilgisi bir sonraki hafta için bir şey söylemiyor. Yine aynı
 şekil: gerçek, açıklayıcı, alınamaz.
+
+---
+
+## 12. Yeni veri kaynakları: iki bulgu, biri beklenmedik (`impliedvol.py`, `drivers.py`)
+
+2026-09-10'da dokuz yeni kamuya açık Yahoo serisi tezgâha alındı: `^GVZ`,
+`^MOVE`, `GDX`, `^HUI`, `CNY=X`, `INR=X`, `HYG`, `^VIX3M`, `BTC-USD`.
+
+**Hiçbiri `fetch_data.MACRO_SYMBOLS`'e eklenmedi.** O sözlük canlı yolu da
+besliyor (`predict.py` her koşuda her girdiyi çekiyor); kapıdan geçmemiş bir
+seriyi oraya koymak günlük bir istek ve sessiz bir arıza yüzeyi satın alıp
+karşılığında hiçbir şey vermiyor. Adaylar `research/panel.CANDIDATE_SYMBOLS`
+içinde yaşıyor ve terfi yolu tek: `drivers.py`'nin Bonferroni eşiği **ve**
+`lags.py`'nin hizalama taraması.
+
+`GLD`/`SLV` bilerek listeye alınmadı — metalin kendisi oldukları için yeni
+bilgi taşımazlar, sadece çoklu-test sayacını şişirirlerdi.
+
+### GVZ yön taşımıyor — ve bu zaten iddia değildi
+
+Ne `gvz` ne de ondan türetilen `vrp` (varyans risk primi, `gvz − 100×rv60`)
+yön kapısını geçti. Lag taraması nedenini gösteriyor: `gvz` lag 0'da +0,042,
+lag +1'de −0,017; `vrp` lag 0'da +0,088, lag +1'de −0,016. İma edilen
+oynaklık bir **büyüklük** serisidir, yön serisi değil. Bunu yön testinden
+geçirip "bir şey çıkmadı" demek yanlış soruyu sormak olurdu.
+
+### GVZ oynaklığı ÇOK daha iyi tahmin ediyor — ölçüldü, tartışmasız
+
+Asıl soru şuydu: bu projenin **çalıştığı ölçülmüş tek mekanizması** (oynaklığa
+tepki veren pozisyon boyutlandırma, bkz. 5. bölüm) geçmişe bakan bir sayıyla
+besleniyor (`predict.py:399`, son 60 günün std sapması). Piyasanın kendi
+ileriye dönük tahmini daha mı iyi?
+
+Altın, TEST yarısı (2017-07 → 2026-09), gelecek 60 günün gerçekleşen oynaklığı:
+
+| tahminci | r | RMSE |
+|---|---|---|
+| geçmiş rv60 (**üretim**) | 0,501 | 6,29p |
+| GVZ (ölçeklenmiş) | **0,588** | **5,34p** |
+
+Ve asıl test **kapsama (encompassing)** testiydi, çünkü ikisi birbirleriyle
+zaten r=0,85 korelasyonlu — "GVZ tek başına daha iyi" neredeyse garanti ve
+neredeyse anlamsız. `gelecek_vol ~ a·rv60 + b·GVZ` ortak uydurmasında,
+**örtüşmeyen** alt örneklemde (her 60. satır, n=38): **t(b)=+3,12, t(a)=+0,14**.
+Yani GVZ yanına konduğunda üretimdeki tahminci **hiçbir şey katmıyor**.
+20 günlük ufukta daha da keskin: t(b)=+9,21 iken rv60'ın katsayısı **negatife**
+dönüyor (a=−0,20, t=−3,57).
+
+Ölçek tuzağı da baştan ölçüldü: GVZ'nin eğitim yarısında ölçülen ima/gerçekleşen
+oranı **1,1162** (varyans risk primi). Ham GVZ'yi `trading.vol_scale`'e vermek
+her pozisyonu kalıcı olarak ~1/1,116 ile çarpardı — bu oynaklık hedeflemesi
+değil "**%10 daha az altın tut**"tur, `assets.py`'nin gümüşün
+`target_volatility`'si için belgelediği arızanın aynısı.
+
+### Ama üretime GİRMEDİ, ve girmeme sebebi bu bölümün asıl dersi
+
+Daha iyi tahmin, ticaret kuralında daha iyi sonuç demek değil.
+`vol_tahmini = (1−w)·rv60 + w·GVZ` ızgarası (w ∈ {0; 0,25; 0,5; 0,75; 1}, **w=0
+üretimin kendisi ve ızgaranın içinde**) iki mekanik strateji için koşturuldu:
+
+| altın, `voltarget` | w=0 | 0,25 | 0,50 | 0,75 | 1,00 |
+|---|---|---|---|---|---|
+| **EĞİTİM** Calmar | **0,086** | 0,082 | 0,075 | 0,068 | 0,057 |
+| **TEST** Calmar | 0,703 | 0,741 | 0,772 | 0,797 | **0,818** |
+
+İki yarı ızgarayı **tam ters** sıralıyor. Eğitim yarısı w büyüdükçe monoton
+kötüleşiyor, test yarısı monoton iyileşiyor — Spearman **−1,00**.
+
+Bu, bu tezgâhın standart kuralının ("eğitimde seç, testte bir kez doğrula")
+**yanlış cevap verdiği** bir durum: test yarısındaki iyileşme bir doğrulama
+değil, ayrılmış veriden cevabı okumaktır. Bölme soruyu çözmedi, bir **rejim
+değişimini ikiye ayırdı** — eğitim yarısı altının 2011-2015 ayısını, test
+yarısı 2017-2026 boğasını taşıyor, ve w hangi rejime düştüğüne göre puan
+alıyor.
+
+Bu yüzden koruma **script'in içine** yazıldı, tabloyu okuyanın yakalamasına
+bırakılmadı: eğitim ve test Calmar sıralamaları arasındaki Spearman ≤ 0 ise
+hiçbir şey benimsenmiyor. Uydurulmuş bir eşik değil — "iki yarı en azından
+yönde anlaşsın" bir örneklem dışı kontrolden istenebilecek en zayıf şey.
+
+Dört hücrenin üçünde koruma ateşledi (altın `voltarget` −1,00, altın
+`defensive` −0,70, gümüş `voltarget` −0,90). Geçen tek hücre gümüş
+`defensive` (+0,70, w=0,50, test +0,031 Calmar) — ve o da benimsenmedi:
+gümüş burada **açıkça ikincil** bir kontrol (GVZ altının ima edilen
+oynaklığıdır; `^VXSLV` yayından kalkmış, Yahoo tek satır döndürüyor), seçim
+0,020 vs 0,012 gibi ikisi de sıfıra yakın eğitim Calmar'ları arasında
+yapılmış, ve birincil varlık aynı testte iki stratejide birden kalmış.
+**Dört hücrenin birini almak tam olarak bu tezgâhın önlemek için var olduğu
+şeydir.**
+
+Doğru okuma: **GVZ oynaklığı daha iyi tahmin ediyor, ama bu tahmin üstünlüğü
+bu ızgarada Calmar'a çevrilebilir hâlde değil.** 5. bölümün kazancı
+oynaklığın *otokorelasyonundan* geliyor; daha iyi bir oynaklık tahmini, o
+kazancın kaynağını daha da iyileştirmek zorunda değil.
+
+### Beklenmedik olan: altın madencileri metali ÖNCÜLÜYOR
+
+Yön kapısının düşük beklentili kolu bir şey buldu ve dört ayrı öldürme
+denemesinden sağ çıktı. `GDX` ve `^HUI`, **her iki metalde de**, örneklem
+dışı test yarısında Bonferroni eşiğini geçti:
+
+| | altın TEST r | t | gümüş TEST r | t |
+|---|---|---|---|---|
+| `gdx` | +0,1091 | +6,14 | +0,1000 | +5,63 |
+| `hui` | +0,0984 | +5,54 | +0,0981 | +5,52 |
+
+Dört öldürme denemesi ve hepsinin sonucu:
+
+1. **Hizalama (`lags.py`).** Tepe lag 0'da (+0,667), lag +1'de +0,150, lag +2'de
+   ~0. Temiz bir sönüm, ve **negatif laglarda ağırlık yok** (lag −1: −0,041).
+   Bu önemliydi: madenciler 16:00 New York'ta, altın 17:00'da kapanıyor — yani
+   altının kapanışı daha taze, ve mekanik olarak beklenen şekil altının
+   madenciyi öncülemesiydi. O şekil yok.
+2. **Kontrol serisi.** Gümüşün altınla eşzamanlı ilişkisi **daha büyük**
+   (+0,783 vs +0,667) ve lag +1'i −0,016. Devasa bir eşzamanlı ilişki tek
+   başına lag +1 kuyruğu üretmiyor — 2. bölümün TIP için kurduğu argümanın
+   aynısı, burada tersine çevrilemez.
+3. **Kendi getirisi kontrolü — belirleyici olan bu.** GDX'in günlük getirisi
+   büyük ölçüde altının kendi getirisidir, dolayısıyla lag +1 okuması altının
+   **kendi** otokorelasyonu olabilirdi. Bugünkü altın getirisi sabitlendiğinde
+   ilişki **zayıflamıyor, GÜÇLENİYOR**: ham r=+0,109 → kısmi r=**+0,179**
+   (t=+10,20). Tahmin eden şey madencinin altından **ayrışan** kısmı.
+4. **Düz mum artefaktı.** Altının kapanışı bazen sadece bir uzlaşma basımıdır
+   (test yarısında %5,2); o günlerde GDX gerçekten altının kapanışında olmayan
+   bilgi taşır ve "tahmin" ediyormuş gibi görünürdü. Etki normal mumlarda
+   +0,1796, düz mumlarda +0,1817 — **fark yok**, ve örneklemin %95'i normal.
+
+**Yine de üretime girmedi ve girmemeli.** Ölçülen şey **1 günlük** ufukta bir
+korelasyondur; bu sistemin ufku **5 gün** (`ml_model.HORIZON_DAYS`), ve
+`wall.py` 1 günlük ufkun başabaş isabetini %56,2 diye ölçmüştü — bu projedeki
+en yüksek duvar. Bir korelasyonun duvarı aştığı gösterilmedi. Eksik olan üç
+test: (a) 5 günlük ufukta ayakta kalıyor mu, (b) maliyet merdiveninin
+neresinde ölüyor, (c) `edge.walk_forward`'ın eşleştirilmiş A/B'sinde üretim
+özellik setine bir şey katıyor mu. Üçü de kendi fazını hak ediyor.
+
+Bu, `README`'deki on iki bölümün **yön tarafında güçlü şekilde pozitif çıkan
+ilki** — ve tam da bu yüzden en şüpheli davranılması gereken bulgu.
