@@ -15,6 +15,7 @@ import pytest
 
 import assets
 import ensemble
+import miners_signal
 import ml_model
 import predict
 
@@ -48,6 +49,13 @@ def _panel(rows: int = 700) -> pd.DataFrame:
                                ("tip", 110.0, 0.003), ("ief", 95.0, 0.003),
                                ("silver", 25.0, 0.015), ("gold", 1800.0, 0.01)):
         frame[name] = start * np.exp(np.cumsum(rng.normal(0.0, scale, rows)))
+    # gdx gets a DETERMINISTIC final move rather than a random one, because a
+    # test that asserts on the miners signal needs a value it can name. The
+    # last bar rises exactly 2%, so miners_signal must produce
+    # 0.02 * GDX_SCALE = 0.5.
+    gdx = 30.0 * np.exp(np.cumsum(rng.normal(0.0, 0.02, rows)))
+    gdx[-1] = gdx[-2] * 1.02
+    frame["gdx"] = gdx
     return frame
 
 
@@ -111,15 +119,19 @@ class _ShrinkingCalibrator:
 @pytest.fixture
 def wired(monkeypatch):
     """run_asset with every external dependency replaced. Returns a recorder."""
-    seen = {"traded": []}
+    seen = {"traded": [], "told": {}}
 
     monkeypatch.setattr(predict, "load_panel", lambda asset: _panel())
     monkeypatch.setattr(predict.fetch_data, "get_live_price",
                         lambda symbol: (100.0, symbol))
     monkeypatch.setattr(predict.news_module, "news_signal",
                         lambda asset: {"direction": "UP", "confidence": 0.0, "score": 0.0})
-    monkeypatch.setattr(predict.trading, "maybe_trade",
-                        lambda db, asset, strategy, *a, **k: seen["traded"].append(strategy))
+    def _record_trade(db, asset, strategy, prediction_id, price, trend, vol,
+                      direction, confidence):
+        seen["traded"].append(strategy)
+        seen["told"][strategy] = {"direction": direction, "confidence": confidence}
+
+    monkeypatch.setattr(predict.trading, "maybe_trade", _record_trade)
     monkeypatch.setattr(predict.kanal_finans_trading, "maybe_check_stop_loss",
                         lambda *a, **k: None)
 
@@ -206,6 +218,53 @@ def test_every_portfolio_runs_exactly_once_per_prediction(wired, monkeypatch):
     monkeypatch.setattr(predict.calibration, "load", lambda key: {})
     predict.run_asset(_Db(), assets.GOLD)
     assert wired["traded"] == list(predict.trading.STRATEGIES)
+
+
+def test_the_miners_portfolio_is_actually_wired_to_the_miners_signal(wired, monkeypatch):
+    """The `miners` book must receive miners_signal's call, not the abstain default.
+
+    This is the single mis-wiring that no other test in the suite can see.
+    predict.py picks a portfolio's signal with
+
+        strategy_signal.get(name, {"direction": "UP", "confidence": 0.0})
+
+    so a strategy present in trading.STRATEGIES but MISSING from that dict
+    silently falls through to a permanent abstain: no exception, no warning,
+    a portfolio that simply sits at SIGNAL_BASE_EXPOSURE forever while the
+    dashboard shows it as a working strategy. `test_every_portfolio_runs_
+    exactly_once_per_prediction` would still pass, because the book does run.
+
+    The fixture panel's last gdx bar rises exactly 2%, so the expected
+    confidence is 0.02 * GDX_SCALE = 0.5 -- a number this test can name, which
+    is what separates "the right value arrived" from "some value arrived".
+    """
+    db = _Db()
+    predict.run_asset(db, assets.GOLD)
+
+    told = wired["told"]["miners"]
+    assert told["direction"] == "UP"
+    assert told["confidence"] == pytest.approx(0.02 * miners_signal.GDX_SCALE)
+    # And it must be a DIFFERENT number from the ml component's, or the
+    # assertion above could be satisfied by the wrong signal arriving.
+    assert told["confidence"] != wired["told"]["ml"]["confidence"]
+
+
+def test_miners_abstains_rather_than_selling_when_gdx_is_missing(wired, monkeypatch):
+    """A dead GDX feed must leave the book flat, never short it.
+
+    fetch_data.get_macro_daily is fail-soft per series, so this is a real
+    Tuesday, not a hypothetical. An abstain returns direction "UP" with
+    confidence 0.0, which compute_target_exposure reads as "no tilt".
+    """
+    monkeypatch.setattr(predict, "load_panel",
+                        lambda asset: _panel().drop(columns=["gdx"]))
+    db = _Db()
+    predict.run_asset(db, assets.GOLD)
+
+    assert wired["told"]["miners"]["confidence"] == 0.0
+    # Every other portfolio still got its own signal -- one dead series must
+    # not take the run down with it.
+    assert wired["told"]["ml"]["confidence"] > 0
 
 
 def test_no_written_number_is_nan(wired, monkeypatch):
