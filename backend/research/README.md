@@ -45,6 +45,7 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 | `realrate.py` | Gerçek reel faiz (FRED DFII10) vs TIP/IEF vekili; merkez bankası alımının ölçülebilir izi |
 | `impliedvol.py` | GVZ (altının ima edilen oynaklığı) gerçekleşen oynaklığı üretimdeki tahminciden daha iyi kestiriyor mu, ve bu Calmar'a çevrilebiliyor mu |
 | `vixterm.py` | `vix3m` `vix`'in yerini almali mi -- ML ozelligi ve makro bileseni ayri ayri, eslestirilmis A/B |
+| `instrument.py` | Tüm skorbord `GLD`/`IAU`/`SLV` üzerinde: bu depodaki kenar, gerçekten alınabilen enstrümanda da var mı — ortak pencere ve sabit komisyonla |
 | `miners.py` | `GDX`/`^HUI` madenci öncülüğü: bilgi hangi günde yaşıyor, üretim özellik setine katıyor mu, maliyet merdiveninin neresinde ölüyor — üç kontrollü |
 | `pooled.py` | Bağlayıcı kısıt gözlem sayısıysa: iki metali havuzlayıp eğitmek IC'yi artırıyor mu — üç kollu (üretim / normalleştirilmiş / havuz) |
 
@@ -67,6 +68,7 @@ python impliedvol.py        # ~30 sn (GVZ; panel yeniden kurulmus olmali)
 python vixterm.py           # ~6 dk  (vix3m vix'in yerini almali mi)
 python pooled.py            # ~25 dk (havuzlanmis cok-varlikli egitim)
 python miners.py            # ~11 dk (madenci onculugu: ufuk + A/B + maliyet)
+python instrument.py        # ~5 dk  (ayni skorbord ETF uzerinde)
 ```
 
 `panel.py` argümansız çalıştırılınca **her iki metal için de** panel kurar
@@ -1424,3 +1426,101 @@ cevap değil. **Açık soru: `voltarget`, `technical`, `ml`, `macro` ve `ensembl
 GLD/IAU/SLV üzerinde al-ve-tut'u geçmeye devam ediyor mu?** Cevaplanana kadar
 bu README'deki hiçbir Calmar sayısı "perakende bir hesapta böyle olurdu" diye
 okunmamalı.
+
+---
+
+## 17. Tüm skorbord, alınabilir enstrüman üzerinde (`instrument.py`)
+
+16. bölüm `miners` için enstrümanın belirleyici olduğunu gösterdi ve açık bir
+soru bıraktı: **bu depodaki her sayı `GC=F`/`SI=F` üzerinde ölçüldü, ve hiçbir
+perakende hesap COMEX vadeli kontratı tutamaz.** Bu bölüm skorbordun tamamını
+`GLD`, `IAU` ve `SLV` üzerinde yeniden koşuyor.
+
+**Ön-kayıt:** *"geçer" = ETF üzerinde, $10.000 hesapta, işlem başına $1,50 sabit
+komisyonla al-ve-tut'u Calmar'da geçmek.* Her strateji her rungda raporlanır.
+
+### İki metodolojik şart, ikisi de sonucu değiştiriyordu
+
+**1. Sabitler devralınmadı, yeniden ölçüldü.** `assets.py`'nin bütün mesajı bu.
+Üç fiyat ölçeği de bir **oran** normalize ediyor, o yüzden GLD'nin $403'ü ile
+GC=F'in $4384'ü arasındaki 10 kat fark tanım gereği önemsiz — ama o oranların
+oynaklığı ampirik bir soru, ve cevabı ölçüldü:
+
+| seri | macd | ema_cross | sma200 | yıllık oynaklık | taban oran |
+|---|---|---|---|---|---|
+| `GC=F` | 173,1 | 51,9 | 6,53 | %18,1 | 0,557 |
+| `GLD` | 171,9 | 50,8 | 6,25 | %18,3 | 0,553 |
+| `IAU` | 170,8 | 50,7 | 6,22 | %18,3 | 0,548 |
+
+Neredeyse birebir — **yani ETF farklı bir seri değil.** Bu önemli: aşağıdaki
+farklar serinin kendi dinamiğinden değil, sinyallerle **ilişkisinden** geliyor.
+(Ölçüm ayrıca üretimdeki 172,0/51,5/6,5 değerlerini yeniden üretiyor, yani
+yöntem `compare.py` ile tutarlı.)
+
+**`target_volatility` bilerek DEĞİŞTİRİLMEDİ** ve bu ayrımı kaçırmak
+karşılaştırmayı sessizce geçersiz kılardı: o bir ölçüm değil, bir **risk
+tercihi**. Altın %18,1 gerçekleştirip %15 hedefliyor, gümüş %33,7 gerçekleştirip
+%28 — ikisi de gerçekleşenin ~%83'ü. Her seriye kendi oynaklığını hedefletmek
+`voltarget`'ı iki sütunda **farklı bir strateji** yapardı.
+
+**2. Ortak pencere zorunlu.** Serbest bırakılınca vadeli sütun 19,5 yıl, ETF
+sütunu 16,1 yıl kapsıyordu — yani vadeli sütun 2008-2011 altın patlamasını
+içeriyor, ETF sütunu içermiyor, ve bu **tek başına** al-ve-tut'un Calmar'ını
+0,177'den 0,231'e çıkarıyordu. O iki sütunu karşılaştırmak **takvimi ölçüp
+enstrüman diye raporlamak** olurdu. Her şey 2010-07-19 → 2026-09-09'a kısıtlı.
+
+### Sonuç: Calmar sıralaması enstrümanla köklü şekilde değişiyor
+
+$10.000 rungunda al-ve-tut'u geçenler:
+
+| | vadeli | ETF |
+|---|---|---|
+| **altın** | `voltarget`, `ml`, `miners` | `voltarget`, `trend`, `defensive`, `ensemble` |
+| **gümüş** | `voltarget`, `technical`, `macro`, `miners` | `voltarget`, `trend`, `defensive`, `ensemble`, `technical` |
+
+- **Düşenler:** `miners` (iki metalde de — 16. bölümü ortak pencerede
+  doğruluyor), `ml` (altın), `macro` (gümüş).
+- **Sadece ETF'te geçenler:** `trend`, `defensive`, `ensemble` — üç ETF'te de.
+- **Her yerde geçen tek strateji: `voltarget`.**
+
+`voltarget`'ın enstrümandan bağımsız çıkması 5. maddenin en güçlü
+doğrulamasıdır: kazancı oynaklığın **otokorelasyonundan** geliyor, ki bu
+serinin kendi özelliğidir, bir saat farkı değil. `miners`'ınki bir saatti ve
+saat değişince gitti.
+
+### Ama Calmar para değildir, ve bu bölümün asıl uyarısı bu
+
+GLD, $10.000, 16,1 yıl, işlem başına $1,50:
+
+| strateji | son değer | YBG | Sharpe | maks düşüş | Calmar | işlem | komisyon |
+|---|---|---|---|---|---|---|---|
+| `voltarget` | **$36.257** | %8,3 | 0,59 | %39,2 | 0,212 | 131 | $215 |
+| `defensive` | $29.815 | %7,0 | 0,60 | %33,6 | 0,209 | 234 | $476 |
+| `ensemble` | $25.772 | %6,0 | 0,60 | %29,8 | 0,203 | 427 | $760 |
+| **`buyhold`** | **$34.844** | %8,0 | 0,48 | %45,6 | 0,177 | 1 | $2 |
+| `miners` | $20.990 | %4,7 | 0,33 | %44,7 | 0,105 | 2646 | $4.345 |
+
+**Calmar'da al-ve-tut'u geçen dört stratejinin üçü, PARADA ondan geride.**
+`defensive` ve `ensemble` Calmar'ı düşüşü keserek kazanıyor, para kazanarak
+değil — 16 yılda sırasıyla $5.029 ve $9.072 daha **az** bitiriyorlar.
+
+Geriye tek bir aday kalıyor ve onun da iddiası mütevazı: **`voltarget` 16 yılda
+al-ve-tut'tan $1.413 fazla** (+%4, yani gürültü mesafesinde) ama maksimum düşüşü
+%45,6'dan **%39,2'ye**, Sharpe'ı 0,48'den **0,59**'a taşıyor. Ve bunu **yılda
+~8 işlemle** yapıyor ($215 toplam komisyon), yani elle uygulanabilir ve sabit
+komisyona neredeyse duyarsız.
+
+**Dürüst özet: bu depoda $10.000'lik bir GLD hesabında al-ve-tut'tan anlamlı
+şekilde daha fazla PARA kazandıran hiçbir şey yok.** Olan şey, aynı parayı
+belirgin şekilde daha az acıyla kazandıran bir mekanizma — ve o mekanizma
+5. maddenin en baştan beri söylediği şey.
+
+### Açık uçlar
+
+- `trend`/`defensive`/`ensemble` ETF'te **mutlak olarak** da iyileşiyor
+  (`defensive` 0,172 → 0,208), sadece daha alçak bir bara karşı kazanmıyorlar.
+  Sebebi ölçülmedi. Makul hipotez, ETF'in gece seansı olmaması ve boşlukların
+  günlük mumun içinde farklı dağılması — ama bu bir hipotez, ölçüm değil.
+- Bu bölümde Calmar farkları için anlamlılık testi **yok**. Üç ETF'te ve iki
+  metalde tutarlı olması bu tezgâhın istediği tekrarlamadır, ama 0,03'lük bir
+  Calmar farkı tek başına bir karar gerekçesi değildir.

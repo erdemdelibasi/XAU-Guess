@@ -60,11 +60,26 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
    Brier beceri skoru her ufukta negatif.
 4. **Model pozisyon boyutunu da eğemiyor.** `research/tilt.py`'de eğitim
    ızgarası zorlanmadan EĞİM=0 seçti.
-5. **Uzun süre ölçülebilir katkı veren tek mekanizma oynaklığa tepki veren
-   pozisyon boyutlandırmaydı.** 19,9 yıl örneklem dışı: Sharpe 0,58→0,64,
-   maksimum düşüş %44,4→%30,1, karşılığında 2,1 puan yıllık getiri. **10.
-   madde 2026-09-10'da buna ikinci bir mekanizma ekledi** — ve o, yön
-   tarafında olan ilki.
+5. **Ölçülebilir katkı veren tek mekanizma oynaklığa tepki veren pozisyon
+   boyutlandırma — ve bu, ALINABİLİR enstrümanda da ayakta kalan TEK şey.**
+   19,9 yıl örneklem dışı: Sharpe 0,58→0,64, maksimum düşüş %44,4→%30,1,
+   karşılığında 2,1 puan yıllık getiri. `research/instrument.py` skorbordun
+   tamamını `GLD`/`IAU`/`SLV` üzerinde, ortak pencerede ve sabit komisyonla
+   yeniden koştu: `voltarget` **her sütunda** (vadeli ve ETF, altın ve gümüş)
+   al-ve-tut'u Calmar'da geçiyor. Geçen başka hiçbir strateji bunu yapamıyor.
+   Sebep de tutarlı: kazancı oynaklığın **otokorelasyonundan** geliyor, ki bu
+   serinin kendi özelliğidir. 10. maddedeki `miners`'ınki bir **saat farkıydı**
+   ve saat değişince gitti (16. bölüm).
+
+   **Ama Calmar para değildir, ve bu ayrım bu projenin en pahalı dersidir.**
+   $10.000'lik bir GLD hesabında 16,1 yılda: `voltarget` $36.257, al-ve-tut
+   $34.844 — **fark $1.413, yani gürültü mesafesinde**. Kazanılan şey para
+   değil, sükûnet: maksimum düşüş %45,6 → %39,2, Sharpe 0,48 → 0,59, ve bunu
+   **yılda ~8 işlemle**. Calmar'da al-ve-tut'u geçen diğer üç strateji
+   (`trend`, `defensive`, `ensemble`) **parada ondan geride** — düşüşü keserek
+   kazanıyorlar. **Bu depoda $10.000'lik bir hesapta al-ve-tut'tan anlamlı
+   şekilde daha fazla PARA kazandıran hiçbir şey yok.** `research/README.md`
+   17. bölüm.
 6. **Altın/gümüş oranı yön bilgisi taşımıyor.** 5 form × 3 hedef × 4 ufuk =
    60 testin **sıfırı** eşiği geçti (`research/ratio.py`). Rotasyon da,
    çifti birlikte tutmak da altını risk-ayarlı geçemiyor.
@@ -1033,14 +1048,14 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   gelmesi 180 çözülmüş satır sürer. Canlı sinyal *üreten* kodun testi hâlâ
   yok; o `backtest.py` + canlı izlemeyle doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
-  oku.** Orada ölçülüp elenmiş **on altı** hipotez duruyor — oranla ilgili
+  oku.** Orada ölçülüp elenmiş **on yedi** hipotez duruyor — oranla ilgili
   bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve
   merkez bankası alımıyla ilgili olan 11. bölümde, yeni bir veri kaynağı
   eklemekle ilgili olan 12. bölümde, "daha çok veriyle eğitelim" ile ilgili
   olan 13. bölümde, altın madencileriyle ilgili olan 14. bölümde,
   komisyon/hesap büyüklüğüyle ilgili olan 15. bölümde,
-  "gerçekte hangi enstrümanı alıyorum" ile ilgili olan 16. bölümde büyük
-  ihtimalle zaten var.
+  "gerçekte hangi enstrümanı alıyorum" ile ilgili olan 16. ve 17.
+  bölümde büyük ihtimalle zaten var.
 - **Yeni bir seri denemek isteyince `fetch_data.MACRO_SYMBOLS`'e EKLEME.**
   O sözlük canlı yolu da besliyor (`predict.py` her koşuda her girdiyi
   çekiyor), yani kapıdan geçmemiş bir seri oraya konunca günlük bir istek ve
@@ -1080,7 +1095,15 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   **seans sınırı faz kayması** çıktı (vadeli mum ~23 saat, ETF mumu 6,5 saat)
   ve GLD/IAU/SLV'de kayboldu — 16. bölüm. Gün çözünürlüklü bir lag taraması
   bunu göremez. Ölçüm aracı: `research/miners.tradeable_frame` + 4. bölüm.
-  **Diğer stratejiler için bu henüz ölçülmedi ve açık bir sorudur.**
+  Tüm skorbord için cevap `research/instrument.py`'de (17. bölüm): sıralama
+  enstrümanla **köklü şekilde** değişiyor, iki yönde birden. İki şart olmadan
+  o karşılaştırma geçersizdir — (a) fiyat ölçekleri ETF'in kendi serisinde
+  **yeniden ölçülmeli** ama `target_volatility` **değiştirilmemeli** (o bir
+  ölçüm değil, risk tercihidir; değiştirmek `voltarget`'ı iki sütunda farklı
+  bir strateji yapar), ve (b) **ortak pencere zorunludur** — serbest bırakınca
+  vadeli sütun 19,5 yıl, ETF sütunu 16,1 yıl kapsıyor ve aradaki 2008-2011
+  altın patlaması tek başına al-ve-tut'un Calmar'ını 0,177'den 0,231'e
+  çıkarıyor, yani takvimi ölçüp enstrüman diye raporlamış olursun.
 - Supabase REST API varsayılan ~1000 satırla sınırlı döner; geniş sorgularda
   sayfalama gerekir (bkz. `retrain.fetch_resolved`).
 - Doğrulama genelde `curl` ile Supabase REST API'sine doğrudan sorgu atarak
