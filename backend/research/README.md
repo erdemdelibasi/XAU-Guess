@@ -1337,3 +1337,90 @@ işlem yapıyor ve bu sayının kendisi ölçülmüş bir tercih değil,
 dengeleme eşiği — işlem beklenen kazancından pahalıysa işlem yapma — bu
 tablonun tamamını sola kaydırırdı. Ölçülmedi, ve ölçülene kadar iddia
 edilmiyor.
+
+---
+
+## 16. Madenci öncülüğü büyük ölçüde bir SEANS SINIRI etkisi (`miners.py` 4. bölüm)
+
+14. ve 15. bölümlerin tamamı `GC=F` ve `SI=F` üzerinde ölçüldü — **COMEX vadeli
+kontratları, yani hiçbir perakende hesabın tutamayacağı enstrümanlar.** Soru
+"peki gerçekten alabildiğim şeyde ne oluyor" diye sorulduğunda cevap net çıktı
+ve **14. bölümün pratik değerini ortadan kaldırıyor.**
+
+### Ölçüm
+
+| | lag 0 (eşzamanlı) | **lag +1 (tahmin eden)** | toplam |
+|---|---|---|---|
+| `GC=F` vadeli | +0,667 | **+0,150** | 0,817 |
+| `GLD` ETF | +0,766 | **+0,040** | 0,806 |
+| `IAU` ETF | +0,764 | +0,045 | 0,809 |
+| `SI=F` vadeli | +0,595 | **+0,161** | 0,756 |
+| `SLV` ETF | +0,699 | **+0,071** | 0,770 |
+
+**Toplam korunuyor; değişen sadece bölünme.** Bu, tahmin edici bilginin değil,
+bir **faz kaymasının** imzasıdır — ve iki metalde, üç ETF'te birden aynı yönde.
+
+### Mekanizma
+
+`GC=F`'in günlük mumu ~23 saat sürüyor: önceki gün 18:00 New York'ta başlıyor,
+17:00'da bitiyor. `GDX`'inki 09:30–16:00. İki mum **aynı fazda değil.**
+Vadelinin t+1 mumu, GDX kapandıktan **iki saat sonra** başlıyor — dolayısıyla
+GDX'in t günündeki hareketine verilen tepkinin bir kısmı mekanik olarak
+vadelinin t+1 mumuna düşüyor ve gün çözünürlüğünde **öncülük gibi okunuyor.**
+GLD ise GDX ile **aynı anda**, 16:00'da kapanıyor; o yüzden aynı bilgi lag 0'da
+kalıyor (+0,766) ve ertesi güne pek bir şey artmıyor (+0,040).
+
+**`lags.py` bunu göremezdi ve bu bir kusur değil, kapsam farkı.** O dosya bir
+**tam gün** takvim kayması arıyor ve doğru cevap veriyor (tepe lag 0'da, negatif
+laglarda ağırlık yok). Burada olan şey **kısmi seans örtüşmesi** — gün
+çözünürlüklü hiçbir tarama için görünür değil. `drivers.py`'nin kendi
+docstring'indeki uyarının ("eşzamanlı korelasyon sinyal değildir") daha ince
+taneli hâli.
+
+### Ekonomik sonuç: satın alınabilir enstrümanda kazanç YOK
+
+Üretimdeki `miners` kuralı, ETF'in **kendi** kapanışları üzerinde, işlem başına
+$1,50 + 1 bp ile (20,3 yıl):
+
+| GLD, hesap | `miners` son değer | al-ve-tut | fark |
+|---|---|---|---|
+| $5.000 | $12.096 | $30.370 | **−$18.274** |
+| **$10.000** | **$37.964** | **$60.749** | **−$22.785** |
+| $25.000 | $115.561 | $151.885 | −$36.324 |
+| $100.000 | $503.696 | $607.568 | −$103.872 |
+
+`IAU` aynı. `SLV` kısmen ayakta: $10.000'de berabere ($47.037 vs $46.535),
+$25.000'de öne geçiyor ($143.041 vs $116.348) — gümüşün ETF lag+1'i (+0,071)
+altınınkinin (+0,040) neredeyse iki katı olduğu için.
+
+Gider oranı **modellenmedi** ve buna gerek yok: her iki kol da yatırımda
+kaldıkları süreyle orantılı ödüyor, yani karşılaştırmada büyük ölçüde
+sadeleşiyor — ve sadeleşmediği yerde `miners`'ın lehine (ortalama %85 pozisyon
+vs %100).
+
+### Üretimde ne değişti, ne değişmedi
+
+**Strateji kaldırılmadı.** 14. bölümün ölçümü kendi şartlarında geçerli: bu
+sistemin kâğıt portföyleri vadeli fiyatla değerleniyor (`fetch_data.get_live_price`
+→ GC=F/SI=F) ve `backtest.py` de öyle. Vadeli işlem yapabilen biri için kazanç
+gerçek. Ön-kayıtlı bir barajı, sonradan gelen bir bilgiyle geriye dönük iptal
+etmek de bu tezgâhın kuralı değil.
+
+**Ama arayüz metni değişti, çünkü yanlış okumaya davet ediyordu.** Kart artık
+"ETF maliyetinde al-ve-tut'u geçiyor" demiyor — kazancın vadeli kontrata özgü
+olduğunu, ETF'lerde kaybolduğunu ve **satın alınabilir bir strateji olmadığını**
+söylüyor. Günlük mail de `miners` al-ve-tut'u geçtiği her hafta aynı dipnotu
+basıyor; yoksa mail onu her iyi haftada birinci sıraya koyup tam olarak yanlış
+sonuca davet ederdi.
+
+### Bu, tek bir stratejiden büyük bir soru açıyor
+
+**Bu depodaki HER strateji `GC=F`/`SI=F` üzerinde ölçüldü.** `miners` için
+enstrüman farkının belirleyici olduğu artık ölçülü. Diğerleri için
+ölçülmedi — ve beklenti farklı: `voltarget`'ın kazancı oynaklığın
+otokorelasyonundan geliyor, ki bu enstrümandan bağımsız bir özellik;
+`miners`'ınki ise doğrudan bir saat farkıydı. Ama "beklenti" bu tezgâhta bir
+cevap değil. **Açık soru: `voltarget`, `technical`, `ml`, `macro` ve `ensemble`
+GLD/IAU/SLV üzerinde al-ve-tut'u geçmeye devam ediyor mu?** Cevaplanana kadar
+bu README'deki hiçbir Calmar sayısı "perakende bir hesapta böyle olurdu" diye
+okunmamalı.

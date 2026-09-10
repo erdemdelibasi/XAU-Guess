@@ -139,8 +139,21 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
     `drivers.py`'nin Bonferroni eşiği → `lags.py`'nin hizalama taraması →
     `miners.py`'nin maliyet merdiveni. `^HUI` aday olarak kaldı (ikisi 0,01 IC
     içinde ölçüldü; ikisini birden göndermek canlı bağımlılığı bedavaya
-    ikiye katlamak olurdu) ve belgelenmiş yedektir. `research/README.md`
-    14. bölüm.
+    ikiye katlamak olurdu) ve belgelenmiş yedektir.
+
+    **AMA aynı gün ölçüldü ki bu kazanç VADELİ KONTRATA ÖZGÜ.** Aynı kural,
+    alınabilir ETF'lerin kendi kapanışları üzerinde koşulunca kayboluyor: öncü
+    korelasyon `GC=F`'te +0,150 iken `GLD`'de **+0,040**, `SI=F`'te +0,161 iken
+    `SLV`'de +0,071 — ve **lag0 + lag+1 toplamı sabit kalıyor**, yani bilgi
+    yok olmuyor, "bugün"e geri kayıyor. Sebep bir faz kayması: `GC=F`'in günlük
+    mumu ~23 saat (önceki gün 18:00 → 17:00), `GDX`'inki 09:30–16:00; vadelinin
+    t+1 mumu GDX kapandıktan **iki saat sonra** başlıyor, `GLD` ise GDX ile
+    **aynı anda** kapanıyor. $10.000'lik hesapta GLD üzerinde `miners`
+    al-ve-tut'a **$22.785 kaybediyor**. `lags.py` bunu göremezdi: o **tam gün**
+    kayması arar, bu ise **kısmi seans örtüşmesi**. Strateji kaldırılmadı
+    (kâğıt portföyler vadeli fiyatla değerleniyor, ölçüm kendi şartlarında
+    geçerli) ama **arayüz kartı ve günlük mail artık satın alınabilir olmadığını
+    açıkça yazıyor**. `research/README.md` 14. ve **16.** bölüm.
 
 Madde 5'in madde 3'ü **kurtarmadığını** anlamak kritik: oynaklık hedefleme
 hiçbir şey tahmin etmiyor, gerçekleşen oynaklığa tepki veriyor ve oynaklık
@@ -1020,12 +1033,14 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   gelmesi 180 çözülmüş satır sürer. Canlı sinyal *üreten* kodun testi hâlâ
   yok; o `backtest.py` + canlı izlemeyle doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
-  oku.** Orada ölçülüp elenmiş **on beş** hipotez duruyor — oranla ilgili
+  oku.** Orada ölçülüp elenmiş **on altı** hipotez duruyor — oranla ilgili
   bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve
   merkez bankası alımıyla ilgili olan 11. bölümde, yeni bir veri kaynağı
   eklemekle ilgili olan 12. bölümde, "daha çok veriyle eğitelim" ile ilgili
   olan 13. bölümde, altın madencileriyle ilgili olan 14. bölümde,
-  komisyon/hesap büyüklüğüyle ilgili olan 15. bölümde büyük ihtimalle zaten var.
+  komisyon/hesap büyüklüğüyle ilgili olan 15. bölümde,
+  "gerçekte hangi enstrümanı alıyorum" ile ilgili olan 16. bölümde büyük
+  ihtimalle zaten var.
 - **Yeni bir seri denemek isteyince `fetch_data.MACRO_SYMBOLS`'e EKLEME.**
   O sözlük canlı yolu da besliyor (`predict.py` her koşuda her girdiyi
   çekiyor), yani kapıdan geçmemiş bir seri oraya konunca günlük bir istek ve
@@ -1059,6 +1074,13 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   `ablation.min_detectable_ic` bu sayıyı üretiyor.
 - Bir parametre değiştirirsen `backtest.py`'ı çalıştırıp etkisini **ölç**.
   Bu projede sezgiyle konmuş sayı yok.
+- **Bir kenar bulduğunda, ALINABİLİR enstrümanda da ölç.** Bu depodaki her
+  strateji `GC=F`/`SI=F` üzerinde ölçülüyor ve bunlar perakende bir hesabın
+  tutamayacağı vadeli kontratlar. `miners`'ın kazancının neredeyse tamamı bir
+  **seans sınırı faz kayması** çıktı (vadeli mum ~23 saat, ETF mumu 6,5 saat)
+  ve GLD/IAU/SLV'de kayboldu — 16. bölüm. Gün çözünürlüklü bir lag taraması
+  bunu göremez. Ölçüm aracı: `research/miners.tradeable_frame` + 4. bölüm.
+  **Diğer stratejiler için bu henüz ölçülmedi ve açık bir sorudur.**
 - Supabase REST API varsayılan ~1000 satırla sınırlı döner; geniş sorgularda
   sayfalama gerekir (bkz. `retrain.fetch_resolved`).
 - Doğrulama genelde `curl` ile Supabase REST API'sine doğrudan sorgu atarak

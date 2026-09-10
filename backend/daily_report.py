@@ -484,6 +484,15 @@ def render_text(report: dict) -> str:
         beat = section["beat_benchmark"]
         lines.append("    Al-ve-tut'u geçen: "
                      + (", ".join(STRATEGY_LABELS[s] for s in beat) if beat else "HİÇBİRİ"))
+        # `miners` is the one book here whose measured edge is specific to the
+        # instrument it is valued in. research/README.md section 16: the lead
+        # is largely a futures session-boundary effect (GC=F settles 17:00,
+        # GDX 16:00) and it collapses on the ETFs a retail account can hold
+        # -- +0.150 to +0.040. Without this line the mail would rank it first
+        # every good week and invite exactly the wrong conclusion.
+        if "miners" in beat:
+            lines.append("    (Madenciler: kazanç VADELİ kontrata özgü, "
+                         "GLD/IAU/SLV'de kayboluyor — satın alınabilir değil)")
 
         kf = section["kanal_finans"]
         if kf:

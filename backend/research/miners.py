@@ -83,6 +83,8 @@ import pandas as pd  # noqa: E402
 import ablation  # noqa: E402
 import assets as assets_module  # noqa: E402
 import backtest as backtest_module  # noqa: E402
+import fetch_data  # noqa: E402
+import miners_signal  # noqa: E402
 import edge  # noqa: E402
 import ml_model  # noqa: E402
 import panel as panel_module  # noqa: E402
@@ -471,6 +473,132 @@ def part3(asset, common: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Part 4 -- the instrument a person can actually buy
+# ---------------------------------------------------------------------------
+
+# What a retail broker offering US-listed securities actually lets you hold.
+# GC=F and SI=F are COMEX futures contracts and are NOT among them, so every
+# number in Parts 1-3 is measured on something the reader cannot buy.
+TRADEABLE = {
+    "gold": (("GLD", 0.40), ("IAU", 0.25)),   # (ticker, annual expense ratio %)
+    "silver": (("SLV", 0.50),),
+}
+
+# Account sizes to price a flat commission against, matching
+# backtest.ACCOUNT_SIZES plus the $10,000 rung a person is likely to ask about.
+FLAT_FEE_USD = 1.50
+FLAT_SPREAD_BPS = 1.0
+ACCOUNT_SIZES = (5_000, 10_000, 25_000, 100_000)
+
+
+def tradeable_frame(asset, ticker: str) -> pd.DataFrame:
+    """ETF closes joined to GDX's daily change, on the ETF's own calendar.
+
+    Deliberately NOT the research panel. The panel is keyed on the futures
+    contract's calendar and carries the futures close; this asks a different
+    question -- what would have happened to someone holding the ETF -- so the
+    ETF sets the index and its own closes are the prices traded.
+    """
+    etf = fetch_data.get_daily(ticker, years=25)
+    gdx = fetch_data.get_daily("GDX", years=25)
+    if etf.empty or gdx.empty:
+        return pd.DataFrame()
+
+    idx = pd.DatetimeIndex(etf["time"]).normalize()
+    gdx_close = gdx.set_index(pd.DatetimeIndex(gdx["time"]).normalize())["close"]
+    gdx_close = gdx_close[~gdx_close.index.duplicated(keep="last")]
+    # ffill only -- the same backward-only rule fetch_data.align_on_gold uses.
+    # Anything else would pull a future GDX print into an earlier ETF row.
+    joined = gdx_close.reindex(idx, method="ffill")
+
+    out = pd.DataFrame({
+        "time": etf["time"].to_numpy(),
+        "close": etf["close"].to_numpy(dtype=float),
+        "gdx_chg": joined.pct_change().to_numpy(dtype=float),
+    })
+    return out.dropna(subset=["gdx_chg"]).reset_index(drop=True)
+
+
+def part4(asset) -> None:
+    """Does the edge survive on the instrument, and after the commission?
+
+    THE TIMING PROBLEM THIS EXISTS TO SURFACE
+    ------------------------------------------
+    The whole finding rests on an hour. GDX settles 16:00 New York and COMEX
+    gold 17:00, so at the moment the metal's bar prints, the miners' close is
+    already known -- a decision a person could actually make.
+
+    GLD, IAU and SLV are US equities. **They close at 16:00, the same instant
+    as GDX.** The hour is gone. Acting on it means trading in the closing
+    minutes on a GDX print that is not yet final, which is a different and
+    strictly worse execution than the one Parts 1-3 measured.
+
+    So this part re-measures the production rule end to end on the ETF's own
+    closes. Two things change at once and both are unavoidable, because they
+    are what the instrument IS: the price series (an ETF tracking spot, not a
+    futures contract carrying basis) and the settlement time.
+
+    The expense ratio is NOT modelled. It is a continuous drag that both arms
+    pay in equal proportion to the time they are invested, so it very nearly
+    cancels in a comparison against buy-and-hold -- and where it does not
+    cancel it favours this rule, which averages 85% exposure against
+    buy-and-hold's 100%. Printing it as a column would overstate the case.
+    """
+    print("\n" + "=" * 100)
+    print("  BOLUM 4 -- GERCEKTEN ALINABILEN ENSTRUMAN  (GC=F degil, ETF)")
+    print("=" * 100)
+    print("  UYARI, olcumden once: GDX 16:00 New York'ta kapaniyor, GC=F 17:00'da.")
+    print("  Bolum 1-3'un tamami o BIR SAATE dayaniyor. GLD/IAU/SLV ise ABD")
+    print("  hisseleridir ve GDX ile AYNI ANDA, 16:00'da kapanirlar -- yani o saat")
+    print("  yok. Asagidaki sayilar, kapanis dakikalarinda henuz kesinlesmemis bir")
+    print("  GDX fiyatiyla islem yapabildigini VARSAYIYOR; gercek uygulama bundan")
+    print("  daha iyi olamaz, daha kotu olabilir.")
+
+    for ticker, expense in TRADEABLE.get(asset.key, ()):
+        df = tradeable_frame(asset, ticker)
+        if df.empty or len(df) < 750:
+            print(f"\n  {ticker}: yetersiz veri.")
+            continue
+
+        years = (df["time"].iloc[-1] - df["time"].iloc[0]).days / 365.25
+        # The PRODUCTION signal function, not a copy -- same discipline
+        # backtest.py applies to trading.compute_target_exposure.
+        targets = np.array([
+            trading.compute_target_exposure(
+                "miners", 1.0, 1.0, 0.15,
+                *(lambda s: (s["direction"], s["confidence"]))(
+                    miners_signal.miners_signal(df.iloc[i: i + 1])))
+            for i in range(len(df))])
+        hold = np.full(len(df), trading.MAX_EXPOSURE)
+        prices = df["close"].to_numpy(dtype=float)
+
+        print(f"\n  --- {ticker} ({len(df)} gun, {years:.1f} yil, "
+              f"{df['time'].iloc[0].date()} -> {df['time'].iloc[-1].date()}; "
+              f"gider orani %{expense:.2f}/yil, modellenmedi) ---")
+        print(f"      {'hesap':>9}{'strateji':>10}{'son deger':>13}{'YBG':>8}"
+              f"{'oynak':>8}{'Sharpe':>8}{'maks dus':>10}{'Calmar':>8}"
+              f"{'islem':>7}{'komisyon':>11}")
+        for size in ACCOUNT_SIZES:
+            scaled = FLAT_FEE_USD * trading.STARTING_CASH / size
+            k = size / trading.STARTING_CASH
+            for label, path in (("miners", targets), ("al-ve-tut", hold)):
+                book = backtest_module.Portfolio(label)
+                for price, target in zip(prices, path):
+                    book.step(float(price), float(target),
+                              FLAT_SPREAD_BPS / 10_000.0, scaled)
+                if min(book.equity) <= 0:
+                    print(f"      {size:>9,}{label:>10}{'IFLAS':>13}")
+                    continue
+                m = backtest_module.metrics(book.equity, book.exposure, years)
+                print(f"      {size:>9,}{label:>10}{m['final'] * k:>13,.0f}"
+                      f"{100 * m['cagr']:>7.1f}%{100 * m['vol']:>7.1f}%"
+                      f"{m['sharpe']:>8.2f}{100 * m['max_dd']:>9.1f}%"
+                      f"{m['calmar']:>8.3f}{book.trades:>7}"
+                      f"{book.fees_paid * k:>11,.0f}")
+            print()
+
+
+# ---------------------------------------------------------------------------
 
 def run_for_asset(asset) -> None:
     print("\n" + "#" * 100)
@@ -492,6 +620,7 @@ def run_for_asset(asset) -> None:
     part1(asset, common)
     part2(asset, common)
     part3(asset, common)
+    part4(asset)
 
 
 def main() -> int:

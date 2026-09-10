@@ -57,7 +57,10 @@ const STRATEGIES = [
   { key: "claude", label: "Sadece Claude", desc: "Yalnızca Claude'un bağımsız yargısı." },
   { key: "miners", label: "Madenciler", desc:
     "GDX (altın madencileri ETF'i) bugün yükseldiyse yarın pozisyonu artırır. " +
-    "Tek günlük ufuk. ETF maliyetinde al-ve-tut'u geçiyor, banka gram altın maliyetinde geçmiyor." },
+    "Tek günlük ufuk. Kazancı VADELİ kontrat üzerinde ölçüldü ve büyük ölçüde " +
+    "seans saatlerinden geliyor: GC=F 17:00'da, GDX 16:00'da kapanıyor. " +
+    "GLD/IAU/SLV gibi ETF'lerde bu saat farkı yok ve kazanç kayboluyor " +
+    "(öncü korelasyon +0,150 → +0,040). Satın alınabilir bir strateji DEĞİL." },
   { key: "kanalfinans", label: "Kanal Finans TŞ", follower: true,
     desc: "Tunç Şatıroğlu ne derse onu yapar. Tam giriş/çıkış, zarar-kes takipli." },
 ];
