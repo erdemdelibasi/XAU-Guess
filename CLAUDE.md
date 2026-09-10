@@ -86,15 +86,41 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
    ağırlık ızgarasını eğitim ve test yarıları **tam ters** sıralıyor
    (Spearman −1,00), yani bölme soruyu çözmedi, bir rejim değişimini ikiye
    ayırdı. `research/README.md` 12. bölüm.
-10. **Altın madencileri metali öncülüyor gibi görünüyor — AÇIK bir bulgu,
-    üretimde değil.** `GDX`/`^HUI` her iki metalde de örneklem dışı
-    Bonferroni eşiğini geçti (t=+5,5..+6,1) ve dört öldürme denemesinden sağ
-    çıktı: hizalama taraması, gümüş kontrol serisi, metalin kendi getirisi
-    (kontrol edilince ilişki zayıflamıyor **güçleniyor**: r=+0,109 → kısmi
-    +0,179) ve düz mum artefaktı. **Ama ölçülen 1 GÜNLÜK bir korelasyondur**;
-    bu sistemin ufku 5 gün ve `wall.py` 1 günlük duvarı %56,2 diye ölçmüştü.
-    Duvarı aştığı gösterilmedi. Bu tezgâhta yön tarafında güçlü pozitif çıkan
-    ilk bulgu, ve tam bu yüzden en şüpheli davranılması gereken bulgu.
+10. **Altın madencileri metali gerçekten öncülüyor — ölçüldü, ama sadece
+    1 GÜNLÜK ufukta, ve üretimde değil.** `GDX`/`^HUI` her iki metalde de
+    örneklem dışı Bonferroni eşiğini geçti (t=+5,5..+6,1) ve **yedi** öldürme
+    denemesinden sağ çıktı: hizalama taraması, gümüş kontrol serisi, düz mum
+    artefaktı, metalin kendi getirisi (kontrol edilince ilişki zayıflamıyor
+    **güçleniyor**: r=+0,151 → kısmi +0,206), ve `miners.py`'nin üç ekonomik
+    kontrolü — sabit-ortalama pozisyon, 5 gün bayat sinyal, metalin kendi
+    momentumu. Üçü de al-ve-tut'un altında kaldı, yani kazanç ne "daha az
+    metal tutmak"tan, ne devir hızından, ne de bedava bir momentum
+    sinyalinden geliyor.
+
+    **Bilginin tamamı t+1 gününde ve t+2'den itibaren hiçbir şey yok.**
+    Yani 5 günlük ufukta kaybolması bir ölüm değil, aritmetik bir seyrelme.
+    `edge.walk_forward`'ın eşleştirilmiş A/B'sinde 1 günlük ufukta üretim
+    özellik setine katkı **+0,079..+0,097 IC, dört hücrenin dördünde de
+    p=0,000** (altın IC +0,0447 → **+0,1416**; bu deponun ölçtüğü en yüksek
+    IC). 5 günlük ufukta ayırt edilemiyor (p=0,13 / p=0,99), ama testin gücü
+    de yazılı: orada görülebilecek en küçük IC 0,1025, ölçülen fark 0,025.
+
+    Maliyet merdiveninde **öldüğü yer de ölçüldü**: altın 10bp ile 40bp
+    arasında, gümüş 40bp ile 150bp arasında. ETF maliyetinde `uretim egimi`
+    kuralı al-ve-tut'u Calmar'da geçiyor (altın +0,100, gümüş +0,126, iki
+    yarıda da aynı işaretle) — **banka gram altın maliyetinde geçmiyor**
+    (−0,264). 7. maddedeki `macro` bileşeninin aynısı: gerçek bir sinyal,
+    üzerine para koymanın pahalı olduğu bir sinyal.
+
+    **Yine de hiçbir üretim dosyası değişmedi**, ve sebebi ilan edilmiş
+    şartın kendisi: benimseme şartı 5 günlük ufukta katkı **VE** maliyet
+    testini geçmekti; ikincisi geçti, birincisi geçmedi. Şart iki ayrı
+    benimseme yolunu tek koşula bağlıyordu ve onu sonucu **gördükten sonra**
+    ikiye ayırmak tam olarak bu tezgâhın yasakladığı şeydir (bkz. GVZ
+    ızgarası, `gs_ratio_z`). Ayrı bir faz, kendi ön-kaydıyla gerekiyor — ve
+    o fazın üç somut bedeli var: `GDX` canlı yola girer, panelin %18,6'sı
+    eğitimden düşer, ve 5 günlük **tek ufuk** varsayımı kırılır.
+    `research/README.md` 14. bölüm.
 
 Madde 5'in madde 3'ü **kurtarmadığını** anlamak kritik: oynaklık hedefleme
 hiçbir şey tahmin etmiyor, gerçekleşen oynaklığa tepki veriyor ve oynaklık
@@ -954,11 +980,12 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   gelmesi 180 çözülmüş satır sürer. Canlı sinyal *üreten* kodun testi hâlâ
   yok; o `backtest.py` + canlı izlemeyle doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
-  oku.** Orada ölçülüp elenmiş **on üç** hipotez duruyor — oranla ilgili
+  oku.** Orada ölçülüp elenmiş **on dört** hipotez duruyor — oranla ilgili
   bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve
   merkez bankası alımıyla ilgili olan 11. bölümde, yeni bir veri kaynağı
   eklemekle ilgili olan 12. bölümde, "daha çok veriyle eğitelim" ile ilgili
-  olan 13. bölümde büyük ihtimalle zaten var.
+  olan 13. bölümde, altın madencileriyle ilgili olan 14. bölümde büyük
+  ihtimalle zaten var.
 - **Yeni bir seri denemek isteyince `fetch_data.MACRO_SYMBOLS`'e EKLEME.**
   O sözlük canlı yolu da besliyor (`predict.py` her koşuda her girdiyi
   çekiyor), yani kapıdan geçmemiş bir seri oraya konunca günlük bir istek ve

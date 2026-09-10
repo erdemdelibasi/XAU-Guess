@@ -45,6 +45,7 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 | `realrate.py` | Gerçek reel faiz (FRED DFII10) vs TIP/IEF vekili; merkez bankası alımının ölçülebilir izi |
 | `impliedvol.py` | GVZ (altının ima edilen oynaklığı) gerçekleşen oynaklığı üretimdeki tahminciden daha iyi kestiriyor mu, ve bu Calmar'a çevrilebiliyor mu |
 | `vixterm.py` | `vix3m` `vix`'in yerini almali mi -- ML ozelligi ve makro bileseni ayri ayri, eslestirilmis A/B |
+| `miners.py` | `GDX`/`^HUI` madenci öncülüğü: bilgi hangi günde yaşıyor, üretim özellik setine katıyor mu, maliyet merdiveninin neresinde ölüyor — üç kontrollü |
 | `pooled.py` | Bağlayıcı kısıt gözlem sayısıysa: iki metali havuzlayıp eğitmek IC'yi artırıyor mu — üç kollu (üretim / normalleştirilmiş / havuz) |
 
 ```bash
@@ -65,6 +66,7 @@ python realrate.py          # ~6 dk  (FRED gerekir)
 python impliedvol.py        # ~30 sn (GVZ; panel yeniden kurulmus olmali)
 python vixterm.py           # ~6 dk  (vix3m vix'in yerini almali mi)
 python pooled.py            # ~25 dk (havuzlanmis cok-varlikli egitim)
+python miners.py            # ~11 dk (madenci onculugu: ufuk + A/B + maliyet)
 ```
 
 `panel.py` argümansız çalıştırılınca **her iki metal için de** panel kurar
@@ -1029,3 +1031,146 @@ normalleştirme testi bile değil. C vs B ikisinden de arınmış.
 
 **Bu, ileride güçlü bir örneklemle tekrar sorulmaya değer tek açık uçtur.**
 Ama p=0,12 ve tek metal, bu tezgâhta bir karar değildir.
+
+---
+
+## 14. Madenciler: bilgi gerçek, ama sadece 1 günlük (`miners.py`)
+
+12. bölüm `GDX`/`^HUI`'yi **AÇIK** bırakmış ve eksik üç testi adıyla yazmıştı:
+(a) 5 günlük ufukta ayakta kalıyor mu, (b) maliyet merdiveninin neresinde
+ölüyor, (c) `edge.walk_forward`'ın eşleştirilmiş A/B'sinde üretim özellik
+setine bir şey katıyor mu. Bu bölüm o üç testtir.
+
+**32 test önceden ilan edildi** (2 metal × 2 seri × 6 ufuk = 24 korelasyon,
+2 metal × 2 ufuk × 2 aday kol = 8 eşleştirilmiş A/B), eşik |t| > 3,29.
+Ortak pencere 2006-05 → 2026-09 (5105 gün); `GDX` 2006'da başladığı için
+**1168 seans (%18,6) bedel**, ve `ml_model.prepare_training_frame` NaN satırı
+düşürdüğü için üretime girerse bu bedel her eğitim koşusunda da ödenirdi.
+
+### (a) Ölmüyor — SEYRELİYOR, ve bu ayrım her şeyi belirliyor
+
+Kümülatif bir ufuk tablosu "5 günde kayboldu" ile "5 güne yayıldı"yı ayırt
+edemez, ve ikisi **zıt işler** gerektirir. Bu yüzden her t+k gününün getirisi
+**tek başına** ölçüldü (pencereler örtüşmüyor):
+
+| gün t+k | altın ham r | kısmi r | t | gümüş kısmi r | t |
+|---|---|---|---|---|---|
+| **+1** | +0,1506 | **+0,2058** | **+15,02** | **+0,2271** | **+16,65** |
+| +2 | −0,0265 | −0,0117 | −0,84 | −0,0222 | −1,59 |
+| +3 | −0,0004 | −0,0149 | −1,06 | +0,0227 | +1,62 |
+| +4 | +0,0155 | +0,0355 | +2,53 | +0,0210 | +1,50 |
+| +5 | +0,0271 | +0,0250 | +1,79 | +0,0111 | +0,79 |
+| +6..+10 | — | hepsi \|t\|<2,8 | — | hepsi \|t\|<2,0 | — |
+
+(kısmi = metalin **kendi** aynı gün getirisi sabit tutularak; 12. bölümün 3.
+öldürme testi, artık her ufukta)
+
+Bütün ağırlık **t+1'de**, ve t+2'den itibaren hiçbir şey yok. Yani 5 günlük
+kümülatif korelasyonun düşük çıkması bir **ölüm değil, aritmetik bir
+seyrelmedir**: dört günlük ilgisiz gürültü aynı bilginin üzerine biniyor.
+Kümülatif tablo bunu doğruluyor — altın kısmi r ufuk 1'de +0,1793, ufuk 5'te
++0,1214, ufuk 20'de +0,0700 (t=+0,78).
+
+### (c) 1 günlük ufukta ML setine büyük katkı, 5 günlük ufukta hiç
+
+`edge.walk_forward`, aynı satırlar, aynı refit takvimi, tek değişen kolon
+listesi:
+
+| varlık | ufuk | ÜRETİM IC | +GDX IC | fark | p | +HUI farkı | p |
+|---|---|---|---|---|---|---|---|
+| altın | **1** | +0,0447 | **+0,1416** | **+0,0970** | **0,000** | **+0,0876** | **0,000** |
+| gümüş | **1** | +0,0731 | **+0,1604** | **+0,0872** | **0,000** | **+0,0791** | **0,000** |
+| altın | 5 | +0,0057 | +0,0310 | +0,0252 | 0,129 | +0,0124 | 0,367 |
+| gümüş | 5 | −0,0031 | −0,0022 | +0,0009 | 0,995 | +0,0042 | 0,665 |
+
+1 günlük ufukta **dört hücrenin dördü de** Bonferroni eşiğini (0,05/32 =
+0,0016) geçiyor, aynı işaretle, iki metalde ve iki seride birden. +0,1416,
+bu deponun bugüne kadar ölçtüğü **en yüksek IC** (önceki en yüksek 13.
+bölümün alınmamış +0,1040'ıydı, üretim +0,055).
+
+5 günlük ufukta ise fark ayırt edilemiyor — **ama testin gücü de yazılı**:
+o örneklemin görebileceği en küçük IC 0,1025, ölçülen fark 0,025. Yani
+"katkı yok" değil, "**bu ufukta bu örneklemin göremeyeceği kadar seyrelmiş**".
+
+### (b) Maliyet merdiveni — ve üç kontrol olmadan bu tablo okunamaz
+
+İki ön-kayıtlı kural, `trading.compute_rebalance` üzerinden (kopya değil):
+`saf` = madenci yükseldiyse tam pozisyon, düştüyse nakit (**bir öneri değil,
+üst sınır**); `uretim egimi` = `trading.compute_target_exposure`'ın sinyal
+dalının kendisi, 0,85 tabanı etrafında ±0,15 iki yönlü eğim, ölçeği eğitim
+yarısının p90'ı.
+
+**Her iki kural da al-ve-tut'tan daha az metal tutuyor** (%85 ve ~%50), ve
+daha az tutmak tek başına oynaklığı ve düşüşü küçültür — yani **gürültüyle
+bile** Calmar'ı yükseltirdi. Bu, `assets.py`'nin gümüşün `target_volatility`'si
+için belgelediği "**daha az altın tut**" arızasının aynısıdır. Üç kontrol
+bu yüzden zorunlu:
+
+| kontrol | ne yapar | ne eler |
+|---|---|---|
+| `[sabit ort]` | o kuralın **ortalama** pozisyonunda sabit durur, hiç zamanlama yok | "kazanç daha az metal tutmaktan geliyor" |
+| `[bayat]` | aynı kural, **5 gün eski** madenci verisiyle: aynı dağılım, aynı devir hızı, aynı komisyon, sıfır bilgi | "kazanç devir hızından / bir backtest artefaktından geliyor" |
+| `[kendi mom]` | aynı kural, metalin **kendi** `return_1d`'siyle — bedava sinyal | "GDX aslında altının kendi momentumunun vekili" |
+
+**Üçü de geçildi, istisnasız.** `[sabit ort]` her hücrede al-ve-tut'la aynı
+(±0,02) — yani "daha az tut" açıklaması sıfır. `[bayat]` ve `[kendi mom]`
+ise al-ve-tut'un **altında**: altında `saf [kendi mom]` Calmar 0,018,
+al-ve-tut 0,219. Altının kendi 1 günlük momentumu hiçbir şey kazandırmıyor;
+kazandıran şey madencinin altından **ayrışan** kısmı — 12. bölümün kısmi
+korelasyon bulgusunun ekonomik karşılığı.
+
+`uretim egimi` kolunun al-ve-tut'a karşı Calmar farkı (48 hücrenin hepsinde
+`−BAYAT` ve `−KENDI` **pozitif**):
+
+| maliyet | altın TAM | altın TEST | gümüş TAM | gümüş TEST |
+|---|---|---|---|---|
+| COMEX 2bp | +0,147 | +0,148 | +0,150 | +0,149 |
+| **ETF 10bp** | **+0,100** | **+0,097** | **+0,126** | **+0,125** |
+| gümüş varsayılanı 20bp | — | — | **+0,097** | **+0,097** |
+| Perakende 40bp | −0,042 | −0,092 | +0,044 | +0,041 |
+| **Banka 150bp** | **−0,264** | **−0,525** | **−0,121** | **−0,217** |
+
+**Merdivende öldüğü yer yazılı: altın 10bp ile 40bp arasında, gümüş 40bp ile
+150bp arasında.** Kullanıcının gerçek enstrümanı banka gram altınsa (150bp)
+bu sinyal **orada para kazandırmaz** — ve bu, 7. bölümün `macro` bileşeni
+için ölçtüğü şeyin aynısıdır: gerçek bir sinyal, üzerine para koymanın
+pahalı olduğu bir sinyal.
+
+### Hizalama bir kez daha denetlendi
+
+Bu büyüklükte bir sonucu tek başına açıklayabilecek tek hipotez bir günlük
+join kayması. İki bağımsız kontrol: `lags.py`'nin tepe noktası **lag 0'da**
+(+0,667), lag +1'de +0,150, lag −1'de −0,041 — bir gün kaymış bir join'de
+tepe +1'de olurdu, orada değil. Ve `fetch_data.align_on_gold` yalnızca
+`reindex(...).ffill()` yapıyor, yani **sadece geriye bakıyor**; bir gelecek
+değeri erken bir satıra çekemez.
+
+### Hüküm: üretime GİRMEDİ, ve girmeme sebebi ilan edilmiş şartın kendisi
+
+Benimseme şartı **sonuçlara bakılmadan önce** iki maddeydi: (1) Bölüm 2'de
+katkı, aynı yönde, iki metalde de; **VE** (2) Bölüm 3'te al-ve-tut'u geçmek,
+iki yarıda da.
+
+- **Şart 2 geçti**, üç kontrolü birden geçerek, her varlığın kendi canlı
+  maliyet basamağında.
+- **Şart 1, 5 günlük ufukta geçmedi** (p=0,13 / p=0,99). 1 günlük ufukta
+  geçti, hem de fazlasıyla.
+
+Şart, iki **ayrı** benimseme yolunu (5 günlük ML kolonu / bağımsız 1 günlük
+bileşen) tek bir koşula bağlıyordu. Sonucu **gördükten sonra** onu ikiye
+ayırmak, tam olarak bu tezgâhın önlemek için var olduğu şeydir — `gs_ratio_z`
+ve GVZ ızgarasında olduğu gibi. Bu yüzden burada hiçbir üretim dosyası
+değişmedi.
+
+**Ama bu negatif bir bulgu değil.** Bilgi gerçek, artefakt değil (üç kontrol),
+üretim setine katkısı ölçüldü, ve ETF maliyetinde paraya çevrilebiliyor. Tek
+sorun şu: **1 günlük**, ve bu sistemin bütün mimarisi 5 gün üzerine kurulu —
+ufuk `wall.py` ile ölçülerek seçilmişti ve 1 günlük duvar bu projedeki en
+yüksek duvardır (%56,2).
+
+Yani bu, bu depoda **yön tarafında ilk kez gerçek bir üretim değişikliğini
+hak eden** bulgudur; ama hak ettiği değişiklik, ilan edilmiş şartın yazıldığı
+değişiklik değil. Ayrı bir faz, kendi ön-kaydı ve kendi koşusuyla gerekiyor —
+ve o fazın ödemesi gereken üç somut bedel şunlar: `GDX` canlı yola
+(`fetch_data.MACRO_SYMBOLS`) girer, panelin %18,6'sı eğitimden düşer, ve
+5 günlük tek ufuk varsayımı kırılır.
