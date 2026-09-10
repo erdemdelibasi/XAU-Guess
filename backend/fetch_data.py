@@ -74,6 +74,15 @@ MACRO_SYMBOLS = {
     "ief": "IEF",           # yields (see macro.real_yield_proxy); FRED's own
                             # DFII10 series is the real thing but is not
                             # reachable from every network (see below).
+    "gdx": "GDX",           # gold miners ETF. The ONE series here that feeds a
+                            # standalone signal rather than the model -- see
+                            # miners_signal.py. It graduated out of
+                            # research/panel.CANDIDATE_SYMBOLS the only way a
+                            # series may: research/drivers.py's Bonferroni bar,
+                            # research/lags.py's alignment scan, and then
+                            # research/miners.py's cost ladder. Do NOT add a
+                            # series here that has not made that trip; this
+                            # dict is fetched on every live run.
 }
 
 # FRED publishes the actual 10Y TIPS real yield (DFII10), the 10Y breakeven

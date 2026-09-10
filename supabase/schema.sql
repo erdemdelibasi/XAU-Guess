@@ -144,7 +144,7 @@ select a.asset, s.strategy
 from (values ('gold'), ('silver')) as a(asset)
 cross join (values
     ('buyhold'), ('voltarget'), ('trend'), ('defensive'), ('ensemble'),
-    ('technical'), ('ml'), ('macro'), ('claude'), ('kanalfinans')
+    ('technical'), ('ml'), ('macro'), ('claude'), ('kanalfinans'), ('miners')
 ) as s(strategy)
 on conflict (asset, strategy) do nothing;
 

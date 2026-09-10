@@ -30,7 +30,7 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 
 | Dosya | Ne yapar |
 |---|---|
-| `panel.py` | Her metal için 25 yıllık + 13 makro + 9 **aday** serilik günlük panel kurar, `panel_<varlık>.json`'a önbelleğe alır (~1 dk, gitignore'da). Adaylar (`CANDIDATE_SYMBOLS`) canlı yolda **yok** — 12. bölüm |
+| `panel.py` | Her metal için 25 yıllık + 14 makro + 8 **aday** serilik günlük panel kurar, `panel_<varlık>.json`'a önbelleğe alır (~1 dk, gitignore'da). Adaylar (`CANDIDATE_SYMBOLS`) canlı yolda **yok** — 12. bölüm |
 | `wall.py` | Başabaş duvarı: ufka ve maliyete göre gereken yön isabeti |
 | `drivers.py` | 26 serinin eşzamanlı (açıklayan) vs öncü (tahmin eden) etkisi, **her iki metal için**; negatiflerin yanına testin gücünü de basar |
 | `lags.py` | Bir "öncü" sürücü gerçekten öncü mü, yoksa takvim kayması mı |
@@ -1174,3 +1174,83 @@ değişiklik değil. Ayrı bir faz, kendi ön-kaydı ve kendi koşusuyla gerekiy
 ve o fazın ödemesi gereken üç somut bedel şunlar: `GDX` canlı yola
 (`fetch_data.MACRO_SYMBOLS`) girer, panelin %18,6'sı eğitimden düşer, ve
 5 günlük tek ufuk varsayımı kırılır.
+
+### Sonrası: Faz 5b — ayrı bir faz, ayrı bir ön-kayıt, ve bu sefer üretime girdi
+
+Yukarıdaki hüküm ("hiçbir üretim dosyası değişmedi") o commit için doğruydu
+ve öyle kalıyor. Bulguyu üretime taşımak, kendi barajını **kendi sonuçlarına
+bakmadan önce** ilan eden ayrı bir faz olarak yapıldı.
+
+**Sonuçlara bakılmadan sabitlenen üç karar**, gerekçeleri puan değil:
+
+1. **`GDX`, `^HUI` değil.** İkisi dört hücrede de 0,01 IC içinde ölçüldü, yani
+   bu bir performans seçimi **olamaz**. Gerekçe veri güvenilirliği: GDX işlem
+   gören bir ETF, `^HUI` bir endeks — ve bu proje `^VXSLV`'yi tam olarak buna
+   kaybetti (Yahoo tek satır döndürüyor). HUI belgelenmiş yedek olarak aday
+   listesinde kaldı; ikisini birden göndermek canlı bağımlılığı bedavaya ikiye
+   katlamak olurdu.
+2. **Strateji, ensemble bileşeni değil.** Gerekçe yukarıda ölçülü: ufuk 1 gün,
+   `ensemble.combine()` 5 günlük tahmin havuzluyor.
+3. **`predictions` tablosuna yeni kolon yok** — migration tek bir `portfolios`
+   insert'ine indi.
+
+**Ölçek sabiti (`GDX_SCALE`), kod yazılmadan önce ölçüldü.** `|gdx_chg|`'in
+p90'ı **iki panelde de beşinci haneye kadar aynı** (0,03973) — aynı seriyi
+okuyorlar — yani `BOND_SCALE`/`VIX_SCALE` gibi modül sabiti, `assets.py`'ye
+girmesi gereken bir şey değil. Bu, tahmin edilmedi, `compare.py`'nin
+fiyat-türevli ölçekler için yaptığı testin aynısıyla ayrıldı.
+
+`GDX_SCALE = 25,0` (= 1/p90) ve CLAUDE.md'nin zorunlu kıldığı **ikili**
+kontrol — doyma oranı VE medyan |skor| birlikte:
+
+| dönem | doyma | medyan \|skor\| | p90 \|skor\| |
+|---|---|---|---|
+| tam panel | %9,9 | 0,349 | 0,993 |
+| eğitim yarısı | %12,3 | 0,402 | 1,000 |
+| test yarısı | %7,4 | 0,310 | 0,907 |
+
+Altı sayının altısı da diğer skorlayıcıların aralığında (doyma %5,7-13,7,
+medyan 0,30-0,53), **ve iki yarıda da**. Tek başına doyma oranına bakmak
+`real_yield_chg`'in medyan |skor|'u 0,009'a düşerken doymanın iyi görünmesine
+yol açan arızanın kapısıdır.
+
+**Kabul barajı, ilan edildiği hâliyle:** *`miners`, `buyhold`'u Calmar'da
+hem 2bp hem 10bp basamağında, her iki metalde de geçecek. 40bp/150bp şart
+değil — orada öldüğü zaten ölçüldü. Geçmezse tam geri alma.*
+
+`python backtest.py`, 19,5 yıl (2007-03 → 2026-09), 4898 test günü:
+
+| maliyet | altın `miners` | altın al-tut | fark | gümüş `miners` | gümüş al-tut | fark |
+|---|---|---|---|---|---|---|
+| COMEX 2bp | **0,38** | 0,23 | **+0,14** | **0,27** | 0,12 | **+0,15** |
+| **ETF 10bp** | **0,32** | 0,23 | **+0,09** | **0,24** | 0,12 | **+0,12** |
+| Perakende 40bp | 0,17 | 0,23 | −0,06 | 0,15 | 0,12 | +0,04 |
+| Banka 150bp | −0,05 | 0,23 | −0,28 | −0,02 | 0,12 | −0,14 |
+
+**Baraj geçildi**, dört hücrenin dördünde. Ve bu, `miners.py`'nin Bölüm 3'ünde
+ölçülen sayılarla bağımsız olarak uyuşuyor (orada altın +0,100 / gümüş +0,126,
+burada +0,09 / +0,12) — **farklı kod yolu, aynı cevap**, yani Bölüm 3'ün
+kendi kural uygulaması ile üretimin `compute_target_exposure`'ı ayrışmıyor.
+Zaten ayrışmamalıydı: sinyal stratejilerinin dalı tam olarak
+`0,85 + 0,15×signed`'dir ve Bölüm 3 bunu bilerek taklit etmişti.
+
+Altının ETF basamağında **iki tarafı birden** iyileştiriyor: YBG %10,8 vs
+%10,3 **ve** maksimum düşüş %33,2 vs %44,4. Yani bu, 5. bölümün oynaklık
+hedeflemesi gibi "getiriyi acıyla takas eden" bir kazanç değil.
+
+**Ama yılda ~165 işlem yapıyor** (19,5 yılda 3225), ve merdivenin çökme sebebi
+tam olarak budur: 150bp'de $1000'lık deftere **$2078 komisyon**. Banka gram
+altınında bu sinyal para kaybettirir, ve ekranda öyle yazıyor.
+
+**Üretim yüzeyi bilerek küçük tutuldu:** yeni `backend/miners_signal.py`,
+`fetch_data.MACRO_SYMBOLS`'e `gdx`, `indicators.SIGNAL_ONLY_SERIES`,
+`trading.STRATEGIES`, `predict.py`'nin strateji sözlüğü, `backtest.py`'nin
+skor kolonu, `daily_report`/`app.js` etiketleri, ve `schema.sql`'de tek bir
+portföy satırı. **Model hiç değişmedi** — özellik sayıları (altın 27, gümüş
+25) ve eğitilebilir satır sayıları (5706/5707) birebir aynı, çünkü `gdx_chg`
+`FEATURE_COLUMNS`'a girmedi.
+
+Mevcut bir test bu işi yaparken **gerçek bir hata yakaladı**:
+`test_daily_report.test_every_portfolio_that_exists_is_reported` kırmızı
+yandı — yeni portföy günlük mailden sessizce düşecekti. Tam olarak o testin
+var olma sebebi.

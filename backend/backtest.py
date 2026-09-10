@@ -51,6 +51,7 @@ import numpy as np
 import pandas as pd
 
 import assets as assets_module
+import miners_signal
 import ml_model
 import trading
 from indicators import build_features, technical_signal
@@ -187,6 +188,14 @@ def compute_signal_path(df: pd.DataFrame, asset) -> pd.DataFrame:
                 # outcome, which is the error this whole bench exists to avoid.
                 "ensemble_score": float(np.clip((ml_score + tech["score"]) / 2.0, -1, 1)),
                 "macro_score": _macro_score(row, asset.leading_drivers),
+                # The real miners_signal, not a copy -- same reason this file
+                # calls trading.compute_target_exposure rather than restating
+                # it. It abstains (0.0) on every row before GDX started
+                # trading in 2006, which is correct and visible: the `miners`
+                # portfolio simply sits at SIGNAL_BASE_EXPOSURE until the
+                # series exists, rather than silently trading on a NaN.
+                "miners_score": miners_signal.miners_signal(
+                    labelled.iloc[start + offset: start + offset + 1])["score"],
             })
         start = stop
     return pd.DataFrame(rows)
@@ -221,7 +230,7 @@ def _macro_score(row: pd.Series, drivers: tuple[str, ...]) -> float:
 
 SCORE_COLUMN = {
     "ensemble": "ensemble_score", "technical": "tech_score",
-    "ml": "ml_score", "macro": "macro_score",
+    "ml": "ml_score", "macro": "macro_score", "miners": "miners_score",
 }
 
 # Display-only relabelling for the report table. Printing the bare string

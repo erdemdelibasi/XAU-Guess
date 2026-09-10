@@ -93,7 +93,7 @@ STRATEGY_LABELS = {
     "buyhold": "Al-ve-tut", "voltarget": "Oynaklık hedefi", "trend": "Trend filtresi",
     "defensive": "Savunma", "ensemble": "Harman", "technical": "Sadece teknik",
     "ml": "Sadece ML", "macro": "Sadece makro", "claude": "Sadece Claude",
-    "kanalfinans": "Kanal Finans TŞ",
+    "miners": "Madenciler", "kanalfinans": "Kanal Finans TŞ",
 }
 # trading.STRATEGIES plus the follower, which is a real $1000 book keyed into
 # the same table but driven by a different engine (kanal_finans_trading.py).

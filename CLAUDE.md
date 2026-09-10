@@ -60,9 +60,11 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
    Brier beceri skoru her ufukta negatif.
 4. **Model pozisyon boyutunu da eğemiyor.** `research/tilt.py`'de eğitim
    ızgarası zorlanmadan EĞİM=0 seçti.
-5. **Ölçülebilir katkı veren tek mekanizma oynaklığa tepki veren pozisyon
-   boyutlandırma.** 19,9 yıl örneklem dışı: Sharpe 0,58→0,64, maksimum düşüş
-   %44,4→%30,1, karşılığında 2,1 puan yıllık getiri.
+5. **Uzun süre ölçülebilir katkı veren tek mekanizma oynaklığa tepki veren
+   pozisyon boyutlandırmaydı.** 19,9 yıl örneklem dışı: Sharpe 0,58→0,64,
+   maksimum düşüş %44,4→%30,1, karşılığında 2,1 puan yıllık getiri. **10.
+   madde 2026-09-10'da buna ikinci bir mekanizma ekledi** — ve o, yön
+   tarafında olan ilki.
 6. **Altın/gümüş oranı yön bilgisi taşımıyor.** 5 form × 3 hedef × 4 ufuk =
    60 testin **sıfırı** eşiği geçti (`research/ratio.py`). Rotasyon da,
    çifti birlikte tutmak da altını risk-ayarlı geçemiyor.
@@ -86,41 +88,59 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
    ağırlık ızgarasını eğitim ve test yarıları **tam ters** sıralıyor
    (Spearman −1,00), yani bölme soruyu çözmedi, bir rejim değişimini ikiye
    ayırdı. `research/README.md` 12. bölüm.
-10. **Altın madencileri metali gerçekten öncülüyor — ölçüldü, ama sadece
-    1 GÜNLÜK ufukta, ve üretimde değil.** `GDX`/`^HUI` her iki metalde de
-    örneklem dışı Bonferroni eşiğini geçti (t=+5,5..+6,1) ve **yedi** öldürme
-    denemesinden sağ çıktı: hizalama taraması, gümüş kontrol serisi, düz mum
-    artefaktı, metalin kendi getirisi (kontrol edilince ilişki zayıflamıyor
-    **güçleniyor**: r=+0,151 → kısmi +0,206), ve `miners.py`'nin üç ekonomik
-    kontrolü — sabit-ortalama pozisyon, 5 gün bayat sinyal, metalin kendi
-    momentumu. Üçü de al-ve-tut'un altında kaldı, yani kazanç ne "daha az
-    metal tutmak"tan, ne devir hızından, ne de bedava bir momentum
-    sinyalinden geliyor.
+10. **Altın madencileri metali gerçekten öncülüyor — ve bu, bu depoda yön
+    tarafında ÜRETİME GİREN ilk bulgudur.** `GDX` her iki metalde de örneklem
+    dışı Bonferroni eşiğini geçti ve **yedi** öldürme denemesinden sağ çıktı:
+    hizalama taraması, gümüş kontrol serisi, düz mum artefaktı, metalin kendi
+    getirisi (kontrol edilince ilişki zayıflamıyor **güçleniyor**: r=+0,151 →
+    kısmi **+0,206**), ve `miners.py`'nin üç ekonomik kontrolü — sabit-ortalama
+    pozisyon, 5 gün bayat sinyal, metalin kendi momentumu. Son üçü kritikti:
+    kural al-ve-tut'tan az metal tutuyor ve **daha az tutmak tek başına
+    Calmar'ı yükseltir**, yani gürültüyle bile kazanmış görünürdü. Sabit-ortalama
+    kolu her hücrede al-ve-tut'la aynı çıktı (±0,02), diğer ikisi al-ve-tut'un
+    **altında** kaldı.
 
-    **Bilginin tamamı t+1 gününde ve t+2'den itibaren hiçbir şey yok.**
-    Yani 5 günlük ufukta kaybolması bir ölüm değil, aritmetik bir seyrelme.
-    `edge.walk_forward`'ın eşleştirilmiş A/B'sinde 1 günlük ufukta üretim
-    özellik setine katkı **+0,079..+0,097 IC, dört hücrenin dördünde de
-    p=0,000** (altın IC +0,0447 → **+0,1416**; bu deponun ölçtüğü en yüksek
-    IC). 5 günlük ufukta ayırt edilemiyor (p=0,13 / p=0,99), ama testin gücü
-    de yazılı: orada görülebilecek en küçük IC 0,1025, ölçülen fark 0,025.
+    **Ufuk 1 GÜN, ve bu bir ayrıntı değil, mimari bir kısıt.** Bilginin tamamı
+    t+1'de, t+2'den itibaren hiçbir şey yok. `edge.walk_forward`'ın eşleştirilmiş
+    A/B'sinde 1 günlük ufukta katkı **+0,079..+0,097 IC, dört hücrenin dördünde
+    p=0,000** (altın +0,0447 → **+0,1416**, bu deponun ölçtüğü en yüksek IC);
+    5 günlük ufukta ayırt edilemiyor (p=0,13 / p=0,99). Bu yüzden `miners`
+    **`ensemble.COMPONENTS`'te DEĞİL**: `ensemble.combine()` 5 günlük bir tahmin
+    havuzluyor, 1 günlük bir oyu oraya koymak farklı bir soruyu tam ağırlıkla
+    cevaplatmak olurdu. Kanal Finans'ın dışarıda tutulmasıyla aynı aile.
+    Üretime **yalnızca strateji** olarak girdi. Aynı sebeple `gdx_chg`
+    `ml_model.FEATURE_COLUMNS`'a **konmadı** — 5 günde ölçülebilir katkısı yok
+    ve `build_feature_frame` NaN satırı düşürdüğü için panelin %18,6'sına mal
+    olurdu. `tests/test_miners_signal.py` bu üç sınırı da kilitliyor, ve özellik
+    sayıları değişmedi (altın 27, gümüş 25; eğitilebilir satır 5706/5707).
 
-    Maliyet merdiveninde **öldüğü yer de ölçüldü**: altın 10bp ile 40bp
-    arasında, gümüş 40bp ile 150bp arasında. ETF maliyetinde `uretim egimi`
-    kuralı al-ve-tut'u Calmar'da geçiyor (altın +0,100, gümüş +0,126, iki
-    yarıda da aynı işaretle) — **banka gram altın maliyetinde geçmiyor**
-    (−0,264). 7. maddedeki `macro` bileşeninin aynısı: gerçek bir sinyal,
-    üzerine para koymanın pahalı olduğu bir sinyal.
+    **Benimseme barajı sonuçlara BAKILMADAN önce ilan edildi**: "`miners`,
+    `buyhold`'u Calmar'da hem 2bp hem 10bp basamağında, her iki metalde de
+    geçecek". `backtest.py`, 19,5 yıl:
 
-    **Yine de hiçbir üretim dosyası değişmedi**, ve sebebi ilan edilmiş
-    şartın kendisi: benimseme şartı 5 günlük ufukta katkı **VE** maliyet
-    testini geçmekti; ikincisi geçti, birincisi geçmedi. Şart iki ayrı
-    benimseme yolunu tek koşula bağlıyordu ve onu sonucu **gördükten sonra**
-    ikiye ayırmak tam olarak bu tezgâhın yasakladığı şeydir (bkz. GVZ
-    ızgarası, `gs_ratio_z`). Ayrı bir faz, kendi ön-kaydıyla gerekiyor — ve
-    o fazın üç somut bedeli var: `GDX` canlı yola girer, panelin %18,6'sı
-    eğitimden düşer, ve 5 günlük **tek ufuk** varsayımı kırılır.
-    `research/README.md` 14. bölüm.
+    | | altın miners | altın al-tut | gümüş miners | gümüş al-tut |
+    |---|---|---|---|---|
+    | COMEX 2bp | **0,38** | 0,23 | **0,27** | 0,12 |
+    | **ETF 10bp** | **0,32** | 0,23 | **0,24** | 0,12 |
+    | Perakende 40bp | 0,17 | 0,23 | 0,15 | 0,12 |
+    | **Banka 150bp** | **−0,05** | 0,23 | **−0,02** | 0,12 |
+
+    Altının ETF basamağında **iki tarafı birden** iyileştiriyor: YBG %10,8 vs
+    %10,3 **ve** maksimum düşüş %33,2 vs %44,4.
+
+    **Ama yılda ~165 işlem yapıyor** (19,5 yılda 3225), ve merdivenin çökme
+    sebebi budur: 150bp'de $1000'lık deftere $2078 komisyon. **Banka gram
+    altınında bu sinyal para kaybettirir.** 7. maddedeki `macro` bileşeninin
+    aynısı — gerçek bir sinyal, üzerine para koymanın pahalı olduğu bir sinyal.
+    Ekranda al-ve-tut'un yanında, kıyas rozetiyle duruyor.
+
+    `GDX` bu yüzden `fetch_data.MACRO_SYMBOLS`'e girdi ve **bunu yapan tek
+    seridir**; yolu `research/panel.py`'nin başlığında yazılı ve tek yön var:
+    `drivers.py`'nin Bonferroni eşiği → `lags.py`'nin hizalama taraması →
+    `miners.py`'nin maliyet merdiveni. `^HUI` aday olarak kaldı (ikisi 0,01 IC
+    içinde ölçüldü; ikisini birden göndermek canlı bağımlılığı bedavaya
+    ikiye katlamak olurdu) ve belgelenmiş yedektir. `research/README.md`
+    14. bölüm.
 
 Madde 5'in madde 3'ü **kurtarmadığını** anlamak kritik: oynaklık hedefleme
 hiçbir şey tahmin etmiyor, gerçekleşen oynaklığa tepki veriyor ve oynaklık
@@ -136,10 +156,10 @@ diğerlerinin yanında, kıyas rozetiyle duruyor.
 
 ## Önemli kısıtlar
 
-- **Gerçek para/emir yok.** Metal başına on portföy (dokuzu `trading.py`'nin
-  motoruyla, biri Kanal Finans takipçisi) — toplam yirmi, hepsi sanal.
+- **Gerçek para/emir yok.** Metal başına on bir portföy (onu `trading.py`'nin
+  motoruyla, biri Kanal Finans takipçisi) — toplam yirmi iki, hepsi sanal.
 - **Hiçbir piyasa verisi anahtarı gerekmiyor.** Yahoo Finance chart API
-  (GC=F, SI=F + 13 makro seri), Binance'in kamuya açık
+  (GC=F, SI=F + 14 makro seri), Binance'in kamuya açık
   `data-api.binance.vision` uç noktası (altının hafta sonu fiyatı için
   PAXG), ve YouTube'un anahtarsız RSS'i.
 - **Gümüşün hafta sonu fiyatı YOKTUR.** Altın için PAXG bir 24/7 vekil
@@ -991,7 +1011,18 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   çekiyor), yani kapıdan geçmemiş bir seri oraya konunca günlük bir istek ve
   sessiz bir arıza yüzeyi satın alınmış olur. Adaylar
   `research/panel.CANDIDATE_SYMBOLS` içinde yaşar ve terfi yolu tektir:
-  `drivers.py`'nin Bonferroni eşiği **ve** `lags.py`'nin hizalama taraması.
+  `drivers.py`'nin Bonferroni eşiği **ve** `lags.py`'nin hizalama taraması —
+  ve seri bir **sinyale** girecekse ayrıca `miners.py`'nin maliyet merdiveni.
+  Bugüne kadar bu yolculuğu **tek bir seri** tamamladı (`GDX`, 2026-09-10);
+  diğer sekiz aday hâlâ adaydır. Bir seri terfi ettiğinde
+  `CANDIDATE_SYMBOLS`'tan çıkarılır, yoksa iki yerden birden istenir.
+- **Model özelliği olmayacak bir seri `indicators.SIGNAL_ONLY_SERIES`'e
+  konur, `CONTEXT_DRIVERS`'a değil.** Ayrım yük taşıyor: `CONTEXT_DRIVERS`
+  sınıflandırıcının bölünebileceği rejim bağlamıdır, `SIGNAL_ONLY_SERIES` ise
+  bağımsız bir sinyalin okuduğu ama modelin **görmemesi gereken** kolondur.
+  `gdx_chg`'i `ml_model.FEATURE_COLUMNS`'a eklemek 5 günlük ufukta ölçülebilir
+  hiçbir şey kazandırmaz ve `build_feature_frame` NaN satırı düşürdüğü için
+  panelin %18,6'sını sessizce siler.
 - **`supabase/schema.sql` değiştiysen migration'ı kullanıcıya ver.** Repo
   kendi migration'ını uygulayamaz. Yeni bir kolon ekliyorsan
   `predict.PENDING_MIGRATION_COLUMNS`'a da ekle: PostgREST bilinmeyen bir

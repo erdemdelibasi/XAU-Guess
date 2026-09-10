@@ -188,6 +188,17 @@ GOLD_PRICE_SCALES = PriceScales(macd=172.0, ema_cross=51.5, sma200=6.5)
 # gratuitously incompatible and their feature-count guards asymmetric.
 CONTEXT_DRIVERS = ("dxy", "us10y", "silver", "gold", "spx")
 
+# Series whose change is built for a STANDALONE signal and must never become a
+# model feature. Separate from CONTEXT_DRIVERS (which exists precisely so the
+# classifier can split on regime context) because the distinction is load
+# bearing: research/miners.py measured that `gdx_chg` contributes at a ONE-day
+# horizon and is indistinguishable from noise at the five-day horizon
+# ml_model.HORIZON_DAYS actually trains on. Putting it in FEATURE_COLUMNS would
+# buy nothing measurable and cost 18.6% of the panel, because
+# ml_model.build_feature_frame drops rows carrying a NaN feature and GDX only
+# starts in 2006. tests/test_miners_signal.py locks it out.
+SIGNAL_ONLY_SERIES = ("gdx",)
+
 # Series quoted as a LEVEL in points or percent, where the change is a
 # difference rather than a return. Getting this wrong is not a rounding error:
 # the percentage change of a volatility index is a different quantity with a
@@ -265,7 +276,7 @@ def add_macro_columns(df: pd.DataFrame, drivers: tuple[str, ...] = LEADING_DRIVE
     """
     out = df.copy()
 
-    for name in tuple(drivers) + CONTEXT_DRIVERS:
+    for name in tuple(drivers) + CONTEXT_DRIVERS + SIGNAL_ONLY_SERIES:
         if name not in out.columns:
             continue
         if name in LEVEL_SERIES:

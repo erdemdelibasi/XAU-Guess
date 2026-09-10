@@ -55,6 +55,9 @@ const STRATEGIES = [
   { key: "ml", label: "Sadece ML", desc: "Yalnızca gradient boosting modeli." },
   { key: "macro", label: "Sadece makro", desc: "Yalnızca ölçülmüş öncü sürücüler." },
   { key: "claude", label: "Sadece Claude", desc: "Yalnızca Claude'un bağımsız yargısı." },
+  { key: "miners", label: "Madenciler", desc:
+    "GDX (altın madencileri ETF'i) bugün yükseldiyse yarın pozisyonu artırır. " +
+    "Tek günlük ufuk. ETF maliyetinde al-ve-tut'u geçiyor, banka gram altın maliyetinde geçmiyor." },
   { key: "kanalfinans", label: "Kanal Finans TŞ", follower: true,
     desc: "Tunç Şatıroğlu ne derse onu yapar. Tam giriş/çıkış, zarar-kes takipli." },
 ];

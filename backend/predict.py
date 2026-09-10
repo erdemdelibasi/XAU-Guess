@@ -63,6 +63,7 @@ import ensemble  # noqa: E402
 import fetch_data  # noqa: E402
 import kanal_finans_trading  # noqa: E402
 import macro_signal as macro_module  # noqa: E402
+import miners_signal  # noqa: E402
 import ml_model  # noqa: E402
 import news_signal as news_module  # noqa: E402
 import trading  # noqa: E402
@@ -475,7 +476,13 @@ def run_asset(db, asset) -> int:
           f"| harman hedef pozisyon %{100 * target_exposure:.0f}")
 
     # ---- portfolios -------------------------------------------------------
-    strategy_signal = {"technical": tech, "ml": ml, "macro": macro, "claude": claude}
+    # `miners` is a strategy but NOT an ensemble component: it answers the
+    # one-day question and ensemble.combine() pools a five-day forecast (see
+    # miners_signal.py). It is therefore absent from `signals` above and
+    # appears only here, where a portfolio needs a direction and a confidence.
+    miners = miners_signal.miners_signal(features)
+    strategy_signal = {"technical": tech, "ml": ml, "macro": macro, "claude": claude,
+                       "miners": miners}
     for name in trading.STRATEGIES:
         signal = final if name == "ensemble" else strategy_signal.get(
             name, {"direction": "UP", "confidence": 0.0})

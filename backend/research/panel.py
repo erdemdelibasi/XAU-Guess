@@ -78,10 +78,20 @@ CANDIDATE_SYMBOLS = {
     "move": "^MOVE",      # 2002-11. Bond implied volatility. Gold is a rates
                           # asset, so this is VIX's counterpart on the side that
                           # actually drives it.
-    "gdx": "GDX",         # 2006-05. Gold miners ETF -- the widely repeated
-                          # "miners lead the metal" claim, never tested here.
-    "hui": "^HUI",        # 2001-09. The same claim at full panel depth, without
-                          # GDX's ETF-era truncation.
+    # `gdx` used to live here and GRADUATED on 2026-09-10 -- it is now in
+    # fetch_data.MACRO_SYMBOLS, so it arrives through macro_symbols_for()
+    # instead and every research script still sees the column. It is the only
+    # series that has ever made the trip, and the route is written down in
+    # this file's header: drivers.py's Bonferroni bar, lags.py's alignment
+    # scan, then research/miners.py's cost ladder. See miners_signal.py.
+    "hui": "^HUI",        # 2001-09. The same "miners lead the metal" claim at
+                          # full panel depth, without GDX's ETF-era truncation.
+                          # Kept as a CANDIDATE rather than promoted alongside
+                          # gdx: the two measured within 0.01 IC of each other,
+                          # so shipping both would double a live dependency for
+                          # nothing. It is miners_signal's documented fallback
+                          # if GDX's feed ever fails -- an index, though, and
+                          # this project already lost ^VXSLV to exactly that.
     "cny": "CNY=X",       # 2001-09. The largest physical buyer's currency.
     "inr": "INR=X",       # 2003-12. The second largest.
     "hyg": "HYG",         # 2007-04. High-yield credit -- risk appetite of a kind
