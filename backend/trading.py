@@ -310,15 +310,20 @@ def maybe_trade(db, asset, strategy: str, prediction_id: int | None, price: floa
                       {"target_exposure": target, "updated_at": now_iso})
         return
 
+    # A proportional spread PLUS a flat per-trade commission. `flat_fee_usd`
+    # is 0.0 for gold and silver, so their books are unchanged; it is nonzero
+    # only for the tracked ETFs, where the broker charges by the trade rather
+    # than by the size. Modelling one as the other would make the dashboard
+    # flatter these books every day -- see research/README.md section 15.
     if decision["action"] == "BUY":
         gross = decision["usd_amount"]
-        fee = gross * asset.fee_rate
+        fee = gross * asset.fee_rate + asset.flat_fee_usd
         moved = (gross - fee) / price
         new_cash, new_units = cash - gross, units + moved
     else:
         moved = decision["ounce_amount"]
         gross = moved * price
-        fee = gross * asset.fee_rate
+        fee = gross * asset.fee_rate + asset.flat_fee_usd
         new_cash, new_units = cash + (gross - fee), units - moved
 
     _update_state(db, asset.key, strategy, {

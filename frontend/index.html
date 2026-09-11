@@ -314,6 +314,52 @@
     <p class="muted small" id="trades-note">-</p>
   </section>
 
+  <!-- The tradeable-ETF books. NOT asset-scoped and NOT under the tab strip:
+       these are not a third metal, they are the same rules run on the thing a
+       retail account can actually hold. Everything above is valued in COMEX
+       futures, which no retail account can hold at all -- and
+       backend/research/README.md section 16 measured that this is not a
+       cosmetic difference. -->
+  <section class="card" id="etf-card">
+    <h2>Alınabilir Enstrüman &mdash; GLD (altın ETF)</h2>
+    <p class="muted small">
+      Yukarıdaki her portföy <strong>COMEX vadeli</strong> fiyatıyla değerleniyor ve
+      perakende bir hesap vadeli kontrat tutamaz. Buradaki defterler aynı kuralları
+      gerçekten alınabilen ETF üzerinde, <strong>işlem başına $1,50 sabit komisyonla</strong>
+      işletiyor. Yalnızca mekanik stratejiler var, çünkü ölçüm bunları seçti.
+    </p>
+    <div class="table-wrap">
+      <table id="etf-table">
+        <thead>
+          <tr><th>Strateji</th><th>Değer</th><th>Pozisyon</th><th>Hedef</th>
+              <th>Toplam</th><th>vs Al-ve-tut</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="muted small" id="etf-note">-</p>
+
+    <details class="explain">
+      <summary>Bu defterler ne iddia ediyor, ne iddia etmiyor</summary>
+      <div>
+        <p><strong>Para kazandırma iddiası yok.</strong> 16,1 yıllık ölçümde
+        $10.000'lik bir GLD hesabında <code>voltarget</code> $36.257, al-ve-tut
+        $34.844 bitirdi &mdash; aradaki $1.413 gürültü mesafesindedir.</p>
+        <p><strong>İddia risk tarafında:</strong> aynı ölçümde maksimum düşüş
+        %45,6'dan %39,2'ye, Sharpe 0,48'den 0,59'a indi &mdash; ve bu, yılda
+        yaklaşık <strong>8 işlemle</strong> yapıldı. Bu defterler o düşüş
+        azalmasının canlıda da tutup tutmadığını izlemek için var.</p>
+        <p>Aynı testte Calmar'da al-ve-tut'u geçen diğer üç stratejinin üçü de
+        <strong>parada ondan geride bitirdi</strong>: düşüşü keserek kazanıyorlar,
+        para kazanarak değil. Calmar bir risk-ayarlı ölçüttür, kâr değil.</p>
+        <p>Sadece mekanik stratejiler (<code>buyhold</code>, <code>voltarget</code>,
+        <code>trend</code>, <code>defensive</code>) var. Ölçüm ETF üzerinde
+        al-ve-tut'u geçenlerin neredeyse tamamının bunlar olduğunu söyledi &mdash;
+        ve bunlar model, makro panel veya LLM çağrısı istemiyor.</p>
+      </div>
+    </details>
+  </section>
+
   <!-- NOT "Geçmiş Tahminler". The newest row here is normally still OPEN --
        its target session has not arrived yet -- and titling the panel "past"
        made a future date read as a past one. The panel is the track record;

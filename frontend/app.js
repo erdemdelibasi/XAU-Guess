@@ -168,6 +168,16 @@ const TV_TICKERS = { gold: "TVC:GOLD", silver: "TVC:SILVER", usdtry: "FX_IDC:USD
    that reason, and the 10-minute delay is the price paid for being on the
    right series; it is stated on screen rather than hidden. */
 const TV_FUTURES = { gold: "COMEX:GC1!", silver: "COMEX:SI1!" };
+
+// The tradeable ETFs (backend/assets.TRACKED). Their books are valued on
+// these, and they ride in the SAME request as everything else -- one more
+// ticker in the existing POST, not a second round trip.
+//
+// Kept out of TV_TICKERS on purpose, for the same reason TV_FUTURES is: only
+// the SPOT tickers decide the "gecikmeli" badge. An ETF quote folded into
+// that calculation would let a delayed listing permanently brand the
+// real-time spot cards as delayed.
+const TV_ETFS = { gld: "AMEX:GLD" };
 const TROY_OUNCE_GRAMS = 31.1034768;
 
 /* Live prices refresh on their own fast loop, separate from Supabase.
@@ -473,7 +483,8 @@ async function fetchTradingView() {
       // type is what keeps the request preflight-free and therefore allowed.
       headers: { "Content-Type": "text/plain;charset=UTF-8" },
       body: JSON.stringify({
-        symbols: { tickers: [...Object.values(TV_TICKERS), ...Object.values(TV_FUTURES)] },
+        symbols: { tickers: [...Object.values(TV_TICKERS), ...Object.values(TV_FUTURES),
+                              ...Object.values(TV_ETFS)] },
         columns: ["close", "update_mode", "open"],
       }),
     });
@@ -514,6 +525,8 @@ async function fetchTradingView() {
       usdtry: read(TV_TICKERS.usdtry),
       // The series the portfolios are valued on -- see the TV_FUTURES note.
       futures: { gold: read(TV_FUTURES.gold), silver: read(TV_FUTURES.silver) },
+      // What the tracked-ETF books are marked to.
+      etfs: { gld: read(TV_ETFS.gld) },
       // No fallback source (Binance) has a comparable "today's open" -- its
       // 24hr ticker has a rolling-window open, a different number wearing the
       // same name -- so this stays empty rather than mixing definitions, and
@@ -1222,6 +1235,79 @@ function renderValuationNote(asset, mark) {
       + `Bu değerler kapanış anında donmuştur.`;
 }
 
+// Labels for the tracked-ETF books. Deliberately the SAME wording as the
+// futures panels above -- these are the same rules, and giving them different
+// names would invite reading them as different strategies.
+const ETF_STRATEGIES = [
+  { key: "buyhold", label: "Al-ve-tut", benchmark: true },
+  { key: "voltarget", label: "Oynaklık hedefi" },
+  { key: "trend", label: "Trend filtresi" },
+  { key: "defensive", label: "Savunma" },
+];
+
+// backend/assets.TRACKED. One entry today; a list so a second ETF is a data
+// change rather than a rewrite.
+const TRACKED_ETFS = [{ key: "gld", label: "GLD", tv: "AMEX:GLD" }];
+
+/* Renders the tradeable-ETF books.
+ *
+ * Separate from renderStrategies and NOT asset-scoped: these books do not
+ * belong to the selected metal, they belong to the instrument. Reusing the
+ * per-asset renderer would have meant filtering on `currentAsset`, which is
+ * exactly the bug -- the card would blank itself whenever the silver tab was
+ * open. */
+function renderEtfBooks(portfolios, live) {
+  const body = document.querySelector("#etf-table tbody");
+  const note = document.getElementById("etf-note");
+  const etf = TRACKED_ETFS[0];
+  const price = live?.etfs?.[etf.key] ?? null;
+  const mine = (portfolios ?? []).filter((p) => p.asset === etf.key);
+
+  if (!mine.length) {
+    body.innerHTML = `<tr><td colspan="6" class="muted">Defterler henüz kurulmadı.</td></tr>`;
+    note.textContent = "supabase/schema.sql'deki `gld` portföy migration'ı çalıştırılmamış.";
+    return;
+  }
+  // A missing quote must not silently value the books at zero. Showing the
+  // last known cash+units without a mark would be a number with no defined
+  // meaning, so the row says so instead.
+  if (price === null) {
+    body.innerHTML = `<tr><td colspan="6" class="muted">${etf.tv} fiyatı alınamadı.</td></tr>`;
+    note.textContent = "Canlı ETF fiyatı gelmeden defterler değerlenemez.";
+    return;
+  }
+
+  const byKey = new Map(mine.map((p) => [p.strategy, p]));
+  const valueOf = (row) => Number(row.cash_usd) + Number(row.ounces) * price;
+  const benchmark = byKey.get("buyhold");
+  const benchmarkTotal = benchmark ? valueOf(benchmark) / STARTING_CASH - 1 : null;
+
+  body.innerHTML = ETF_STRATEGIES.map(({ key, label, benchmark: isBench }) => {
+    const row = byKey.get(key);
+    if (!row) return `<tr><td>${label}</td><td colspan="5" class="muted">—</td></tr>`;
+    const value = valueOf(row);
+    const total = value / STARTING_CASH - 1;
+    const exposure = value > 0 ? (Number(row.ounces) * price) / value : 0;
+    const versus = isBench || benchmarkTotal === null
+      ? '<span class="muted">kıyas</span>'
+      : fmtSignedPct(total - benchmarkTotal);
+    return `<tr${isBench ? ' class="benchmark"' : ""}>
+      <td>${label}</td>
+      <td>${fmtUsd(value)}</td>
+      <td>${fmtPct(exposure)}</td>
+      <td>${fmtPct(Number(row.target_exposure))}</td>
+      <td>${fmtSignedPct(total)}</td>
+      <td>${versus}</td>
+    </tr>`;
+  }).join("");
+
+  note.innerHTML = `${etf.tv} $${price.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    + ` &mdash; her defter $${STARTING_CASH.toLocaleString("tr-TR")} ile başladı,`
+    + ` işlem başına $1,50 komisyon ödüyor.`
+    + ` <strong>Calmar kâr değildir:</strong> ölçümde al-ve-tut'u Calmar'da geçen`
+    + ` stratejilerin çoğu parada ondan geride bitirdi.`;
+}
+
 function renderAll() {
   const asset = ASSETS[currentAsset];
   // Repaints every asset-scoped card in the selected metal's colour. The
@@ -1240,6 +1326,9 @@ function renderAll() {
   renderTrades(cache.trades, asset);
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
   renderKanalFinans(cache.mentions, cache.themes);
+  // Not asset-scoped -- see renderEtfBooks. Rendered from renderAll anyway
+  // so a tab switch repaints it with whatever the price loop last had.
+  renderEtfBooks(cache.portfolios, cache.live);
 }
 
 /* ------------------------------------------------------------------ load */
@@ -1247,7 +1336,7 @@ function renderAll() {
 // Declared before its use in loadData rather than after: a `const` is in the
 // temporal dead zone until evaluated, so the current bottom-of-file call
 // order is the only thing that makes a later declaration work.
-const EMPTY_LIVE = { gold: null, silver: null, usdtry: null, futures: {}, open: {}, delayed: false, source: "" };
+const EMPTY_LIVE = { gold: null, silver: null, usdtry: null, futures: {}, etfs: {}, open: {}, delayed: false, source: "" };
 
 /* Supabase data. One row per trading day, so this stays on the slow cycle --
    polling it every few seconds would re-download identical bytes. */
@@ -1377,6 +1466,7 @@ async function refreshPrices() {
     silver: tv?.silver ?? null,
     usdtry,
     futures: tv?.futures ?? {},
+    etfs: tv?.etfs ?? {},
     open: tv?.open ?? {},
     delayed: tv?.delayed ?? false,
     source: tv?.gold ? tv.source : "Binance",
@@ -1394,6 +1484,10 @@ async function refreshPrices() {
     const mark = valuationPrice(currentAsset);
     renderStrategies(cache.portfolios, mark.price, asset, cache.costBasis);
     renderValuationNote(asset, mark);
+    // The ETF books are ounces x price too, and their price arrives on this
+    // same tick. Left out, the card would sit at whatever loadData last saw
+    // (five minutes) while everything beside it moved every two seconds.
+    renderEtfBooks(cache.portfolios, cache.live);
   }
   schedulePrices();
 }

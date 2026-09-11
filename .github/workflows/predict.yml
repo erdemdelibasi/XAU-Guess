@@ -43,6 +43,23 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python predict.py
 
+      # The ETF trackers (assets.TRACKED), in the same job rather than a
+      # separate workflow: they read closed sessions from the same afternoon,
+      # touch no model and no LLM, and take seconds. A second cron would be a
+      # second thing to notice when it silently stops.
+      #
+      # `if: always()` so a failure in the prediction above -- a dead Yahoo
+      # series, a missing model -- does not also stop the books that have
+      # nothing to do with it. ETFs settle 16:00 New York, three hours before
+      # this workflow runs, so the session it reads is long closed.
+      - name: Update tradeable-ETF books
+        if: always()
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python track_etf.py
+
       # predict.py bootstrap-trains a model when none exists or the feature
       # set changed. Without this commit that model is discarded when the
       # runner shuts down, and every single run pays to retrain from scratch.

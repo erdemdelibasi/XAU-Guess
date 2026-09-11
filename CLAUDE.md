@@ -15,6 +15,10 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
   -> backend/predict.py       her iş günü 23:00 UTC (COMEX kapanışından sonra)
                               iki metal için de sırayla çalışır
   -> backend/retrain.py       her gün 01:30 UTC
+  -> backend/track_etf.py     predict.py ile AYNI adımda, hemen sonrasında --
+                              alınabilir ETF defterleri (assets.TRACKED).
+                              Model yok, LLM yok, makro panel yok: sadece
+                              fiyat geçmişi ve trading.MECHANICAL.
   -> backend/daily_report.py  her iş günü 06:00 UTC (09:00 TRT) -- günlük
                               özet maili; hiçbir şey yazmaz, sadece okur
 
@@ -185,7 +189,8 @@ diğerlerinin yanında, kıyas rozetiyle duruyor.
 ## Önemli kısıtlar
 
 - **Gerçek para/emir yok.** Metal başına on bir portföy (onu `trading.py`'nin
-  motoruyla, biri Kanal Finans takipçisi) — toplam yirmi iki, hepsi sanal.
+  motoruyla, biri Kanal Finans takipçisi) — toplam yirmi iki, artı GLD için
+  dört ETF defteri. Yirmi altısı da sanal.
 - **Hiçbir piyasa verisi anahtarı gerekmiyor.** Yahoo Finance chart API
   (GC=F, SI=F + 14 makro seri), Binance'in kamuya açık
   `data-api.binance.vision` uç noktası (altının hafta sonu fiyatı için
@@ -885,6 +890,39 @@ gösteriliyor — NULL'u "soğuk başlangıç değil" saymak, uyarıyı en çok 
 duyan satırlarda susturur.
 
 ---
+
+### Alınabilir enstrüman: ayrı defterler, ayrı kayıt, ayrı iddia
+
+`predict.py`'nin ürettiği yirmi iki portföyün hepsi **COMEX vadeli** fiyatıyla
+değerleniyor ve perakende bir hesap vadeli kontrat tutamaz. 16. ve 17. bölümler
+bunun kozmetik bir fark olmadığını ölçtü. `backend/track_etf.py` bu yüzden var:
+aynı kuralları **GLD** üzerinde, işlem başına **$1,50 sabit komisyonla** işleten
+dört defter.
+
+**`assets.TRACKED`, `assets.ASSETS`'ten AYRI bir sözlüktür ve öyle kalmalı.**
+`ASSETS` `predict.py`'nin döndüğü şeydir: ML modeli, kalibratör, Claude çağrısı,
+ensemble, bir `predictions` satırı. Bunların hiçbiri burada geçerli değil ve
+GLD'yi oraya koymak günlük bir LLM çağrısı ile üçüncü bir model dosyası satın
+alıp karşılığında hiçbir şey vermezdi. `GLD.model_filename` bilerek **boş**,
+`leading_drivers` bilerek **boş tuple** — ikincisi önemli, çünkü altınınkileri
+yazmak GLD üzerinde yapılmamış bir `drivers.py` ölçümünü ima ederdi.
+
+**Yalnızca `trading.MECHANICAL` koşuyor** ve bu ölçülmüş bir seçim: 17. bölümde
+ETF üzerinde al-ve-tut'u geçenlerin `ensemble` dışında hepsi mekanik, ve mekanik
+stratejiler fiyat geçmişinden başka hiçbir şey istemiyor. İki gerekçenin
+çakışması tesadüf ve tam da bu yüzden birileri sonradan "model zaten var" diye
+`ml` eklemek isteyebilir — o model bu varlık için **yok**.
+
+**`Asset.flat_fee_usd` varsayılan 0,0'dır ve altın/gümüş için 0,0 kalmalı.**
+1-14. bölümlerdeki her Calmar tamamen oransal maliyet varsayıyor; sıfırdan farklı
+bir varsayılan hepsini sessizce geçersiz kılardı. `trading.maybe_trade` artık
+`gross * fee_rate + flat_fee_usd` hesaplıyor.
+
+**Ve bu defterlerin iddiası getiri değil.** 17. bölüm: $10.000'lik bir GLD
+hesabında 16,1 yılda `voltarget` $36.257, al-ve-tut $34.844 — fark gürültü.
+Kazanılan şey maksimum düşüşün %45,6'dan %39,2'ye inmesi, ve bu yılda ~8
+işlemle. Arayüz kartı, mail bölümü ve modül docstring'i üçü de bunu yazıyor;
+biri silinirse okuyucu Calmar'ı kâr sanır.
 
 ### Portföy değerlemesi SPOT değil VADELİ fiyatla yapılır
 

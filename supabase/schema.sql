@@ -148,6 +148,22 @@ cross join (values
 ) as s(strategy)
 on conflict (asset, strategy) do nothing;
 
+-- Tracked ETFs (assets.TRACKED). A SEPARATE seed because these books run a
+-- different and much smaller pipeline: backend/track_etf.py, mechanical
+-- strategies only, no prediction row and no model. See that module and
+-- research/README.md section 17 -- on GLD the futures scoreboard's ranking
+-- changes fundamentally, and only the mechanical strategies survive.
+--
+-- No `model_state` rows for these: model_state tracks ENSEMBLE COMPONENTS'
+-- live skill, and no component runs here.
+insert into portfolios (asset, strategy)
+select a.asset, s.strategy
+from (values ('gld')) as a(asset)
+cross join (values
+    ('buyhold'), ('voltarget'), ('trend'), ('defensive')
+) as s(strategy)
+on conflict (asset, strategy) do nothing;
+
 create table if not exists trades (
     id                          bigserial primary key,
     created_at                  timestamptz not null default now(),

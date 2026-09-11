@@ -385,6 +385,63 @@ def build_asset_report(db, asset, start: datetime, end: datetime) -> dict:
     }
 
 
+# The tradeable-ETF books (assets.TRACKED, written by track_etf.py). Their
+# strategies are trading.MECHANICAL, and the labels are deliberately the same
+# words the futures books use -- they are the same rules on a different
+# instrument, and renaming them would invite reading them as different ones.
+ETF_STRATEGIES = ("buyhold", "voltarget", "trend", "defensive")
+
+# One line, carried into both renderers, because these books are the ones most
+# likely to be misread. research/README.md section 17 measured that on money
+# rather than Calmar nothing here beats doing nothing.
+ETF_NOTE = ("COMEX vadeli değil, gerçekten alınabilen ETF · işlem başına $1,50 · "
+            "iddia getiri değil, DÜŞÜŞ azalması (ölçümde %45,6 → %39,2)")
+
+
+def build_etf_report(db) -> list[dict]:
+    """Value every tracked-ETF book at its own live price.
+
+    No 24-hour column, unlike the metals'. That one is reconstructed from
+    `predictions.price_at_prediction` -- the price the books actually traded
+    at that day -- and these books have no predictions rows at all, by design.
+    Inventing the number from a fresh quote would compare a live price against
+    a live price and call the difference a day's move.
+    """
+    sections = []
+    for asset in assets_module.TRACKED.values():
+        try:
+            price, source = fetch_data.get_live_price(asset.symbol)
+        except Exception as exc:  # noqa: BLE001 -- a dead quote must not kill the mail
+            print(f"WARNING: {asset.key} price failed ({type(exc).__name__}: {exc})")
+            continue
+        states = portfolio_states(db, asset.key)
+        if not states:
+            continue
+
+        books = {}
+        for strategy in ETF_STRATEGIES:
+            row = states.get(strategy)
+            if not row:
+                continue
+            value = float(row["cash_usd"]) + float(row["ounces"]) * price
+            books[strategy] = {
+                "value_now": value,
+                "total": value / trading.STARTING_CASH - 1.0,
+                "target": float(row.get("target_exposure") or 0.0),
+                "exposure": (float(row["ounces"]) * price / value) if value > 0 else 0.0,
+            }
+        bench = books.get(BENCHMARK)
+        for strategy, book in books.items():
+            book["vs_benchmark"] = (None if bench is None or strategy == BENCHMARK
+                                    else book["total"] - bench["total"])
+        beat = [s for s, b in books.items()
+                if s != BENCHMARK and b.get("vs_benchmark") is not None
+                and b["vs_benchmark"] > 0]
+        sections.append({"asset": asset, "price": price, "source": source,
+                         "books": books, "beat_benchmark": beat})
+    return sections
+
+
 def build_report(db) -> dict:
     start, end = window_bounds(datetime.now(TIMEZONE))
     per_asset = []
@@ -396,8 +453,13 @@ def build_report(db) -> dict:
             print(f"WARNING: {asset.key} section failed ({type(exc).__name__}: {exc})")
     ratio_row = next((a["row"] for a in per_asset if a["row"] and a["row"].get("gs_ratio")), None)
     health_warnings = [line for a in per_asset for line in a.get("health", [])]
+    try:
+        etfs = build_etf_report(db)
+    except Exception as exc:  # noqa: BLE001 -- the metals' report must survive it
+        print(f"WARNING: ETF section failed ({type(exc).__name__}: {exc})")
+        etfs = []
     return {"start": start, "end": end, "assets": per_asset, "ratio_row": ratio_row,
-            "health_warnings": health_warnings}
+            "etfs": etfs, "health_warnings": health_warnings}
 
 
 # --------------------------------------------------------------------------
@@ -511,6 +573,25 @@ def render_text(report: dict) -> str:
                   + (f" · 250 seans z {fmt_num(float(ratio_row['gs_ratio_z']), 2)}"
                      if ratio_row.get("gs_ratio_z") is not None else ""),
                   f"  {RATIO_NOTE}"]
+
+    for etf in report.get("etfs", []):
+        lines += ["", f"ALINABİLİR ENSTRÜMAN — {etf['asset'].label} "
+                      f"({fmt_usd(etf['price'], 2)})",
+                  f"  {ETF_NOTE}"]
+        for strategy in ETF_STRATEGIES:
+            book = etf["books"].get(strategy)
+            if not book:
+                continue
+            versus = ("kıyas" if strategy == BENCHMARK
+                      else fmt_signed_pct(book["vs_benchmark"]))
+            lines.append(f"    {STRATEGY_LABELS[strategy]:<18}"
+                         f"{fmt_usd(book['value_now'], 2):>10}"
+                         f"{fmt_signed_pct(book['total']):>10}"
+                         f"{versus:>11}  pozisyon %{100 * book['exposure']:.0f}"
+                         f" (hedef %{100 * book['target']:.0f})")
+        beat = etf["beat_benchmark"]
+        lines.append("    Al-ve-tut'u geçen: "
+                     + (", ".join(STRATEGY_LABELS[s] for s in beat) if beat else "HİÇBİRİ"))
 
     health_warnings = report.get("health_warnings")
     if health_warnings:
@@ -666,8 +747,50 @@ def _asset_card_html(section: dict) -> str:
     return card + _books_table_html(section) + kf_html
 
 
+def _etf_table_html(etf: dict) -> str:
+    """The tradeable-ETF books. Same shape as _books_table_html, minus the 24h
+    column these books cannot honestly fill (see build_etf_report)."""
+    headers = ("Strateji", "Değer", "Pozisyon", "Toplam", "vs al-tut")
+    head = "".join(
+        f'<th style="padding:7px 9px;font-size:11px;color:{MUTED};text-align:left;'
+        f'border-bottom:1px solid {BORDER};white-space:nowrap;">{h}</th>' for h in headers)
+
+    body = []
+    for strategy in ETF_STRATEGIES:
+        book = etf["books"].get(strategy)
+        if not book:
+            continue
+        is_bench = strategy == BENCHMARK
+        name = (f'<span style="color:{BENCH};font-weight:700;">{STRATEGY_LABELS[strategy]}</span>'
+                f' <span style="color:{MUTED};font-size:10px;">kıyas</span>'
+                if is_bench else STRATEGY_LABELS[strategy])
+        versus = (f'<span style="color:{MUTED};">—</span>' if is_bench
+                  else _pct_html(book["vs_benchmark"]))
+        cells = [name, fmt_usd(book["value_now"], 2),
+                 f'<span style="color:{MUTED};">%{100 * book["exposure"]:.0f}</span>',
+                 _pct_html(book["total"]), versus]
+        body.append("<tr>" + "".join(
+            f'<td style="padding:7px 9px;font-size:12px;border-top:1px solid {BORDER};'
+            f'white-space:nowrap;">{c}</td>' for c in cells) + "</tr>")
+
+    beat = etf["beat_benchmark"]
+    verdict = (", ".join(STRATEGY_LABELS[s] for s in beat) if beat
+               else '<span style="color:%s;">HİÇBİRİ</span>' % BENCH)
+    note = (f'<tr><td colspan="5" style="padding:6px 9px 10px;font-size:11px;color:{MUTED};'
+            f'line-height:1.45;">Al-ve-tut\'u geçen: {verdict}<br>{ETF_NOTE}</td></tr>')
+
+    return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            f'style="background:{CARD};border-radius:10px;overflow:hidden;margin:0 0 14px;'
+            f'border:1px solid {BORDER};">'
+            f'<tr><td colspan="5" style="padding:9px 16px;background:{CARD_HEAD};font-size:12px;'
+            f'font-weight:700;color:{TEXT};">ALINABİLİR ENSTRÜMAN &mdash; '
+            f'{etf["asset"].label} {fmt_usd(etf["price"], 2)}</td></tr>'
+            f'<tr>{head}</tr>' + "".join(body) + note + '</table>')
+
+
 def render_html(report: dict) -> str:
     body = "".join(_asset_card_html(s) for s in report["assets"])
+    body += "".join(_etf_table_html(e) for e in report.get("etfs", []))
 
     ratio_row = report.get("ratio_row")
     if ratio_row:
