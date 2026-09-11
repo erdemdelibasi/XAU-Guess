@@ -1011,10 +1011,13 @@ iki sessiz arızayı da kilitliyor: sinyal ızgarasında kalan bir `follower`
 > Satır artık defter yaşını (`bookAgeDays`, ilk işlemden hesaplanıyor) ve
 > "ölçülmüş sıralama yukarıdaki grafikte" cümlesini birlikte basıyor.
 
-İki ızgara iki farklı şekil istiyor ve ikisi de ölçüldü: ölçülmüş dörtlü ~690px
-kolonda **2×2** oturuyor (üç sütun tek başına bir yetim satır bırakıyordu),
-sinyal yedilisi ise daha dar tabana (196px) ihtiyaç duyuyor — 232px'te o kolona
-iki sütun sığıyor ve grup yeniden-tasarımdan **önceki** hâlinden uzun çıkıyor.
+İki ızgara iki farklı şekil istiyor ve ikisi de ölçüldü. 1280px'te, ana kolonda:
+ölçülmüş dörtlü **2×2** oturuyor (panel 321px; üç sütun tek başına bir yetim
+satır bırakıyordu), sinyal altılısı ise daha dar tabanla (196px) **3×2**
+oturuyor (panel 210px). Takipçi defteri buradan çıkınca — yedi paneldi ve
+üçüncü satırda **tek başına** kalıyordu — grup tam iki satıra denk geldi;
+yetim satırın kaybolması taşınmanın amacı değildi, ölçülen yan faydasıydı.
+Kanal Finans kartındaki tek kutu yan kolonun tamamını alıyor (412px).
 
 ---
 
