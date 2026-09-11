@@ -21,6 +21,11 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
                               fiyat geçmişi ve trading.MECHANICAL.
   -> backend/daily_report.py  her iş günü 06:00 UTC (09:00 TRT) -- günlük
                               özet maili; hiçbir şey yazmaz, sadece okur
+  -> backend/export_backtest.py  ELLE, cron YOK -- backtest'in sermaye
+                              eğrilerini frontend/data/backtest.json'a yazar.
+                              Bir parametre değiştirdiğinde yeniden koş ve
+                              JSON'u AYNI commit'te ver (bkz. aşağıdaki
+                              "Ölçülmüş geçmiş" bölümü)
 
 Kullanıcının kendi bilgisayarı (Windows Task Scheduler -- GitHub Actions DEĞİL,
 bkz. aşağıdaki Kanal Finans notu)
@@ -821,6 +826,173 @@ sayar ve dokuz portföyün `maybe_trade()`'i iki kez ateşlenirdi.
 
 ---
 
+### Düzen: üç bant, ve hangi kartın nerede durduğu ölçümden geliyor
+
+Sayfa 2026-09-11'e kadar **tek bir 8.157 piksellik kolondu** ve içinde her kart
+aynı görsel ağırlığa sahipti: karar, 19,5 yıllık ölçüm, ve Brier beceri skoru
+her ufukta negatif ölçülmüş bir bileşen — üçü de tam genişlik kart, aynı başlık
+puntosu. Yeni düzen `research/README.md`'nin düzyazıyla söylediğini **yerleşimle**
+söylüyor. Ölçülen sonuç: 8.157 → **5.607 piksel**, kolonlar 3.324 / 3.010.
+
+Üç bant:
+
+- **HERO** — `Bugün` kartı ve `Piyasa Durumu` yan yana, çünkü bunlar tek bir
+  düşüncedir: hedef pozisyon, yanındaki oynaklığa verilen **tepkidir**. Alt
+  alta konunca okuyucu cevabı, sebebine ulaşmadan geçiyor.
+- **TAM GENİŞLİK** — `Ölçülmüş Geçmiş`. Grafikler her pikseli istiyor.
+- **İKİ KOLON** — ve ayrım şu: **ana kolon SONUÇLAR** (kağıt portföyler,
+  alınabilir ETF defterleri, tahmin sicili — üzerinde para olan ve kuralları
+  ölçülmüş olan taraf), **yan kolon GİRDİLER** (günün yön çağrısı, bileşenler,
+  her birinin hak ettiği sicil, bir insanın görüşü). İkincisinin tamamı gerçek
+  çıktıdır ve hiçbiri hiçbir şey yapmamayı geçmiyor. Dar kolona almak onu
+  gizlemek değil — sayfanın nihayet araştırma tezgâhıyla aynı şeyi söylemesi.
+
+Kartların hangi kolona gittiği **ölçülerek** ayarlandı, sezgiyle değil: sicil
+önce girdi tarafındaydı ve kolonlar 2.878/3.490 çıkıyordu, yani defterlerin
+altında 600 piksel ölü alan kalıyordu. Sonuçlar tarafına alınca 3.324/3.010.
+Bir kartı taşımadan önce iki kolonun yüksekliğini ölç.
+
+**Sekme şeridi başlığa taşındı ve başlık yapışkan.** 8.000 piksellik bir sayfada
+metal anahtarına ancak en başa dönerek ulaşılabiliyordu — oysa o sekme,
+altındaki her varlık-kapsamlı sayının **ne anlama geldiğini** belirliyor. Tüm
+sayfayı yeniden çerçeveleyen bir kontrol, ilk kaybolan şey olamaz. Kotasyon
+şeridi de aynı sebeple orada: "%63 pozisyon" uygulandığı fiyat olmadan
+okunabilir bir talimat değil, ve `Anlık Fiyatlar` kartı portföyler okunurken
+binlerce piksel yukarıda kalıyor. 1080px altında şerit gizleniyor — dar ekranda
+başlığın görüntü alanını yemesi, kotasyondan daha pahalı.
+
+`renderTopbarQuotes` bilerek **`Anlık Fiyatlar` kartının özeti**, ikinci bir
+kaynak değil: aynı `live` nesnesi ve aynı COMEX yedeği veriliyor, yani ikisi
+ancak biri hiç çizilmemişse ayrışabilir. Düşürdüğü şey tam olarak **köken
+bilgisi** — TL paritesi, kaynak satırı, vadeli–spot farkı — çünkü bunlar doğru
+ifade edilmek için yer isteyen iddialar ve bir başlık şeridinde o yer yok. Bu
+yüzden şerit "canlı" rozetini de takmıyor.
+
+**Kağıt portföyler ikiye ayrıldı, ve çizgi `trading.MECHANICAL`.** Bu bir
+yerleşim tercihi değil, backend'in ETF defterlerinde hangi kuralların
+koşabileceğine karar vermek için zaten kullandığı sabitin aynısı:
+
+- Dört mekanik defter **hiçbir şey tahmin etmiyor** — gerçekleşen oynaklığa ve
+  fiyatın kendi uzun ortalamasına tepki veriyorlar — ve `research/instrument.py`
+  alınabilir enstrümanda al-ve-tut'u geçenlerin biri hariç hepsinin bu kümede
+  olduğunu ölçtü.
+- Diğer yedisi, `research/edge.py`'nin her ufukta "hep uzun"a yenildiğini
+  ölçtüğü, `research/tilt.py`'nin ise tam olarak sıfır değerinde bulduğu bir yön
+  çağrısına göre pozisyon alıyor.
+
+On bir eşit kutu, bu iki kümenin eşit desteklendiğini söylüyordu. Söylemiyorlar,
+ve bu sayfanın bütün işi bunu söylememek. **Hiçbir şey gizlenmiyor**: özet satırı
+canlı sayıyı taşıyor ve tek tık açıyor.
+
+> **Ve o özet satırı kendi örneklemini de yazıyor.** İlk sürüm "şu an 7'sinin
+> 7'si al-ve-tut'un üzerinde" diyordu — doğru, ve anlamsız: defterler 4 günlük ve
+> altının düştüğü bir haftada %100'ün altında duran her defter tanım gereği
+> önde. `renderHistory`'nin `MIN_ROWS_FOR_VERDICT` ile reddettiği hükmün aynısı.
+> Satır artık defter yaşını (`bookAgeDays`, ilk işlemden hesaplanıyor) ve
+> "ölçülmüş sıralama yukarıdaki grafikte" cümlesini birlikte basıyor.
+
+İki ızgara iki farklı şekil istiyor ve ikisi de ölçüldü: ölçülmüş dörtlü ~690px
+kolonda **2×2** oturuyor (üç sütun tek başına bir yetim satır bırakıyordu),
+sinyal yedilisi ise daha dar tabana (196px) ihtiyaç duyuyor — 232px'te o kolona
+iki sütun sığıyor ve grup yeniden-tasarımdan **önceki** hâlinden uzun çıkıyor.
+
+---
+
+### Sayfa cevapla açılır, gerekçeyle değil
+
+İlk kart **`Bugün`** ve manşet sayısı `voltarget`'ın **hedef pozisyonu** —
+yön tahmini değil. Bu bir düzen tercihi değil, projenin kendi ölçümünün
+sayfaya uygulanmış hâli: `research/edge.py` yön modelinin Brier beceri
+skorunu **her ufukta negatif** ölçtü, `research/instrument.py` ise oynaklık
+hedeflemeyi ölçülen **her sütunda** (vadeli/ETF, altın/gümüş) al-ve-tut'u
+Calmar'da geçen tek kural olarak buldu. Sayfa uzun süre ölçülerek değersiz
+bulunan sayıyı en büyük punto ile basıyordu ve işe yaradığı ölçülen sayıyı
+(`target_exposure`) portföy kutularının içine gömüyordu.
+
+Kartta **iki işaret** var ve ikisi de gerekli: dolgu **hedef** pozisyon, çentik
+**şu anki** pozisyon. Tek bir çubuk "ne tutmalıyım" sorusunu cevaplar ve
+aksiyon üreten tek soruyu — "hedeften ne kadar uzağım" — gizler.
+
+Yön çağrısı kaldırıldı değil, **küçültüldü**; gizlemek kendi başına bir
+dürüstsüzlük olurdu. Ama `edge_over_base` negatifken satır bunu açıkça
+yazıyor: p_up 0,5'in üstünde ama taban oranın altındaysa "YÜKSELİŞ" etiketi
+tek başına yanıltır — `renderPrediction`'ın kendi kartında ayrı cümleyle
+anlattığı durumun aynısı.
+
+### Ölçülmüş geçmiş: sayfa artık gürültülü örneklemi değil bilgi taşıyanı gösteriyor
+
+`backtest.py` 19,5 yılı **yalnızca stdout'a** basıyordu, workflow
+`workflow_dispatch`, ve GitHub log'u 90 günde siliniyor. Yani bu projedeki
+tek bilgi taşıyan örneklem kalıcı değildi ve sayfada hiç yoktu — sayfa ise
+Eylül 2026'da başlamış, al-ve-tut'a karşı hüküm vermesi **~2500 seans**
+sürecek canlı defteri başrolde gösteriyordu. Ters taraf başroldeydi.
+
+`backend/export_backtest.py` → `frontend/data/backtest.json` → `chart.js`.
+
+Kararlar ve sebepleri:
+
+- **Supabase tablosu değil, repo'daki statik dosya.** Bu veri yalnızca biri
+  backtest'i bilerek yeniden koştuğunda değişir — yani `trading.py`'nin
+  sabitleri değiştiğinde. Dosya olarak tutulunca eğri ile onu üreten
+  parametre **aynı commit'te** duruyor; tablo olsaydı ikisi sessizce ayrışırdı
+  ki bu deponun tamamı tam olarak buna karşı örgütlenmiş. Ayrıca elle
+  uygulanacak bir migration, bir `service_role` yazma yolu ve bir RLS
+  politikası gerektirmezdi — canlı da olmayan, kullanıcıya özel de olmayan
+  bir veri için.
+- **Metal başına TEK maliyet basamağı: o varlığın canlıda ödediği.**
+  `backtest.py` merdivenin tamamını süpürür çünkü "sinyal var mı" ile "bir
+  insan bunu koruyabilir mi" farklı sorulardır; ama kağıt portföylerin
+  yanında duran bir grafiğin **üçüncü** bir soruyu cevaplaması, tek eksen
+  altında iki farklı dünyayı karşılaştırmak olurdu.
+- **Haftalık örnekleme.** 4900 seans, 1100 piksel — günlük eğri pikselden
+  çok nokta demek. Son seans **her zaman** korunuyor: `sample_indices`
+  olmadan kartın bastığı nihai değer ızgaranın rastgele denk geldiği güne ait
+  olur, bir haftaya kadar yanlış ve tamamen makul görünür.
+- **Düşüş paneli tarayıcıda hesaplanıyor**, JSON'a konmuyor. Sermaye
+  eğrisinin saf bir fonksiyonu; göndermek dosyayı ikiye katlar ve kendi
+  kaynağıyla çelişebilen ikinci bir kopya yaratır.
+- **Logaritmik eksen, ve sınırlar tam dekada değil 1-2-5 adımına yuvarlanır.**
+  Doğrusal eksende ilk on yıl dibe yapışık düz bir çizgidir ve okuyucu "on yıl
+  hiçbir şey olmamış" sonucunu çıkarır; dekada yuvarlamak da en düşük noktası
+  $840 olan bir seriye $100 çizgisi koyup panelin %40'ını boşa harcıyordu.
+- **`buyhold` sekiz kategorik renkten biri DEĞİL.** Kesikli ve solgun: rakip
+  değil **ölçüt**. Kategorik bir renk vermek, referans çizgisini referansı
+  olduğu karşılaştırmanın içine sokardı.
+- **Renk stratejiyi takip eder, sıralamasını ya da seçili olup olmadığını
+  değil.** Bir seriyi kapatmak diğerlerini yeniden boyarsa okuyucunun
+  "mavi = oynaklık hedefi" hafızası her filtrelemede siliniyor demektir.
+- **Özet satırı Calmar'ı VE parayı ayrı ayrı basar**, çünkü ikisi burada
+  aynı listeyi vermiyor ve **bu ayrışmanın kendisi bulgudur**. Yalnızca
+  ilkini basmak, `research/README.md` 17. bölümün düzeltmek için var olduğu
+  abartının aynısı olurdu. `miners` iki listede de görünüyor ve **yıldızla**
+  geliyor: bu depoda onun satın alınabilir olmadığı uyarısı ismin gittiği her
+  yere gider.
+- Palet dataviz referansının koyu basamakları, **bu sayfanın kendi kart
+  zemininde (#15120d) doğrulandı** — parlaklık bandı, kroma tabanı, komşu
+  çiftlerde renk körlüğü ayrımı (en kötü ΔE 8,4), normal görüş tabanı (19,3)
+  ve 3:1 kontrast. Gözle renk değiştirme, doğrulayıcıyı yeniden koş. Ayrıca
+  her görünür çizgi sağ ucunda **doğrudan etiketli**, yani kimlik hiçbir zaman
+  yalnız renge yaslanmıyor.
+- **Kart Supabase'e bağlı değil ve öyle kalmalı.** `loadBacktest` payload'ı
+  alır almaz çiziyor; `renderAll`'ı beklemek, Supabase'de bir kesintinin
+  sayfadaki **tek** kendi kendine yeten paneli karartması demekti.
+
+**`chart.js` tek bir global üzerinden konuşur: `Viz`.** İlk sürüm tepe
+seviyede `const esc` tanımlıyordu, `app.js` de tanımlıyor — ikisi de düz
+`<script>`, yani aynı global kapsam. Bu çakışma **uyarı vermiyor**, çakışma
+noktasında da patlamıyor; **ikinci dosyanın tamamının parse edilmemesine**
+neden oluyor. Sayfa statik HTML'ini çizdi, her sayı "-" kaldı, konsolda tek
+satır vardı. İsim alanı bunu ihtimal olmaktan çıkarıp imkânsız yapıyor.
+
+**`tests/test_export_backtest.py` iki dilin arasındaki aynaları kilitliyor.**
+Çalışma zamanında ihracatçıyı sayfaya bağlayan hiçbir şey yok: bir alanı
+yeniden adlandır, sayfa çökmez — 19,5 yıllık ölçüm vadeden bir başlığın
+altında **boş bir kart** çizer, ki bu eksik grafikten kötüdür çünkü başlık
+iddiayı etmeye devam eder. `test_track_etf`'in "arayüze yazılmayan defter"
+testiyle aynı aile.
+
+---
+
 ### Arayüz: renk varlığı taşır, ve etiketler ölçülmüş şeyi söylemeli
 
 Sayfanın büyük kısmı **tek metal** gösterir (tahmin, piyasa durumu, bileşenler,
@@ -1194,7 +1366,12 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   geçmedi" ile "test görecek kadar güçlü değildi" zıt işler gerektirir.
   `ablation.min_detectable_ic` bu sayıyı üretiyor.
 - Bir parametre değiştirirsen `backtest.py`'ı çalıştırıp etkisini **ölç**.
-  Bu projede sezgiyle konmuş sayı yok.
+  Bu projede sezgiyle konmuş sayı yok. **Sonra `export_backtest.py`'ı koş ve
+  `frontend/data/backtest.json`'u AYNI commit'te ver** — yoksa sayfa eski
+  parametrelerin eğrisini yeni sabitlerin yanında çizmeye devam eder, hiçbir
+  hata vermeden. Bu dosyanın commit edilme sebebi tam olarak budur
+  (`.gitignore`'daki nota bakılabilir: araştırma önbellekleri commit
+  edilmiyor, bu ediliyor).
 - **Bir kenar bulduğunda, ALINABİLİR enstrümanda da ölç.** Bu depodaki her
   strateji `GC=F`/`SI=F` üzerinde ölçülüyor ve bunlar perakende bir hesabın
   tutamayacağı vadeli kontratlar. `miners`'ın kazancının neredeyse tamamı bir

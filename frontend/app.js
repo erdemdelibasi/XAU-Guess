@@ -41,13 +41,13 @@ const COMPONENTS = [
 // Order matters: buyhold renders first as the benchmark everything else is
 // judged against.
 const STRATEGIES = [
-  { key: "buyhold", label: "Al-ve-tut", benchmark: true,
+  { key: "buyhold", label: "Al-ve-tut", benchmark: true, mechanical: true,
     desc: "Hiçbir şey yapma. Kıyas ölçütü: 25 yılda yıllık ~%11,8." },
-  { key: "voltarget", label: "Oynaklık hedefi",
+  { key: "voltarget", mechanical: true, label: "Oynaklık hedefi",
     desc: "Pozisyonu gerçekleşen oynaklığa göre ölçekler. Ölçümde işe yarayan tek mekanizma." },
-  { key: "trend", label: "Trend filtresi",
+  { key: "trend", mechanical: true, label: "Trend filtresi",
     desc: "200 günlük ortalamanın altında pozisyonu kısar. Ayıda kazanır, boğada öder." },
-  { key: "defensive", label: "Savunma",
+  { key: "defensive", mechanical: true, label: "Savunma",
     desc: "Oynaklık + trend birlikte. En düşük düşüş, en düşük getiri." },
   { key: "ensemble", label: "Harman",
     desc: "Tüm sinyaller + risk kuralları." },
@@ -257,6 +257,11 @@ let cache = {
   costBasis: new Map(),
   // Filled by the fast price loop, not by the Supabase load.
   live: null,
+  // The measured history. A static file written by backend/export_backtest.py
+  // and fetched ONCE per session -- it changes only when someone deliberately
+  // re-runs the backtest, so re-downloading 160 KB on every five-minute cycle
+  // would be the same mistake polling Supabase every two seconds would be.
+  backtest: null,
 };
 let priceFailures = 0;
 let priceTimer = null;
@@ -610,6 +615,41 @@ function livePriceCard({ label, metal, usd, usdtry, source, live, badge, footnot
     </div>`;
 }
 
+/* The condensed quote pair in the sticky header.
+
+   Deliberately a SUMMARY of the Anlık Fiyatlar card and never a second source:
+   it is handed the same `live` object and the same COMEX fallback, so the two
+   can disagree only if one of them is not rendered. What it drops is exactly
+   the provenance -- the TL parity, the source line, the futures-spot gap --
+   because those are claims that need room to be stated correctly, and a strip
+   in a header does not have it. So the strip never wears the "canlı" badge or
+   the live styling either: the card above is where a price gets qualified.
+
+   Each metal keeps its OWN palette (.metal-gold / .metal-silver) rather than
+   following the active tab, for the same reason the price cards do -- both are
+   on screen at once, so a shared accent would say they are the same number. */
+function renderTopbarQuotes(live, comex) {
+  const strip = document.getElementById("topbar-quotes");
+  if (!strip) return;
+  strip.innerHTML = ["gold", "silver"].map((key) => {
+    const spot = live[key];
+    const usd = spot ?? comex[key];
+    if (usd === null || usd === undefined) return "";
+    const open = live.open?.[key] ?? null;
+    const pct = spot && open ? spot / open - 1 : null;
+    // Same visibility floor as the card's arrow: below half a basis point the
+    // move is smaller than the digits on screen, and an arrow the reader
+    // cannot size is an overstatement.
+    const show = pct !== null && Math.abs(pct) >= 0.00005;
+    return `<div class="topbar-quote metal-${key}">
+      <span class="tq-label">${key === "gold" ? "XAU" : "XAG"}</span>
+      <span class="tq-value">${fmtUsd(usd, key === "silver" ? 3 : 2)}</span>
+      ${show ? `<span class="tq-chg ${pct >= 0 ? "up-text" : "down-text"}">
+        ${pct >= 0 ? "▲" : "▼"} ${fmtSignedPct(pct)}</span>` : ""}
+    </div>`;
+  }).join("");
+}
+
 function renderLivePrices(live, goldRow, silverRow) {
   const comex = {
     gold: goldRow ? Number(goldRow.price_at_prediction) : null,
@@ -684,6 +724,7 @@ function renderLivePrices(live, goldRow, silverRow) {
     });
   });
   document.getElementById("live-prices").innerHTML = cards.join("");
+  renderTopbarQuotes(live, comex);
 
   // A refresh clock, and when the parity last actually MOVED.
   //
@@ -1039,7 +1080,7 @@ function renderStrategies(portfolios, price, asset, costBasis) {
     ? Number(benchmark.cash_usd) + Number(benchmark.ounces) * price
     : null;
 
-  document.getElementById("strategy-panels").innerHTML = STRATEGIES.map((strategy) => {
+  const panelFor = (strategy) => {
     const state = byKey.get(strategy.key);
     if (!state) {
       return `<div class="strategy-panel"><div class="name">${strategy.label}</div>
@@ -1104,7 +1145,72 @@ function renderStrategies(portfolios, price, asset, costBasis) {
         </div>
         <div class="next-action ${action.kind}">Sonraki işlem: ${action.text}</div>
       </div>`;
-  }).join("");
+  };
+
+  // TWO GROUPS, and the line between them is trading.MECHANICAL -- the same
+  // constant the backend uses to decide which rules may run on the tracked
+  // ETFs. It is not a layout preference:
+  //
+  //   * The four mechanical books forecast NOTHING. They react to realised
+  //     volatility and to price against its own long average, and
+  //     research/instrument.py measured that on the BUYABLE instrument every
+  //     strategy but one that beat buy-and-hold is in this set.
+  //   * The other seven act on a direction call that research/edge.py measured
+  //     as losing to "always long" at every horizon, and that research/tilt.py
+  //     measured as worth a position tilt of exactly zero.
+  //
+  // Eleven equal boxes said those two groups were equally supported. They are
+  // not, and this page's entire job is to not say that.
+  //
+  // Nothing is hidden: the summary carries the live count of how many of them
+  // are currently ahead of buy-and-hold, which is the fact a reader would open
+  // the group to find. Collapsing a measured-null result behind a summary that
+  // states the result is not the same as omitting it.
+  const measured = STRATEGIES.filter((s) => s.mechanical);
+  const signalled = STRATEGIES.filter((s) => !s.mechanical);
+  const ahead = signalled.filter((s) => {
+    const state = byKey.get(s.key);
+    if (!state || benchmarkValue === null) return false;
+    return Number(state.cash_usd) + Number(state.ounces) * price > benchmarkValue;
+  }).length;
+
+  // The live standing gets its AGE printed next to it, and that is not a
+  // decoration. These books opened in September 2026; over a fortnight in
+  // which gold happened to fall, every book holding less than 100% is ahead
+  // of buy-and-hold by construction, and "7 of 7 are winning" is a sentence
+  // about the last two weeks wearing the clothes of a result.
+  //
+  // Same discipline as MIN_ROWS_FOR_VERDICT in renderHistory, which refuses
+  // to rank the model against always-UP under 60 resolved rows, and as
+  // research/ablation.py printing a test's power beside its finding. The
+  // ranking that IS a measurement is the one in the chart above.
+  const days = bookAgeDays();
+  const age = days === null ? "" :
+    ` &mdash; ama defterler <strong>${days} gün</strong>lük, yani bu sıralama henüz `
+    + `bir ölçüm değil. Ölçülmüş sıralama yukarıdaki 19,5 yıllık grafikte.`;
+
+  document.getElementById("strategy-panels").innerHTML = `
+    <div class="strategy-grid">${measured.map(panelFor).join("")}</div>
+    <details class="strategy-more">
+      <summary>
+        <strong>${signalled.length} sinyal defteri</strong> &mdash; yön tahminine göre
+        pozisyon alanlar. Şu an <strong>${ahead}</strong> tanesi al-ve-tut'un
+        üzerinde${age}
+      </summary>
+      <div class="strategy-grid">${signalled.map(panelFor).join("")}</div>
+    </details>`;
+}
+
+// How long the paper books have been running, from the first fill on record.
+// Read off `trades` rather than a hardcoded start date so it stays true if the
+// books are ever reset, and returns null rather than 0 when nothing has traded
+// yet -- "0 gün" would read as a measurement of zero rather than as no data.
+function bookAgeDays() {
+  const first = cache.trades.find((t) => t.created_at);
+  if (!first) return null;
+  const started = new Date(first.created_at).getTime();
+  if (!Number.isFinite(started)) return null;
+  return Math.max(1, Math.round((Date.now() - started) / 86400000));
 }
 
 function renderHistory(rows, asset) {
@@ -1517,6 +1623,251 @@ function gramsPerShareText(etf, price, live) {
     : `${fmtNumber(perShare * TROY_OUNCE_GRAMS, 3)} g`;
 }
 
+/* ------------------------------------------------------------ the answer */
+
+// Which rule the headline speaks for. `voltarget` rather than the blend, and
+// that is a measurement rather than a preference: research/instrument.py ran
+// the whole scoreboard on GC=F, SI=F, GLD, IAU and SLV and volatility
+// targeting is the ONLY strategy that beats buy-and-hold on Calmar in every
+// column. The blend does it on the ETFs and not on the futures. Putting the
+// blend here would headline a rule that fails in half the columns it was
+// measured in.
+const HEADLINE_STRATEGY = "voltarget";
+
+function renderToday(portfolios, price, asset, row) {
+  const mine = portfolios.filter((p) => p.asset === currentAsset);
+  const state = mine.find((p) => p.strategy === HEADLINE_STRATEGY);
+  const target = document.getElementById("today-target");
+  const rows = document.getElementById("today-rows");
+  const verdict = document.getElementById("today-verdict");
+
+  document.getElementById("today-asset-name").textContent = asset.label;
+
+  if (!state || !Number.isFinite(Number(state.target_exposure)) || !(price > 0)) {
+    target.textContent = "-";
+    rows.innerHTML = "";
+    verdict.textContent = "Portföy durumu henüz yüklenmedi.";
+    document.getElementById("today-note").textContent = "-";
+    return;
+  }
+
+  const wanted = Number(state.target_exposure);
+  const value = Number(state.cash_usd) + Number(state.ounces) * price;
+  const now = value > 0 ? (Number(state.ounces) * price) / value : 0;
+  const action = nextActionFor(state, price, now, value);
+
+  target.textContent = fmtPct(wanted, 0);
+  // Two marks, not one: the bar is the TARGET, the notch is where the book
+  // actually sits. A single bar would answer "what should I hold" and hide
+  // the only question that produces an action -- "how far off am I".
+  document.getElementById("today-bar-fill").style.width =
+    `${Math.min(100, Math.max(0, wanted * 100)).toFixed(1)}%`;
+  document.getElementById("today-bar-now").style.left =
+    `${Math.min(100, Math.max(0, now * 100)).toFixed(1)}%`;
+
+  const direction = row?.predicted_direction;
+  const edge = row?.edge_over_base;
+
+  // Labels are short and NOWRAP (see style.css): in the hero this card is
+  // ~660px wide, and a label allowed to shrink broke "Sonraki işlem" onto two
+  // lines and "5 günlük yön çağrısı" onto three, turning a four-row list into
+  // a paragraph.
+  //
+  // The blend's target is NOT repeated here. Piyasa Durumu prints it from the
+  // prediction row (`target_exposure`) directly alongside this card in the
+  // hero, and this one would have come from the portfolios table -- the same
+  // quantity down two different paths, side by side, where any future
+  // divergence would read as a bug in the page rather than in the data.
+  rows.innerHTML = [
+    ["Şu anki pozisyon", fmtPct(now, 0)],
+    ["Sonraki işlem", action.text],
+    // Kept, and kept SMALL. The direction call is genuine output and hiding
+    // it would be its own dishonesty; giving it the headline was the problem.
+    //
+    // The label alone is not enough, and the worst case is "YÜKSELİŞ with a
+    // negative edge": p_up is above 0.5 so the model says up, while sitting
+    // BELOW the base rate -- i.e. less optimistic than knowing nothing at all.
+    // renderPrediction spells this out in its own card; a compact row that
+    // printed the two values side by side without saying so would let the
+    // reader take "YÜKSELİŞ" at face value on exactly the days it is
+    // misleading.
+    ["Yön çağrısı (5 gün)", direction
+      ? `${direction === "UP" ? "YÜKSELİŞ" : "DÜŞÜŞ"} · taban orana fark ${fmtPoints(edge)}`
+        + (direction === "UP" && Number(edge) < 0
+           ? ` <span class="silenced">(taban oranın altında — alım sinyali değil)</span>`
+           : "")
+      : "-"],
+  ].map(([label, text]) =>
+    `<div class="row"><span>${label}</span><span>${text}</span></div>`).join("");
+
+  // One sentence, because a reader who does not want to read a bar chart
+  // still has to be able to leave this card knowing what it said.
+  const drift = now - wanted;
+  if (Math.abs(drift) <= REBALANCE_THRESHOLD) {
+    verdict.innerHTML = `Bugün <strong>yapılacak bir şey yok</strong> &mdash; pozisyon `
+      + `zaten hedefin ${Math.abs(drift) < 0.005 ? "tam üzerinde" : "5 puanlık bandı içinde"}.`;
+  } else if (drift > 0) {
+    verdict.innerHTML = `Kural bugün <strong>pozisyon azaltmayı</strong> söylüyor: `
+      + `elde %${fmtNumber(now * 100, 0)}, hedef %${fmtNumber(wanted * 100, 0)}. `
+      + `Sebep yön tahmini değil, <strong>oynaklığın yükselmesi</strong>.`;
+  } else {
+    verdict.innerHTML = `Kural bugün <strong>pozisyon artırmayı</strong> söylüyor: `
+      + `elde %${fmtNumber(now * 100, 0)}, hedef %${fmtNumber(wanted * 100, 0)}. `
+      + `Sebep yön tahmini değil, <strong>oynaklığın yatışması</strong>.`;
+  }
+
+  document.getElementById("today-note").textContent =
+    `Bu kural yılda yaklaşık 8 işlem yapar; çoğu gün doğru cevap "hiçbir şey yapma"dır. `
+    + `Yüzde, defterin metalde tutulan kısmıdır — kalanı nakittir.`;
+  document.getElementById("today-updated").textContent =
+    state.updated_at ? `son güncelleme ${fmtDateTime(state.updated_at)}` : "";
+}
+
+/* --------------------------------------------------- the measured sample */
+
+// Which curves are drawn. `buyhold` is always on and is not in this set: it
+// is the benchmark, not a selection. Default pairs the headline rule with the
+// full blend -- two lines plus the reference, which is what a first read can
+// actually hold. Everything else is one click away.
+let backtestSelection = new Set([HEADLINE_STRATEGY, "ensemble"]);
+
+// Order is the legend order AND the order chart.js's palette was validated
+// in, adjacent pair by adjacent pair. Reordering this list silently changes
+// which hues sit next to each other and invalidates that check.
+const BACKTEST_SERIES = ["voltarget", "trend", "defensive", "ensemble",
+                         "technical", "ml", "macro", "miners"];
+
+function backtestLabel(key) {
+  return STRATEGIES.find((s) => s.key === key)?.label ?? key;
+}
+
+// What the line is called ON the plot, where the label has to fit inside the
+// right margin rather than a legend row. "Oynaklık hedefi" clipped to
+// "Oynaklık h" at the first render, which is worse than no label.
+const BACKTEST_SHORT = {
+  buyhold: "Al-ve-tut", voltarget: "Oynaklık", trend: "Trend", defensive: "Savunma",
+  ensemble: "Harman", technical: "Teknik", ml: "ML", macro: "Makro", miners: "Madenci",
+};
+
+function renderBacktest(asset) {
+  const card = document.getElementById("backtest-card");
+  const payload = cache.backtest?.assets?.[currentAsset];
+  const root = document.getElementById("backtest-charts");
+  const body = document.querySelector("#backtest-table tbody");
+
+  if (!payload) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  document.getElementById("backtest-asset-name").textContent = asset.label;
+  document.getElementById("backtest-window").textContent =
+    `${payload.start} → ${payload.end} · ${fmtNumber(payload.years, 1)} yıl · `
+    + `${payload.sessions.toLocaleString("tr-TR")} seans · komisyon tek yön ${payload.fee_bps} bp`;
+
+  document.getElementById("backtest-toggle").innerHTML = BACKTEST_SERIES
+    .filter((key) => payload.strategies[key])
+    .map((key) => {
+      const on = backtestSelection.has(key);
+      return `<button class="chip${on ? " on" : ""}" data-series="${key}"`
+        + ` style="--chip:${Viz.colourFor(key)}" aria-pressed="${on}">`
+        + `${esc(backtestLabel(key))}</button>`;
+    }).join("");
+
+  const keys = ["buyhold", ...BACKTEST_SERIES.filter((k) =>
+    backtestSelection.has(k) && payload.strategies[k])];
+  const series = keys.map((key) => {
+    const equity = payload.strategies[key].equity;
+    return { key, label: backtestLabel(key), short: BACKTEST_SHORT[key] ?? key,
+             equity, drawdown: Viz.drawdownOf(equity) };
+  });
+
+  const readoutBox = document.getElementById("backtest-readout");
+  const readout = (index) => {
+    if (index === null) {
+      readoutBox.innerHTML = `<span class="muted">Grafiğin üzerinde gezinerek `
+        + `herhangi bir haftayı okuyabilirsin.</span>`;
+      return;
+    }
+    readoutBox.innerHTML = `<span class="readout-date">${payload.dates[index]}</span>`
+      + series.map((s) =>
+        `<span class="readout-item"><i style="background:${Viz.colourFor(s.key)}"></i>`
+        + `${esc(s.label)} <strong>${fmtUsd(s.equity[index], 0)}</strong>`
+        + ` <em>${fmtNumber(s.drawdown[index], 0)}%</em></span>`).join("");
+  };
+
+  Viz.renderBacktestCharts(root, { dates: payload.dates, series, readout });
+  readout(null);
+
+  // The table view. Required rather than optional: it is the non-visual path
+  // to the same numbers, and it is also the only place the trade COUNT shows
+  // up -- which is what decides whether a curve survives a real commission.
+  const bench = payload.strategies.buyhold;
+  body.innerHTML = ["buyhold", ...BACKTEST_SERIES]
+    .filter((key) => payload.strategies[key])
+    .sort((a, b) => payload.strategies[b].calmar - payload.strategies[a].calmar)
+    .map((key) => {
+      const m = payload.strategies[key];
+      const isBench = key === "buyhold";
+      const better = !isBench && m.calmar > bench.calmar;
+      return `<tr class="${isBench ? "benchmark-row" : ""}">
+        <td><i class="swatch" style="background:${Viz.colourFor(key)}"></i>
+            ${esc(backtestLabel(key))}${isBench ? ' <span class="badge">kıyas</span>' : ""}</td>
+        <td class="num">${fmtUsd(m.final, 0)}</td>
+        <td class="num">${fmtPct(m.cagr, 1)}</td>
+        <td class="num down-text">${fmtPct(m.max_dd, 1)}</td>
+        <td class="num ${better ? "up-text" : ""}">${fmtNumber(m.calmar, 3)}</td>
+        <td class="num">${m.trades.toLocaleString("tr-TR")}</td>
+        <td class="num">${fmtUsd(m.fees, 0)}</td>
+      </tr>`;
+    }).join("");
+
+  const beat = BACKTEST_SERIES.filter((k) => payload.strategies[k]
+    && payload.strategies[k].calmar > bench.calmar);
+  const richer = BACKTEST_SERIES.filter((k) => payload.strategies[k]
+    && payload.strategies[k].final > bench.final);
+  // Both sentences, always, and in this order. Calmar and money disagree here
+  // and that disagreement IS the finding -- reporting only the first would
+  // repeat exactly the overstatement research/README.md section 17 exists to
+  // correct.
+  // `miners` wins both columns here and is NOT buyable: its edge was measured
+  // to come almost entirely from a session-boundary phase shift between the
+  // ~23-hour futures bar and GDX's 6.5-hour one, and it vanishes on GLD/IAU/
+  // SLV (lead correlation +0.150 -> +0.040). The caveat travels with the name
+  // everywhere else on this page; a summary line that named it as the money
+  // winner without it would be the one place a reader could take it straight.
+  const winners = (list) => list.length
+    ? list.map((k) => backtestLabel(k) + (k === "miners" ? "*" : "")).join(", ")
+    : "<strong>HİÇBİRİ</strong>";
+  const minersNote = (beat.includes("miners") || richer.includes("miners"))
+    ? ` <strong>*</strong> Madenciler satın alınabilir bir strateji DEĞİL — kazancı `
+      + `vadeli kontratın seans saatlerinden geliyor ve ETF'te kayboluyor.`
+    : "";
+  document.getElementById("backtest-note").innerHTML =
+    `Al-ve-tut'u <strong>Calmar'da</strong> (risk-ayarlı) geçen: ${winners(beat)}. `
+    + `Al-ve-tut'tan <strong>daha fazla para</strong> kazandıran: ${winners(richer)}. `
+    + `Bu ikisinin aynı liste olmaması bu projenin en pahalı dersidir: Calmar bir `
+    + `risk ölçütüdür, kâr değil.${minersNote}`;
+}
+
+document.addEventListener("click", (event) => {
+  const chip = event.target.closest("#backtest-toggle .chip");
+  if (!chip) return;
+  const key = chip.dataset.series;
+  if (backtestSelection.has(key)) backtestSelection.delete(key);
+  else backtestSelection.add(key);
+  renderBacktest(ASSETS[currentAsset]);
+});
+
+// The SVG is rendered at the container's pixel width rather than scaled by
+// viewBox, so the axis labels stay 11px at every width instead of shrinking
+// to 4px on a phone. That means a resize needs a real re-render.
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => renderBacktest(ASSETS[currentAsset]), 150);
+});
+
 function renderAll() {
   const asset = ASSETS[currentAsset];
   // Repaints every asset-scoped card in the selected metal's colour. The
@@ -1526,6 +1877,8 @@ function renderAll() {
   const row = cache.predictions[currentAsset]?.[0] ?? null;
   const mark = valuationPrice(currentAsset);
 
+  renderToday(cache.portfolios, mark.price, asset, row);
+  renderBacktest(asset);
   renderPrediction(row, asset);
   renderContext(row, asset);
   renderComponents(row, asset);
@@ -1549,9 +1902,41 @@ const EMPTY_LIVE = { gold: null, silver: null, usdtry: null, futures: {}, etfs: 
 
 /* Supabase data. One row per trading day, so this stays on the slow cycle --
    polling it every few seconds would re-download identical bytes. */
+// The measured history, fetched once. A failure here must not take the live
+// dashboard down with it: the card hides itself and everything else renders,
+// which is the same fail-soft rule predict.py applies to a dead macro series.
+// SCHEMA is checked rather than trusted -- a payload whose fields moved
+// should blank the card, not draw half a chart from the fields that survived.
+const BACKTEST_SCHEMA = 1;
+
+async function loadBacktest() {
+  if (cache.backtest) return;
+  try {
+    const response = await fetch("data/backtest.json", { cache: "no-cache" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload.schema !== BACKTEST_SCHEMA) {
+      console.warn(`backtest.json şema ${payload.schema}, beklenen ${BACKTEST_SCHEMA} -- atlandı.`);
+      return;
+    }
+    cache.backtest = payload;
+    // Drawn the moment it lands, rather than waiting for renderAll() at the
+    // end of the Supabase batch. This card needs NO live data -- a static
+    // file and nothing else -- so making it wait on Supabase would mean an
+    // outage there blanks the one panel on this page that cannot be affected
+    // by it. Same fail-soft rule predict.py applies to a dead macro series.
+    renderBacktest(ASSETS[currentAsset]);
+  } catch (error) {
+    console.warn("Ölçülmüş geçmiş yüklenemedi:", error.message);
+  }
+}
+
 async function loadData() {
   try {
-    const [gold, silver, portfolios, trades, records, mentions, themes] = await Promise.all([
+    // In the same batch, not before it: serialising them would add a round
+    // trip to every five-minute cycle for a file that is fetched once.
+    const [, gold, silver, portfolios, trades, records, mentions, themes] = await Promise.all([
+      loadBacktest(),
       api("predictions?select=*&asset=eq.gold&order=target_date.desc&limit=30"),
       api("predictions?select=*&asset=eq.silver&order=target_date.desc&limit=30"),
       api("portfolios?select=*"),

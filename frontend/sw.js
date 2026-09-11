@@ -1,13 +1,19 @@
 // Bump CACHE_NAME whenever frontend behaviour changes meaningfully, or a
 // browser can keep serving the old JS/HTML from cache indefinitely.
-const CACHE_NAME = "xau-guess-v19";
+const CACHE_NAME = "xau-guess-v21";
 const SHELL_FILES = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./chart.js",
   "./config.js",
   "./manifest.json",
+  // The measured backtest. Precached with the shell rather than left to the
+  // runtime handler: it is the one piece of data on this page that is never
+  // stale (it changes only when someone re-runs export_backtest.py), so an
+  // offline visit should still get the charts, not an empty card.
+  "./data/backtest.json",
 ];
 
 self.addEventListener("install", (event) => {

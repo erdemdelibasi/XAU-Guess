@@ -573,3 +573,325 @@ code {
 @media (prefers-reduced-motion: reduce) {
   .live-card.flash-up, .live-card.flash-down { animation: none; }
 }
+
+/* --- "Bugün": the answer, first ---------------------------------------- */
+/* This card sits above the prediction on purpose. The direction call used to
+   own the largest type on the page and it is the number this project's own
+   research measured as worthless (negative Brier skill at every horizon);
+   the position a measured rule is asking for is the one that survives. The
+   visual weight follows that finding rather than the reverse. */
+.card.today {
+  border-color: var(--metal-line);
+  background: linear-gradient(180deg, var(--metal-tint), transparent 140px), var(--card);
+}
+.today-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.today-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) 1fr;
+  gap: 20px;
+  align-items: center;
+  margin-top: 12px;
+}
+.today-target {
+  font-size: clamp(2.6rem, 9vw, 3.6rem);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--metal);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.today-rule { margin-top: 4px; }
+
+/* Two marks on one track: the FILL is the target, the NOTCH is where the
+   book actually sits. A single bar answers "what should I hold" and hides
+   the only question that produces an action -- "how far off am I". */
+.today-bar {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  overflow: visible;
+  margin-bottom: 14px;
+}
+.today-bar > div:first-child {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--metal-2), var(--metal));
+  transition: width 400ms ease;
+}
+#today-bar-now {
+  position: absolute;
+  top: -4px;
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--text);
+  box-shadow: 0 0 0 2px var(--card);
+  transform: translateX(-1.5px);
+  transition: left 400ms ease;
+}
+.today-rows .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.86rem;
+}
+.today-rows .row:last-child { border-bottom: none; }
+/* The label may not shrink. In the hero this card is ~660px, and a flexible
+   label wrapped "Sonraki işlem" onto two lines and the direction row onto
+   three -- a four-row list that read as a paragraph. The VALUE wraps instead,
+   which is the right side to spend the space on. */
+.today-rows .row > span:first-child {
+  color: var(--muted);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.today-rows .row > span:last-child { text-align: right; }
+
+/* --- "Ölçülmüş Geçmiş": the charts ------------------------------------- */
+.backtest-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+
+/* The series filter. One row above the charts, per the interaction rule --
+   a control that changes what is plotted belongs above the plot, not beside
+   or below it. */
+.series-toggle { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 10px; }
+.chip {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 120ms, border-color 120ms;
+}
+/* The dot carries the series colour whether the chip is on or off, so the
+   legend mapping stays readable while a series is hidden. Colour follows the
+   entity, never the selection. */
+.chip::before {
+  content: "";
+  width: 9px; height: 9px;
+  border-radius: 3px;
+  background: var(--chip);
+  opacity: 0.35;
+  transition: opacity 120ms;
+}
+.chip.on { color: var(--text); border-color: var(--chip); }
+.chip.on::before { opacity: 1; }
+.chip:hover { color: var(--text); }
+
+.chart-root { display: flex; flex-direction: column; gap: 4px; }
+.chart-panel { position: relative; }
+.chart-label { color: var(--muted); font-size: 0.76rem; margin-bottom: 2px; }
+.chart-panel svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+.chart-panel .hit { cursor: crosshair; }
+
+/* The hover readout. Fixed min-height so the charts do not jump a line up
+   and down as the pointer enters and leaves. */
+.chart-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-height: 34px;
+  padding: 7px 10px;
+  margin: 6px 0 12px;
+  border-radius: 9px;
+  background: var(--card-2);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+.readout-date { color: var(--metal); font-weight: 700; }
+.readout-item { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.readout-item i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+.readout-item strong { color: var(--text); font-weight: 600; }
+.readout-item em { color: var(--down); font-style: normal; }
+
+.swatch { width: 9px; height: 9px; border-radius: 3px; display: inline-block; margin-right: 6px; }
+tr.benchmark-row td { background: rgba(127, 168, 216, 0.07); }
+
+@media (max-width: 620px) {
+  .today-body { grid-template-columns: 1fr; gap: 14px; }
+  .chart-readout { font-size: 0.78rem; }
+  /* Label above value, not beside it. Side by side, a narrow left column
+     broke "Sonraki işlem" onto two lines and "5 günlük yön çağrısı" onto
+     three, which made a four-row list look like a paragraph. */
+  .today-rows .row { flex-direction: column; gap: 1px; }
+  .today-rows .row > span:last-child { text-align: left; }
+}
+
+/* ======================================================================== */
+/* LAYOUT v2 -- weight redistributed by what the research bench measured.    */
+/* ======================================================================== */
+/* The page was one 8,000px column in which every card had the same visual
+   weight: the decision, the 19.5-year measurement, and a component whose
+   Brier skill score is negative at every horizon all got a full-width card
+   and the same heading size. This section says, in layout, what
+   research/README.md says in prose.
+
+   Three bands:
+     HERO     the decision and the market state it reacts to, side by side
+     FULL     the measured history -- the charts need every pixel of width
+     COLUMNS  main = the books (money attached), side = signals + diagnostics
+
+   Everything here is a grid override; no card's own styling changed, so a
+   card can be moved between bands without touching its rules. */
+
+/* --- sticky top bar ----------------------------------------------------- */
+/* The bar spans the full viewport width by cancelling #app's side padding,
+   then putting it back as its own -- so content scrolls under it edge to
+   edge rather than showing through two 16px gutters. */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px 18px;
+  flex-wrap: wrap;
+  margin: -20px -16px 16px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+  /* Not transparent: the page's fixed metal wash sits behind everything and
+     would read straight through, dragging the scrolling content with it. */
+  background: rgba(11, 9, 6, 0.93);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.topbar h1 { font-size: 1.05rem; margin: 0; letter-spacing: 0.06em; }
+.topbar .asset-tabs { margin-bottom: 0; }
+.topbar .asset-tabs button { padding: 6px 16px; font-size: 0.88rem; }
+.topbar .asset-tabs button::before { width: 9px; height: 9px; }
+/* Pushed right, with the ratio, leaving brand + tabs on the left. */
+.topbar-quotes { margin-left: auto; }
+.topbar-right { text-align: right; line-height: 1.3; }
+.topbar-right .price { font-size: 1.2rem; }
+
+/* The condensed quote strip. Same two numbers as the Anlık Fiyatlar card,
+   which by the time anyone is reading the portfolios is thousands of pixels
+   above -- and a target position is not a readable instruction without the
+   price it applies to. */
+.topbar-quotes {
+  display: flex;
+  gap: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.topbar-quote { display: flex; flex-direction: column; line-height: 1.25; }
+.topbar-quote .tq-label { color: var(--muted); font-size: 0.7rem; letter-spacing: 0.05em; }
+.topbar-quote .tq-value { font-size: 1rem; font-weight: 700; }
+.topbar-quote.metal-gold .tq-value { color: #e8bd5e; }
+.topbar-quote.metal-silver .tq-value { color: #d3dbe6; }
+.topbar-quote .tq-chg { font-size: 0.72rem; font-weight: 600; }
+
+/* --- bands -------------------------------------------------------------- */
+/* align-items:start so a short card never stretches to match a tall
+   neighbour -- a stretched card grows whitespace, not information. */
+.hero {
+  display: grid;
+  grid-template-columns: 1.45fr 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+.hero > .card { margin-bottom: 0; }
+
+.columns {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.col { min-width: 0; }            /* lets wide tables scroll instead of pushing */
+.col > .card:last-child { margin-bottom: 0; }
+.columns { margin-bottom: 16px; }
+
+/* The side column is the demoted one and reads as it: slightly tighter, one
+   step down in heading size. Not greyed out -- this is all real output, and
+   the page says so everywhere it appears. Just not the loudest thing on it. */
+.col-side .card { padding: 14px; }
+.col-side h2 { font-size: 0.98rem; }
+.col-side .direction { font-size: 1.45rem; }
+.col-side .prediction-price { font-size: 1.05rem; }
+.col-side .prediction-meta { gap: 14px; }
+.col-side .meta-item strong { font-size: 1rem; }
+
+/* The strategy grid lives in a ~690px column now instead of the full 1148.
+   At the old 232px floor that is two columns and eleven panels become six
+   rows -- taller than before the redesign. 196px restores three. */
+/* The two groups want different shapes. The measured four land 2x2 in a
+   ~690px column -- four across one row would be 160px each, and three across
+   leaves a single orphan under a half-empty row. The signalled seven want the
+   tighter floor: at 232px that column fits two and the group becomes four
+   rows, taller than before the redesign. */
+#strategy-panels > .strategy-grid { grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
+.strategy-more .strategy-grid { grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); }
+.col-main .strategy-panel { padding: 10px; }
+
+@media (max-width: 1080px) {
+  .topbar-quotes { display: none; }
+}
+
+/* One column, main first. The breakpoint is where the side column stops
+   being able to hold a table without the main one starving. */
+@media (max-width: 960px) {
+  .hero, .columns { grid-template-columns: 1fr; }
+  .hero > .card { margin-bottom: 0; }
+  #strategy-panels > .strategy-grid,
+  .strategy-more .strategy-grid { grid-template-columns: repeat(auto-fit, minmax(216px, 1fr)); }
+  .col > .card:last-child { margin-bottom: 16px; }
+}
+
+@media (max-width: 620px) {
+  .topbar { gap: 8px 12px; padding: 9px 14px; margin: -20px -14px 14px; }
+  .topbar h1 { font-size: 0.95rem; }
+  /* One line, not three. A sticky header that eats 13% of a phone viewport
+     costs more than it returns -- and the ratio's own measured verdict
+     ("60 testin hiçbiri eşiği geçmedi") is why it is the part that gets
+     compressed rather than the tabs or the brand. The trailing-z context
+     drops out here; it is a scale for a number that carries no signal, and
+     the full sentence is still on the Piyasa Durumu card. */
+  .topbar-right {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    text-align: left;
+    width: 100%;
+  }
+  .topbar-right .price { font-size: 1.05rem; }
+  #gs-ratio-context { display: none; }
+}
+
+/* The seven signal-driven books, behind a summary that states the result
+   rather than hiding it. See renderStrategies for why the split is
+   trading.MECHANICAL and not an aesthetic choice. */
+.strategy-more { margin-top: 12px; }
+.strategy-more > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 9px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  font-size: 0.84rem;
+  color: var(--text);
+  line-height: 1.45;
+  transition: border-color 150ms;
+}
+.strategy-more > summary::-webkit-details-marker { display: none; }
+.strategy-more > summary::before {
+  content: "▸";
+  color: var(--metal);
+  margin-right: 8px;
+  display: inline-block;
+  transition: transform 150ms;
+}
+.strategy-more[open] > summary::before { transform: rotate(90deg); }
+.strategy-more > summary:hover { border-color: var(--metal-line); }
+.strategy-more[open] > summary { margin-bottom: 4px; }

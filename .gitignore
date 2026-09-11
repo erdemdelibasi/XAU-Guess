@@ -19,6 +19,17 @@ backend/research/panel_*.json
 # data with an embedded timestamp -- committing it would churn every run.
 backend/research/walkforward_h5.json
 
+# frontend/data/backtest.json is derived data too, and it IS committed -- the
+# opposite call from the two caches above, for a stated reason. Those are
+# rebuilt in seconds by anyone who needs them and churn on every rebuild; that
+# one is what the dashboard DRAWS, so it has to exist for a visitor who never
+# runs Python, and it has to be versioned in the same commit as the parameters
+# that produced it. A curve and the trading.py constants behind it drifting
+# apart silently is exactly the failure this repo is organised against.
+
+# Local screenshots from the headless-Chrome checks.
+.shots/
+
 # OS
 Thumbs.db
 .DS_Store
