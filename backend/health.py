@@ -68,8 +68,12 @@ def fetch_recent(db, asset_key: str, limit: int = LOOKBACK_ROWS) -> list[dict]:
 
 def fetch_model_state_updates(db, asset_key: str) -> list[dict]:
     """Every component's `model_state.updated_at` for one asset -- see the
-    module docstring for why this stands in for "was retrain.py run"."""
-    return (db.table("model_state").select("updated_at")
+    module docstring for why this stands in for "was retrain.py run".
+
+    The call counters ride along because `updated_at` alone cannot tell a
+    stalled retrain from one that has never had anything to do: see check().
+    """
+    return (db.table("model_state").select("updated_at,up_calls,down_calls")
             .eq("asset", asset_key).execute().data)
 
 
@@ -118,8 +122,25 @@ def check(asset, recent: list[dict], model_state_rows: list[dict]) -> list[str]:
                     f">>> DIKKAT ({asset.label}): {label} bileseni son {streak} tahminde "
                     "hep sessiz kaldi -- beklenenden uzun bir sessizlik.")
 
+    # A component record that has never scored anything cannot go stale, and
+    # saying it has is worse than saying nothing. retrain.run_asset skips
+    # rebuild_component_records entirely while `resolved` is empty, so
+    # `updated_at` sits at whatever the seed left and drifts further from
+    # today every night the cron runs PERFECTLY. That is the system's first
+    # weeks by construction: the horizon is five trading days, so nothing can
+    # resolve until a week after the first prediction, and this check fired
+    # "retrain.py may have silently stopped" through all of it.
+    #
+    # Derived from the counters rather than from a second query for resolved
+    # rows: the two callers fetch different things and check() has to stay
+    # pure over what they already have. Every component at zero calls in both
+    # directions means no resolved prediction has ever reached the records --
+    # one always-abstaining component would not do it, because `ml` and
+    # `technical` always vote.
+    scored = any((row.get("up_calls") or 0) + (row.get("down_calls") or 0) > 0
+                 for row in model_state_rows)
     updates = [r["updated_at"] for r in model_state_rows if r.get("updated_at")]
-    if updates:
+    if updates and scored:
         newest_update = max(_parse(ts) for ts in updates)
         retrain_age_days = (now - newest_update).total_seconds() / 86400
         if retrain_age_days > STALE_RUN_ALERT_DAYS:
