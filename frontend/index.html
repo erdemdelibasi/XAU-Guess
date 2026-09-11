@@ -581,9 +581,19 @@
         <p class="muted small">
           Tunç Şatıroğlu'nun videolarında altın ve gümüş hakkında <strong>söyledikleri</strong>.
           Bu bizim tahminimiz değil, onun görüşünün raporudur &mdash; ve modelin
-          bileşenlerinden biri de değildir. Aşağıdaki <code>kanalfinans</code> portföyü
+          bileşenlerinden biri de değildir. Aşağıdaki <code>kanalfinans</code> defteri
           dediklerini birebir uygular.
         </p>
+
+        <!-- The follower's $1,000 book, moved here from the grid of strategy
+             panels. It is not a rule: predict.py does not produce it, the
+             ensemble does not contain it, and compute_target_exposure never
+             sizes it -- it is all-in or all-out on one person's stated call.
+             Standing among ten measured rules it read as an eleventh rule.
+             Its curve stays on "Defterlerin seyri", which is where every book
+             is compared on the same terms. See renderKanalFinansBook. -->
+        <h3 class="sub">Bu görüşün $1.000'lık defteri</h3>
+        <div id="kf-book"></div>
 
         <h3 class="sub">Son görüşler</h3>
         <!-- Cards, not a table. Seven short labels and one paragraph of

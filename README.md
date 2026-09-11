@@ -137,8 +137,11 @@ Kanalın videolarından **iki ayrı şey** çıkarılır:
 
 - **Görüşler** — altın/gümüş başına: sadık tek cümlelik özet, konuşmacının
   duruşu, al/tut/sat, ve verdiyse **ons hedefi, zarar-kes ve direnç
-  seviyeleri**. `kanalfinans` portföyü bunları birebir uygular; zarar-kes
-  her gün sürekli izlenir.
+  seviyeleri**. `kanalfinans` defteri bunları birebir uygular; zarar-kes
+  her gün sürekli izlenir. O $1.000'lık defter arayüzde **bu kartın içinde**
+  duruyor, stratejilerin ızgarasında değil: bir kural değil, bir insanın
+  sözünü kopyalayan tek defter. Eğrisi `Defterlerin seyri` grafiğinde
+  diğerlerinin yanında kalır — orası her defterin aynı ölçüye vurulduğu yer.
 - **Gerekçeler** — görüşün dayandığı makro hikâye: `SAVAS`,
   `ABD_POLITIKA` (Fed/ABD siyaseti), `REZERV` (merkez bankası altın
   alımları, dolarsızlaşma), `DOLAR`, `ENFLASYON`, `ARZ_TALEP`, `BORSA`,

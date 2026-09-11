@@ -972,13 +972,37 @@ koşabileceğine karar vermek için zaten kullandığı sabitin aynısı:
   fiyatın kendi uzun ortalamasına tepki veriyorlar — ve `research/instrument.py`
   alınabilir enstrümanda al-ve-tut'u geçenlerin biri hariç hepsinin bu kümede
   olduğunu ölçtü.
-- Diğer yedisi, `research/edge.py`'nin her ufukta "hep uzun"a yenildiğini
+- Diğer altısı, `research/edge.py`'nin her ufukta "hep uzun"a yenildiğini
   ölçtüğü, `research/tilt.py`'nin ise tam olarak sıfır değerinde bulduğu bir yön
   çağrısına göre pozisyon alıyor.
 
 On bir eşit kutu, bu iki kümenin eşit desteklendiğini söylüyordu. Söylemiyorlar,
 ve bu sayfanın bütün işi bunu söylememek. **Hiçbir şey gizlenmiyor**: özet satırı
 canlı sayıyı taşıyor ve tek tık açıyor.
+
+**Ve on birinci defter (`kanalfinans`) 2026-09-11'de bu karttan çıktı: artık
+Kanal Finans kartının içinde, kopyaladığı sözlerin yanında.** Üçüncü bir tür, ve
+bunu söyleyen sayfa değil backend: `predict.py` onu üretmiyor,
+`ensemble.COMPONENTS` içermiyor, `trading.compute_target_exposure` boyutunu
+hiç hesaplamıyor, `trading.REBALANCE_THRESHOLD` ona uygulanmıyor — hatta
+**`trading.STRATEGIES` içinde bile değil**; işlemleri
+`kanal_finans_trading.decide_on_mention` koyuyor ve kural ayrık AL/SAT.
+Ölçülmüş kuralların ızgarasında durunca on birinci bir kural gibi okunuyordu.
+
+İki inceliği var:
+
+- **Eğrisi canlı grafikte KALIYOR.** Paneli taşımak defterin nerede
+  *anlatıldığıyla* ilgili; karşılaştırma grafikte yapılıyor ve oradan bir çizgi
+  düşürmek, her defteri aynı ölçüye vuran tek yeri bozmak olurdu.
+- **Panel aynı fonksiyondan çıkıyor** (`bookPanelHtml`, ortak `bookContext`).
+  İki kart aynı kutuyu iki ayrı kopyadan çizseydi, ilk eklenen satırda
+  ayrışırlardı — birleşik işlem defterlerinin dersinin aynısı. Kıyas değeri de
+  tek yerde hesaplanıyor, yoksa iki kart al-ve-tut hakkında farklı şey söyleyebilir.
+
+`test_track_etf.test_the_follower_book_is_drawn_once_and_not_among_the_rules`
+iki sessiz arızayı da kilitliyor: sinyal ızgarasında kalan bir `follower`
+**iki kere** çizilir, ikinci bir `follower` girdisi ise `.find` yüzünden
+**hiç** çizilmez.
 
 > **Ve o özet satırı kendi örneklemini de yazıyor.** İlk sürüm "şu an 7'sinin
 > 7'si al-ve-tut'un üzerinde" diyordu — doğru, ve anlamsız: defterler 4 günlük ve

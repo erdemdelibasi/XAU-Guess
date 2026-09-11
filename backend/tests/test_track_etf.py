@@ -17,6 +17,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import assets  # noqa: E402
+import kanal_finans_trading  # noqa: E402
 import track_etf  # noqa: E402
 import trading  # noqa: E402
 
@@ -169,14 +170,53 @@ def test_every_book_on_the_page_shows_its_own_fills():
         end = rest.find("\nfunction ")
         return rest[:end if end != -1 else len(rest)]
 
-    # Both families of book -- the metals' eleven and the ETF's four.
-    for builder in ("renderStrategies", "renderOneEtfBook"):
+    # Both families of book -- every metal book goes through bookPanelHtml
+    # (the portfolios card and the Kanal Finans card share it), the ETF books
+    # through renderOneEtfBook.
+    for builder in ("bookPanelHtml", "renderOneEtfBook"):
         assert "bookLogHtml(" in body(builder), f"{builder} draws no fill log"
 
     # And the combined logs really are gone: two sources for one answer is how
     # the ETF log came to be capped differently from the metals' one.
     assert "function renderTrades" not in source
     assert "trades-table" not in source
+
+
+def test_the_follower_book_is_drawn_once_and_not_among_the_rules():
+    """`kanalfinans` is a third kind of book and the page must keep it that way.
+
+    It is not a rule and not a signal book: predict.py does not produce it,
+    ensemble.COMPONENTS does not contain it, compute_target_exposure never
+    sizes it, and REBALANCE_THRESHOLD does not apply to it -- it is all-in or
+    all-out on one person's stated call. It is drawn in the Kanal Finans card,
+    beside the words it copies.
+
+    Two ways that goes wrong silently. A `follower` entry left in the signal
+    grid is drawn TWICE, once in each card, and nothing raises. A SECOND
+    follower entry is drawn ZERO times, because renderKanalFinansBook resolves
+    one with `.find` -- the same invisible-book failure as the GLD log above.
+
+    That it still has a LINE on the live chart is locked separately, by
+    test_export_backtest.test_live_legend_extends_the_measured_one...: moving
+    the panel is about where the book is explained, not about dropping it from
+    the one comparison that treats every book alike.
+    """
+    app_js = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "frontend", "app.js")
+    source = io.open(app_js, encoding="utf-8").read()
+
+    block = source[source.index("const STRATEGIES = ["):]
+    block = block[:block.index("\n];")]
+    followers = re.findall(r'key: "(\w+)"[^}]*follower: true', block)
+    assert followers == [kanal_finans_trading.STRATEGY], followers
+    # And the reason it is a third kind at all: trading.py does not run it.
+    # Every other book on the page is one of trading.STRATEGIES; this one is
+    # placed by kanal_finans_trading.decide_on_mention.
+    assert kanal_finans_trading.STRATEGY not in trading.STRATEGIES
+
+    # Out of the signal grid, and drawn by its own renderer.
+    assert "!s.mechanical && !s.follower" in source,         "the follower is still in the signalled grid -- it would be drawn twice"
+    assert "function renderKanalFinansBook" in source
 
 
 # ---------------------------------------------------------------------------

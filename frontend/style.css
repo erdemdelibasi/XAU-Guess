@@ -895,6 +895,11 @@ tr.benchmark-row td { background: rgba(127, 168, 216, 0.07); }
    today and a third heading between them would silently repaint both. */
 .strategy-grid.measured { grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
 .strategy-grid.signalled { grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); }
+/* One panel, in the side column: a single column at every width. auto-fit with
+   a minmax floor would stretch the lone book to the full card and leave the
+   default 232px floor unused, which is fine -- this says so rather than
+   relying on it. */
+.strategy-grid.follower-grid { grid-template-columns: 1fr; margin-top: 8px; }
 .col-main .strategy-panel { padding: 10px; }
 #strategy-panels > h3.sub:first-child { margin-top: 4px; }
 

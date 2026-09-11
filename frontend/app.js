@@ -1229,81 +1229,103 @@ document.addEventListener("click", (event) => {
   renderLiveChart(ASSETS[currentAsset], valuationPrice(currentAsset).price);
 });
 
-function renderStrategies(portfolios, price, asset, costBasis) {
+/* What every book panel needs to price itself: the books for the selected
+ * metal, the mark price they are all valued at, and the benchmark they are all
+ * compared against. Built once per render and shared, so the ten panels in one
+ * card and the one in another cannot disagree about the benchmark. */
+function bookContext(portfolios, price, asset, costBasis) {
   const mine = portfolios.filter((p) => p.asset === currentAsset);
   const byKey = new Map(mine.map((p) => [p.strategy, p]));
   const benchmark = byKey.get("buyhold");
-  const benchmarkValue = benchmark
-    ? Number(benchmark.cash_usd) + Number(benchmark.ounces) * price
-    : null;
-
-  const panelFor = (strategy) => {
-    const state = byKey.get(strategy.key);
-    if (!state) {
-      return `<div class="strategy-panel"><div class="name">${strategy.label}</div>
-              <p class="desc">${strategy.desc}</p><div class="value">-</div></div>`;
-    }
-    const value = Number(state.cash_usd) + Number(state.ounces) * price;
-    const pnl = value / STARTING_CASH - 1;
-    const exposure = value > 0 ? (Number(state.ounces) * price) / value : 0;
-    // Every panel also states how it stands against buy-and-hold, because
-    // that comparison is the point and burying it elsewhere is how a reader
-    // ends up not making it.
-    const vsBenchmark =
-      benchmarkValue && !strategy.benchmark ? value / benchmarkValue - 1 : null;
-
-    // The follower portfolio watches a level rather than a target exposure,
-    // so it shows that instead.
-    const extraRow = strategy.follower
-      ? `<div class="row"><span>zarar-kes</span><span>${
-          state.stop_loss_price ? fmtUsd(state.stop_loss_price, asset.digits) : "yok"
-        }</span></div>`
-      : `<div class="row"><span>hedef</span><span>${fmtPct(state.target_exposure, 0)}</span></div>`;
-
-    // "%17 pozisyon" is a ratio; these two are the holding itself, and they
-    // are what the question "did it actually buy any gold?" is asking. A
-    // dashboard that only ever prints ratios cannot answer it.
-    const action = nextActionFor(state, price, exposure, value);
-    // What the metal it still holds cost, and how the price has moved since.
-    // This is a PRICE comparison, not net P&L: the panel's own percentage
-    // above already carries the fees, and repeating them here would count
-    // them twice.
-    const basis = costBasis.get(`${currentAsset}|${strategy.key}`)
-      ?? { avgPrice: null, avgAllIn: null };
-    const sincePurchase = basis.avgPrice ? price / basis.avgPrice - 1 : null;
-
-    return `
-      <div class="strategy-panel${strategy.benchmark ? " benchmark" : ""}${strategy.follower ? " follower" : ""}">
-        <div class="name">${strategy.label}${strategy.benchmark ? '<span class="badge">kıyas</span>' : ""}</div>
-        <p class="desc">${strategy.desc}</p>
-        <div class="value">${fmtUsd(value, 0)}</div>
-        <!-- Not toFixed: this panel sat next to "%48,2" while printing
-             "+0.02%", i.e. two decimal conventions on one screen. Turkish
-             puts the sign OUTSIDE the percent sign -- "+%0,02", not "%+0,02". -->
-        <div class="pnl ${pnl >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(pnl)}</div>
-        <div class="row"><span>pozisyon</span><span>${fmtPct(exposure, 0)}</span></div>
-        ${extraRow}
-        ${vsBenchmark === null ? "" : `
-        <div class="row"><span>al-ve-tut'a göre</span>
-          <span class="${vsBenchmark >= 0 ? "up-text" : "down-text"}">
-            ${fmtSignedPct(vsBenchmark)}
-          </span></div>`}
-        <div class="exposure-bar"><div style="width:${Math.min(100, exposure * 100).toFixed(1)}%"></div></div>
-        <div class="holding">
-          <div class="row"><span>elindeki ${asset.label.toLowerCase()}</span>
-            <span>${Number(state.ounces) > 0 ? fmtOunces(Number(state.ounces)) : "yok"}</span></div>
-          <div class="row"><span>elindeki nakit</span>
-            <span>${fmtUsd(state.cash_usd, 2)}</span></div>
-          ${basis.avgPrice === null ? "" : `
-          <div class="row"><span>aldığı fiyat</span>
-            <span>${fmtUsd(basis.avgPrice, asset.digits)}</span></div>
-          <div class="row"><span>o günden bu yana</span>
-            <span class="${sincePurchase >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(sincePurchase)}</span></div>`}
-        </div>
-        <div class="next-action ${action.kind}">Sonraki işlem: ${action.text}</div>
-        ${bookLogHtml(currentAsset, strategy.key)}
-      </div>`;
+  return {
+    byKey, price, asset, costBasis, assetKey: currentAsset,
+    benchmarkValue: benchmark
+      ? Number(benchmark.cash_usd) + Number(benchmark.ounces) * price
+      : null,
   };
+}
+
+/* One paper book, as a panel.
+ *
+ * Top-level rather than a closure inside renderStrategies because two cards
+ * draw these now: the portfolios card draws ten of them, and the Kanal Finans
+ * card draws the eleventh beside the words it follows. A second copy of this
+ * markup would drift at the first row added to either one -- the same reason
+ * the two trade logs were one function before they became per-book.
+ */
+function bookPanelHtml(strategy, ctx) {
+  const { byKey, price, asset, costBasis, benchmarkValue, assetKey } = ctx;
+  const state = byKey.get(strategy.key);
+  if (!state) {
+    return `<div class="strategy-panel"><div class="name">${strategy.label}</div>
+            <p class="desc">${strategy.desc}</p><div class="value">-</div></div>`;
+  }
+  const value = Number(state.cash_usd) + Number(state.ounces) * price;
+  const pnl = value / STARTING_CASH - 1;
+  const exposure = value > 0 ? (Number(state.ounces) * price) / value : 0;
+  // Every panel also states how it stands against buy-and-hold, because
+  // that comparison is the point and burying it elsewhere is how a reader
+  // ends up not making it.
+  const vsBenchmark =
+    benchmarkValue && !strategy.benchmark ? value / benchmarkValue - 1 : null;
+
+  // The follower portfolio watches a level rather than a target exposure,
+  // so it shows that instead.
+  const extraRow = strategy.follower
+    ? `<div class="row"><span>zarar-kes</span><span>${
+        state.stop_loss_price ? fmtUsd(state.stop_loss_price, asset.digits) : "yok"
+      }</span></div>`
+    : `<div class="row"><span>hedef</span><span>${fmtPct(state.target_exposure, 0)}</span></div>`;
+
+  // "%17 pozisyon" is a ratio; these two are the holding itself, and they
+  // are what the question "did it actually buy any gold?" is asking. A
+  // dashboard that only ever prints ratios cannot answer it.
+  const action = nextActionFor(state, price, exposure, value);
+  // What the metal it still holds cost, and how the price has moved since.
+  // This is a PRICE comparison, not net P&L: the panel's own percentage
+  // above already carries the fees, and repeating them here would count
+  // them twice.
+  const basis = costBasis.get(`${assetKey}|${strategy.key}`)
+    ?? { avgPrice: null, avgAllIn: null };
+  const sincePurchase = basis.avgPrice ? price / basis.avgPrice - 1 : null;
+
+  return `
+    <div class="strategy-panel${strategy.benchmark ? " benchmark" : ""}${strategy.follower ? " follower" : ""}">
+      <div class="name">${strategy.label}${strategy.benchmark ? '<span class="badge">kıyas</span>' : ""}</div>
+      <p class="desc">${strategy.desc}</p>
+      <div class="value">${fmtUsd(value, 0)}</div>
+      <!-- Not toFixed: this panel sat next to "%48,2" while printing
+           "+0.02%", i.e. two decimal conventions on one screen. Turkish
+           puts the sign OUTSIDE the percent sign -- "+%0,02", not "%+0,02". -->
+      <div class="pnl ${pnl >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(pnl)}</div>
+      <div class="row"><span>pozisyon</span><span>${fmtPct(exposure, 0)}</span></div>
+      ${extraRow}
+      ${vsBenchmark === null ? "" : `
+      <div class="row"><span>al-ve-tut'a göre</span>
+        <span class="${vsBenchmark >= 0 ? "up-text" : "down-text"}">
+          ${fmtSignedPct(vsBenchmark)}
+        </span></div>`}
+      <div class="exposure-bar"><div style="width:${Math.min(100, exposure * 100).toFixed(1)}%"></div></div>
+      <div class="holding">
+        <div class="row"><span>elindeki ${asset.label.toLowerCase()}</span>
+          <span>${Number(state.ounces) > 0 ? fmtOunces(Number(state.ounces)) : "yok"}</span></div>
+        <div class="row"><span>elindeki nakit</span>
+          <span>${fmtUsd(state.cash_usd, 2)}</span></div>
+        ${basis.avgPrice === null ? "" : `
+        <div class="row"><span>aldığı fiyat</span>
+          <span>${fmtUsd(basis.avgPrice, asset.digits)}</span></div>
+        <div class="row"><span>o günden bu yana</span>
+          <span class="${sincePurchase >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(sincePurchase)}</span></div>`}
+      </div>
+      <div class="next-action ${action.kind}">Sonraki işlem: ${action.text}</div>
+      ${bookLogHtml(assetKey, strategy.key)}
+    </div>`;
+}
+
+function renderStrategies(portfolios, price, asset, costBasis) {
+  const ctx = bookContext(portfolios, price, asset, costBasis);
+  const { byKey, benchmarkValue } = ctx;
+  const panelFor = (strategy) => bookPanelHtml(strategy, ctx);
 
   // TWO GROUPS, and the line between them is trading.MECHANICAL -- the same
   // constant the backend uses to decide which rules may run on the tracked
@@ -1324,8 +1346,18 @@ function renderStrategies(portfolios, price, asset, costBasis) {
   // are currently ahead of buy-and-hold, which is the fact a reader would open
   // the group to find. Collapsing a measured-null result behind a summary that
   // states the result is not the same as omitting it.
+  // `follower` is the THIRD kind and it is drawn somewhere else entirely --
+  // in the Kanal Finans card, beside the words it copies. It is not a rule and
+  // not a signal book: `predict.py` does not produce it, `ensemble.COMPONENTS`
+  // does not contain it, `trading.compute_target_exposure` never sizes it, and
+  // `trading.REBALANCE_THRESHOLD` does not apply to it -- it is all-in or
+  // all-out on one person's stated call
+  // (`kanal_finans_trading.decide_on_mention`). Standing in a grid of rules it
+  // read as an eleventh rule. Its curve stays on the live chart, where the
+  // comparison it CAN make -- against the same benchmark, on the same days --
+  // is the honest one.
   const measured = STRATEGIES.filter((s) => s.mechanical);
-  const signalled = STRATEGIES.filter((s) => !s.mechanical);
+  const signalled = STRATEGIES.filter((s) => !s.mechanical && !s.follower);
   const ahead = signalled.filter((s) => {
     const state = byKey.get(s.key);
     if (!state || benchmarkValue === null) return false;
@@ -1380,12 +1412,36 @@ function renderStrategies(portfolios, price, asset, costBasis) {
          the same strategy beats buy-and-hold at 2 bp and loses badly at 150,
          so this is not a footnote. -->
     <p class="muted small">
-      Her defterin kendi son işlemleri kutusunun içinde. On bir defter bugüne
+      Her defterin kendi son işlemleri kutusunun içinde; on birincisi
+      (<code>kanalfinans</code>) Kanal Finans kartında. On bir defter bugüne
       kadar toplam <strong>${totalTrades}</strong> işlem yaptı ve
       <strong>${fmtUsd(totalFees, 2)}</strong> komisyon ödedi; oran bu metal için
       tek yönde ${fmtNumber(asset.feeBps, 0)} baz puandır &mdash; bir stratejinin
       al-ve-tut'u geçip geçmediğini çoğu zaman sinyal değil bu sayı belirler.
     </p>`;
+}
+
+/* The follower's book, drawn in the Kanal Finans card rather than among the
+ * rules.
+ *
+ * It answers "what did his call actually cost or earn", and that question
+ * belongs next to the call, not in a grid of measured strategies -- eleven
+ * equal boxes said a person's opinion and a measured risk rule were the same
+ * kind of thing. Same panel function as the other ten (`bookPanelHtml`), so
+ * the two cards cannot drift apart, and same benchmark: `bookContext` builds
+ * the buy-and-hold value once.
+ *
+ * Its curve stays on `Defterlerin seyri` above. Moving the panel is about
+ * where the book is EXPLAINED; the chart is where it is compared, and a line
+ * missing from that chart would quietly drop the one comparison that treats
+ * every book alike. */
+function renderKanalFinansBook(portfolios, price, asset, costBasis) {
+  const host = document.getElementById("kf-book");
+  if (!host) return;
+  const follower = STRATEGIES.find((s) => s.follower);
+  const ctx = bookContext(portfolios, price, asset, costBasis);
+  host.innerHTML = `<div class="strategy-grid follower-grid">`
+    + bookPanelHtml(follower, ctx) + `</div>`;
 }
 
 // How long the paper books have been running, from the first fill on record.
@@ -2094,6 +2150,7 @@ function renderAll() {
   renderLiveChart(asset, mark.price);
   renderValuationNote(asset, mark);
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
+  renderKanalFinansBook(cache.portfolios, mark.price, asset, cache.costBasis);
   renderKanalFinans(cache.mentions, cache.themes);
   // Asset-scoped -- see renderEtfBooks. Rendered from renderAll anyway
   // so a tab switch repaints it with whatever the price loop last had.
@@ -2292,8 +2349,12 @@ async function refreshPrices() {
     const asset = ASSETS[currentAsset];
     const mark = valuationPrice(currentAsset);
     renderStrategies(cache.portfolios, mark.price, asset, cache.costBasis);
-  renderLiveChart(asset, mark.price);
+    renderLiveChart(asset, mark.price);
     renderValuationNote(asset, mark);
+    // The follower's book is ounces x price like the rest; it just lives in
+    // another card now, and leaving it out would freeze one panel on the page
+    // at whatever loadData last saw while its neighbours moved.
+    renderKanalFinansBook(cache.portfolios, mark.price, asset, cache.costBasis);
     // The ETF books are ounces x price too, and their price arrives on this
     // same tick. Left out, the card would sit at whatever loadData last saw
     // (five minutes) while everything beside it moved every two seconds.
