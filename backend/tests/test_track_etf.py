@@ -6,7 +6,9 @@ exist to watch that live. Every test here guards a place where a plausible
 edit would quietly make them claim something that was never measured -- and
 none of those edits would raise an exception on its own.
 """
+import io
 import os
+import re
 import sys
 
 import numpy as np
@@ -111,6 +113,36 @@ def test_only_mechanical_strategies_are_traded():
     assert set(trading.MECHANICAL) == {"buyhold", "voltarget", "trend", "defensive"}
     for strategy in trading.MECHANICAL:
         assert strategy in trading.STRATEGIES
+
+
+def test_every_tracked_book_is_reachable_on_the_page():
+    """A book the backend trades but the page never shows is invisible, silently.
+
+    The card is asset-scoped: TRACKED_ETFS entries carry the ASSETS key whose
+    tab they render under, so a fund whose `metal` matched nothing would trade
+    every weekday and appear on no page at all. Nothing would raise -- the
+    filter would simply return an empty list, and the card would print "this
+    metal has no tracked ETF" while track_etf.py kept writing to the book.
+
+    Text-level on purpose: there is no JS test runner here, and the failure
+    being guarded is a missing edit rather than a wrong computation. The same
+    reasoning as the REBALANCE_THRESHOLD mirror documented in CLAUDE.md.
+    """
+    app_js = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "frontend", "app.js")
+    source = io.open(app_js, encoding="utf-8").read()
+    block = source[source.index("const TRACKED_ETFS = ["):]
+    block = block[:block.index("];")]
+
+    for asset in assets.TRACKED.values():
+        entry = re.search(r'\{ key: "%s".*?\}' % asset.key, block, re.S)
+        assert entry, f"{asset.key} is traded but absent from TRACKED_ETFS"
+        metal = re.search(r'metal: "(\w+)"', entry.group(0))
+        assert metal and metal.group(1) in assets.ASSETS, (
+            f"{asset.key} renders under no existing tab")
+    # And the page must not advertise a book the backend does not keep.
+    for key in re.findall(r'\{ key: "(\w+)"', block):
+        assert key in assets.TRACKED, f"{key} is on the page but not TRACKED"
 
 
 # ---------------------------------------------------------------------------

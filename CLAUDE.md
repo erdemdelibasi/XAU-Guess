@@ -834,6 +834,16 @@ sayfadaki sayıların çoğu bu türden.
   yazar.
 - **Anlık fiyat kartları sekmeyi TAKİP ETMEZ.** İkisi aynı anda ekranda olduğu
   için her biri `.metal-gold` / `.metal-silver` ile kendi paletini sabitler.
+- **Alınabilir enstrüman kartı sekmeyi TAKİP EDER**, ve bu ayrım bilinçlidir:
+  fiyat kartları iki farklı şeyin yan yana konmuş iki kotasyonudur, ETF kartı
+  ise bir **defterdir** ve defter, üzerinde durduğu metalin sayfasına aittir.
+  GLD altın sekmesinde, SLV gümüş sekmesinde. Kart GLD tek başınayken bilerek
+  sekmeden bağımsızdı — o zaman `currentAsset`'e göre filtrelemek kartı gümüş
+  sekmesinde boşaltırdı; SLV eklenince o tehlike de gerekçe de ortadan kalktı.
+  `TRACKED_ETFS` her girdide hangi sekmeye ait olduğunu taşıyor ve
+  `test_track_etf.test_every_tracked_book_is_reachable_on_the_page` bu eşlemeyi
+  kilitliyor: `assets.TRACKED`'a eklenip arayüze yazılmayan bir defter her iş
+  günü işlem yapar ve hiçbir sayfada görünmez — hiçbir yerde hata üretmeden.
 - Gümüş bilerek soğuk/mavimsidir. Nötr gri bu sıcak zeminde "devre dışı" gibi
   okunur, ikinci bir metal gibi değil.
 

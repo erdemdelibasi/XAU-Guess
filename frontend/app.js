@@ -1253,41 +1253,61 @@ const ETF_STRATEGIES = [
   { key: "defensive", label: "Savunma" },
 ];
 
-// backend/assets.TRACKED, in the same order. `claim` is each book's OWN
-// measured result from research/README.md section 17 -- gold's numbers are not
-// reused for silver, because the two are not the same claim: silver's
-// buy-and-hold drawdown is 76.3% against gold's 45.6%, so five points off
-// silver is a smaller cut on a much larger wound.
+// backend/assets.TRACKED, in the same order. `metal` is the ASSETS key whose
+// tab this fund belongs under -- the card follows the tab strip, so GLD shows
+// on the gold tab and SLV on the silver one.
+//
+// `claim` is each book's OWN measured result from research/README.md section
+// 17. Gold's numbers are not reused for silver, because the two are not the
+// same claim: silver's buy-and-hold drawdown is 76.3% against gold's 45.6%,
+// so the five points cut here sit on a much larger wound than gold's six.
 const TRACKED_ETFS = [
-  { key: "gld", label: "GLD", metal: "altın", tv: "AMEX:GLD",
+  { key: "gld", label: "GLD", metal: "gold", metalLabel: "altın", tv: "AMEX:GLD",
     claim: "16,1 yılda $10.000'lik bir hesapta oynaklık hedefi $36.257, al-ve-tut $34.844 bitirdi; "
          + "maksimum düşüş %45,6 → %39,2, Sharpe 0,48 → 0,59." },
-  { key: "slv", label: "SLV", metal: "gümüş", tv: "AMEX:SLV",
+  { key: "slv", label: "SLV", metal: "silver", metalLabel: "gümüş", tv: "AMEX:SLV",
     claim: "16,1 yılda $10.000'lik bir hesapta oynaklık hedefi $35.023, al-ve-tut $33.286 bitirdi; "
          + "maksimum düşüş %76,3 → %70,8, Sharpe 0,24 → 0,32." },
 ];
 
-/* Renders the tradeable-ETF books, one table per instrument.
+/* Renders the tracked-ETF books for the SELECTED metal.
  *
- * Separate from renderStrategies and NOT asset-scoped: these books do not
- * belong to the selected metal, they belong to the instrument. Reusing the
- * per-asset renderer would have meant filtering on `currentAsset`, which is
- * exactly the bug -- the card would blank itself whenever the silver tab was
- * open. Both ETFs are on screen at once for the same reason the two live price
- * cards are: they are different instruments, not two views of one.
+ * Asset-scoped, like every other panel below the tab strip. It was not, while
+ * GLD was the only tracked fund: filtering on `currentAsset` would then have
+ * blanked the card on the silver tab. Adding SLV removed that hazard and with
+ * it the reason -- each metal now has exactly one tradeable proxy, so showing
+ * both at once put a silver book under the gold tab, which is precisely the
+ * confusion the per-asset colouring exists to prevent.
  *
- * Built from TRACKED_ETFS rather than from fixed markup, so adding a third
- * fund stays a data change. */
+ * The LIVE PRICE cards stay unscoped, and that difference is deliberate: they
+ * are two quotes of two different things shown side by side on purpose. These
+ * are books, and a book belongs to the metal whose page it is on.
+ *
+ * Built from TRACKED_ETFS rather than from fixed markup, so a fund is a data
+ * change -- including a metal that has two proxies, which would simply render
+ * two tables on that metal's tab. */
 function renderEtfBooks(portfolios, live) {
   const host = document.getElementById("etf-books");
   if (!host) return;
-  host.innerHTML = TRACKED_ETFS.map((etf) =>
-    renderOneEtfBook(etf, portfolios ?? [], live?.etfs?.[etf.key] ?? null)).join("");
+  const mine = TRACKED_ETFS.filter((etf) => etf.metal === currentAsset);
+  const title = document.getElementById("etf-card-title");
+  if (title) {
+    title.textContent = mine.length
+      ? `Alınabilir Enstrüman — ${mine.map((e) => e.label).join(" / ")}`
+      : "Alınabilir Enstrüman";
+  }
+  // A metal with no tracked fund is a real state (a third metal added to
+  // ASSETS before its ETF is picked), so it gets a sentence rather than an
+  // empty card that reads as a loading failure.
+  host.innerHTML = mine.length
+    ? mine.map((etf) => renderOneEtfBook(
+        etf, portfolios ?? [], live?.etfs?.[etf.key] ?? null)).join("")
+    : `<p class="muted small">Bu metal için izlenen bir ETF yok.</p>`;
 }
 
 function renderOneEtfBook(etf, portfolios, price) {
   // h3.sub, the same heading style the other in-card sections use.
-  const head = `<h3 class="sub">${etf.label} &mdash; ${etf.metal} ETF</h3>`;
+  const head = `<h3 class="sub">${etf.label} &mdash; ${etf.metalLabel} ETF</h3>`;
   const mine = portfolios.filter((p) => p.asset === etf.key);
 
   if (!mine.length) {
@@ -1360,7 +1380,7 @@ function renderAll() {
   renderTrades(cache.trades, asset);
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
   renderKanalFinans(cache.mentions, cache.themes);
-  // Not asset-scoped -- see renderEtfBooks. Rendered from renderAll anyway
+  // Asset-scoped -- see renderEtfBooks. Rendered from renderAll anyway
   // so a tab switch repaints it with whatever the price loop last had.
   renderEtfBooks(cache.portfolios, cache.live);
 }

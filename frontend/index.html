@@ -320,14 +320,17 @@
        futures, which no retail account can hold at all -- and
        backend/research/README.md section 16 measured that this is not a
        cosmetic difference. -->
-  <section class="card" id="etf-card">
-    <h2>Alınabilir Enstrümanlar &mdash; GLD ve SLV</h2>
+  <!-- asset-scoped: the card follows the tab strip, so the gold page shows GLD
+       and the silver page SLV. See renderEtfBooks for why it did not, while
+       GLD was the only tracked fund. -->
+  <section class="card asset-scoped" id="etf-card">
+    <h2 id="etf-card-title">Alınabilir Enstrüman</h2>
     <p class="muted small">
       Yukarıdaki her portföy <strong>COMEX vadeli</strong> fiyatıyla değerleniyor ve
       perakende bir hesap vadeli kontrat tutamaz. Buradaki defterler aynı kuralları
-      gerçekten alınabilen ETF'ler üzerinde, <strong>işlem başına $1,50 sabit komisyonla</strong>
-      işletiyor &mdash; altın için GLD, gümüş için SLV. Yalnızca mekanik stratejiler var,
-      çünkü ölçüm bunları seçti.
+      bu metalin gerçekten alınabilen ETF'i üzerinde,
+      <strong>işlem başına $1,50 sabit komisyonla</strong> işletiyor.
+      Yalnızca mekanik stratejiler var, çünkü ölçüm bunları seçti.
     </p>
     <div id="etf-books"></div>
 
@@ -335,16 +338,18 @@
       <summary>Bu defterler ne iddia ediyor, ne iddia etmiyor</summary>
       <div>
         <p><strong>Para kazandırma iddiası yok.</strong> 16,1 yıllık ölçümde
-        $10.000'lik bir hesapta <code>voltarget</code> al-ve-tut'u GLD'de $1.413,
-        SLV'de $1.737 geçti &mdash; on altı yılda, ikisi de gürültü mesafesinde.</p>
-        <p><strong>İddia risk tarafında:</strong> aynı ölçümde maksimum düşüş GLD'de
-        %45,6'dan %39,2'ye, SLV'de %76,3'ten %70,8'e indi; Sharpe 0,48→0,59 ve
-        0,24→0,32 oldu. Bu, yılda yaklaşık <strong>7-8 işlemle</strong> yapıldı.
-        Bu defterler o düşüş azalmasının canlıda da tutup tutmadığını izlemek için var.</p>
-        <p><strong>İki defter aynı şeyi iddia etmiyor.</strong> Gümüşün al-ve-tut
-        düşüşü %76,3, altınınki %45,6 &mdash; yani SLV'de kesilen beş puan, çok daha
-        büyük bir yaranın üzerinde. Altının sayılarını gümüşe kopyalamak bu farkı
-        görünmez kılardı, o yüzden her defterin sabitleri kendi serisinde ölçüldü.</p>
+        $10.000'lik bir hesapta <code>voltarget</code> al-ve-tut'u yalnızca
+        birkaç yüz dolarla geçti &mdash; on altı yılda, gürültü mesafesinde.
+        Bu metalin kendi sayıları yukarıdaki tablonun altında yazılı.</p>
+        <p><strong>İddia risk tarafında:</strong> aynı ölçümde maksimum düşüş
+        belirgin şekilde geriledi ve Sharpe yükseldi &mdash; ve bu, yılda
+        yaklaşık <strong>7-8 işlemle</strong> yapıldı. Bu defterler o düşüş
+        azalmasının canlıda da tutup tutmadığını izlemek için var.</p>
+        <p><strong>İki metalin defteri aynı şeyi iddia etmiyor</strong>, o yüzden
+        her sekme kendi sayısını gösteriyor: gümüşün al-ve-tut düşüşü %76,3,
+        altınınki %45,6. Yani gümüşte kesilen puanlar çok daha büyük bir yaranın
+        üzerinde. Her defterin sabitleri de kendi serisinde ölçüldü, diğerinden
+        kopyalanmadı.</p>
         <p>Aynı testte Calmar'da al-ve-tut'u geçen stratejilerin çoğu
         <strong>parada ondan geride bitirdi</strong>: düşüşü keserek kazanıyorlar,
         para kazanarak değil. Calmar bir risk-ayarlı ölçüttür, kâr değil.</p>
