@@ -219,6 +219,43 @@ def holdings_as_of(db, asset_key: str, strategy: str, cutoff: datetime) -> tuple
     return trading.STARTING_CASH, 0.0
 
 
+def cost_basis(db, asset_key: str) -> dict[str, dict]:
+    """Average purchase price and last fill date, per strategy.
+
+    AVERAGE COST, the same method frontend/app.js uses: a buy adds units at
+    its own price, a sale removes them at the running average and leaves that
+    average alone. FIFO answers a different question and the two diverge the
+    moment a volatility-targeted book takes partial profits -- the mail and
+    the page disagreeing on what a position cost would be worse than either.
+
+    Unpaginated on purpose: these books trade about eight times a year, so the
+    whole ledger is a few dozen rows. The metals' books would need
+    retrain.fetch_resolved's paging.
+    """
+    rows = (db.table("trades").select("strategy,side,price,ounce_amount,created_at")
+            .eq("asset", asset_key).order("created_at").execute().data)
+    state: dict[str, dict] = {}
+    for row in rows:
+        book = state.setdefault(row["strategy"], {"units": 0.0, "cost": 0.0, "last": None})
+        units = float(row["ounce_amount"])
+        if units <= 0:
+            continue
+        book["last"] = row["created_at"]
+        if row["side"] == "BUY":
+            book["cost"] += float(row["price"]) * units
+            book["units"] += units
+        else:
+            sold = min(units, book["units"])
+            if book["units"] > 0:
+                book["cost"] -= (book["cost"] / book["units"]) * sold
+            book["units"] -= sold
+            if book["units"] <= 1e-9:
+                book["units"], book["cost"] = 0.0, 0.0
+    return {name: {"avg_price": (b["cost"] / b["units"]) if b["units"] > 0 else None,
+                   "last": b["last"]}
+            for name, b in state.items()}
+
+
 def price_as_of(db, asset_key: str, cutoff: datetime) -> float | None:
     """The futures price this system itself recorded at or before `cutoff`.
 
@@ -426,6 +463,7 @@ def build_etf_report(db) -> list[dict]:
         states = portfolio_states(db, asset.key)
         if not states:
             continue
+        basis = cost_basis(db, asset.key)
 
         books = {}
         for strategy in ETF_STRATEGIES:
@@ -433,11 +471,20 @@ def build_etf_report(db) -> list[dict]:
             if not row:
                 continue
             value = float(row["cash_usd"]) + float(row["ounces"]) * price
+            paid = basis.get(strategy, {})
             books[strategy] = {
                 "value_now": value,
                 "total": value / trading.STARTING_CASH - 1.0,
                 "target": float(row.get("target_exposure") or 0.0),
                 "exposure": (float(row["ounces"]) * price / value) if value > 0 else 0.0,
+                # SHARES, not ounces. The DB column is named `ounces` because
+                # one table serves both kinds of book, but a GLD share is about
+                # a tenth of an ounce of gold and an SLV share about nine
+                # tenths of an ounce of silver -- printing this under an
+                # "ons" heading would overstate the gold holding elevenfold.
+                "shares": float(row["ounces"]),
+                "avg_price": paid.get("avg_price"),
+                "last_trade": paid.get("last"),
             }
         bench = books.get(BENCHMARK)
         for strategy, book in books.items():
@@ -599,6 +646,9 @@ def render_text(report: dict) -> str:
                          f"{fmt_signed_pct(book['total']):>10}"
                          f"{versus:>11}  pozisyon %{100 * book['exposure']:.0f}"
                          f" (hedef %{100 * book['target']:.0f})")
+            held = _holding_line(book)
+            if held:
+                lines.append(f"      {held}")
         beat = etf["beat_benchmark"]
         lines.append("    Al-ve-tut'u geçen: "
                      + (", ".join(STRATEGY_LABELS[s] for s in beat) if beat else "HİÇBİRİ"))
@@ -757,6 +807,32 @@ def _asset_card_html(section: dict) -> str:
     return card + _books_table_html(section) + kf_html
 
 
+def _holding_line(book: dict) -> str:
+    """What the book holds and what it paid -- shares, price, date.
+
+    A value and an exposure describe the strategy; they do not say how many
+    shares are held, at what price or when it last moved, and a portfolio row
+    looks identical whether the position was set yesterday or a month ago.
+    No gram figure here: converting shares to metal needs a SPOT quote this
+    report never fetches (it values books in futures, deliberately), and
+    dividing by a futures price would bake the ~1% basis into the number. The
+    page does that conversion, where the spot quote is already on hand.
+    """
+    shares = book.get("shares") or 0.0
+    if shares <= 1e-9:
+        return "pozisyon yok"
+    # fmt_num, not an f-string format spec: the rest of the mail writes
+    # decimals with a comma and mixing both conventions on one line is the
+    # same defect fmtNumber fixed on the page.
+    parts = [f"{fmt_num(shares, 4)} pay"]
+    if book.get("avg_price"):
+        parts.append(f"ort. {fmt_usd(book['avg_price'], 2)}/pay")
+    if book.get("last_trade"):
+        stamp = book["last_trade"]
+        parts.append(f"son işlem {stamp[8:10]}.{stamp[5:7]}.{stamp[0:4]}")
+    return " · ".join(parts)
+
+
 def _etf_table_html(etf: dict) -> str:
     """The tradeable-ETF books. Same shape as _books_table_html, minus the 24h
     column these books cannot honestly fill (see build_etf_report)."""
@@ -776,6 +852,9 @@ def _etf_table_html(etf: dict) -> str:
                 if is_bench else STRATEGY_LABELS[strategy])
         versus = (f'<span style="color:{MUTED};">—</span>' if is_bench
                   else _pct_html(book["vs_benchmark"]))
+        held = _holding_line(book)
+        if held:
+            name += (f'<br><span style="color:{MUTED};font-size:10px;">{held}</span>')
         cells = [name, fmt_usd(book["value_now"], 2),
                  f'<span style="color:{MUTED};">%{100 * book["exposure"]:.0f}</span>',
                  _pct_html(book["total"]), versus]

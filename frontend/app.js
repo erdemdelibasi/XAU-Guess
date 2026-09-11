@@ -927,9 +927,15 @@ function costBasisByStrategy(trades) {
   const byKey = new Map();
   for (const trade of trades) {
     const key = `${trade.asset}|${trade.strategy}`;
-    const state = byKey.get(key) ?? { ounces: 0, marketCost: 0, allInCost: 0 };
+    const state = byKey.get(key) ?? { ounces: 0, marketCost: 0, allInCost: 0, lastAt: null };
     const ounces = Number(trade.ounce_amount);
     if (!Number.isFinite(ounces) || ounces <= 0) continue;
+    // The rows arrive ordered by created_at ascending, so the last one seen is
+    // the most recent. Carried because "what did it pay" and "when did it last
+    // do anything" are different questions and a portfolio box answers neither
+    // on its own -- it looks identical whether the position was set yesterday
+    // or three weeks ago.
+    state.lastAt = trade.created_at ?? state.lastAt;
     if (trade.side === "BUY") {
       state.marketCost += Number(trade.price) * ounces;
       state.allInCost += Number(trade.usd_amount);
@@ -950,8 +956,9 @@ function costBasisByStrategy(trades) {
   const out = new Map();
   for (const [key, s] of byKey) {
     out.set(key, s.ounces > 0
-      ? { avgPrice: s.marketCost / s.ounces, avgAllIn: s.allInCost / s.ounces }
-      : { avgPrice: null, avgAllIn: null });
+      ? { avgPrice: s.marketCost / s.ounces, avgAllIn: s.allInCost / s.ounces,
+          lastAt: s.lastAt }
+      : { avgPrice: null, avgAllIn: null, lastAt: s.lastAt });
   }
   return out;
 }
@@ -1301,11 +1308,66 @@ function renderEtfBooks(portfolios, live) {
   // empty card that reads as a loading failure.
   host.innerHTML = mine.length
     ? mine.map((etf) => renderOneEtfBook(
-        etf, portfolios ?? [], live?.etfs?.[etf.key] ?? null)).join("")
+        etf, portfolios ?? [], live?.etfs?.[etf.key] ?? null, live,
+        cache.costBasis)).join("")
     : `<p class="muted small">Bu metal için izlenen bir ETF yok.</p>`;
 }
 
-function renderOneEtfBook(etf, portfolios, price) {
+/* How much metal one ETF share actually represents, in troy ounces.
+ *
+ * Derived from the price ratio rather than from the sponsor's NAV file: the
+ * fund holds bullion and almost nothing else, so its share price tracks
+ * `metal per share x metal price` closely, and the ratio recovers the first
+ * factor without adding a data source. Measured 2026-09-11: GLD 0.0913 oz and
+ * SLV 0.8989 oz per share, both within a percent of the sponsors' published
+ * figures.
+ *
+ * SPOT is the right denominator here and FUTURES would be wrong, which is the
+ * exact opposite of the rule for portfolio valuation (see the TV_FUTURES
+ * note). The books are valued in futures because that is the series they
+ * traded at; metal CONTENT is a different question -- a fund's bullion is
+ * marked to the spot market, and dividing by a futures price would quietly
+ * bake the ~1% basis into the gram figure.
+ *
+ * Two honest limits, both stated on screen: this is an approximation, and
+ * while the US market is closed the ETF's last close is compared against a
+ * live spot price, so the figure drifts with the overnight move. */
+function metalOuncesPerShare(etf, etfPrice, live) {
+  const spot = live?.[etf.metal] ?? null;
+  if (!Number.isFinite(spot) || spot <= 0 || !Number.isFinite(etfPrice)) return null;
+  return etfPrice / spot;
+}
+
+/* The line that answers "what do I actually hold, and what did I pay".
+ *
+ * A portfolio box shows value and exposure, which is what the strategy cares
+ * about -- but not the three things a person holding the position asks: how
+ * many shares, how much metal that is, and at what price and when it was
+ * bought. Those live in `trades`, which the page already downloads in full
+ * for the cost basis, so this costs no extra request. */
+function etfHoldingLine(etf, row, price, live, basis) {
+  const shares = Number(row.ounces);
+  if (!Number.isFinite(shares) || shares <= 1e-9) return '<span class="muted">pozisyon yok</span>';
+  const parts = [`${fmtNumber(shares, 4)} pay`];
+
+  const perShare = metalOuncesPerShare(etf, price, live);
+  if (perShare !== null) {
+    const grams = shares * perShare * TROY_OUNCE_GRAMS;
+    parts.push(`≈ ${fmtNumber(grams, 2)} g ${etf.metalLabel}`);
+  }
+  const cost = basis?.get(`${etf.key}|${row.strategy}`) ?? null;
+  if (cost?.avgPrice) parts.push(`ort. ${fmtUsd(cost.avgPrice)}/pay`);
+  if (cost?.lastAt) parts.push(`son işlem ${fmtShortDate(cost.lastAt)}`);
+  return parts.join(" · ");
+}
+
+const fmtShortDate = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—"
+    : d.toLocaleDateString("tr-TR", { day: "numeric", month: "short", year: "numeric" });
+};
+
+function renderOneEtfBook(etf, portfolios, price, live, basis) {
   // h3.sub, the same heading style the other in-card sections use.
   const head = `<h3 class="sub">${etf.label} &mdash; ${etf.metalLabel} ETF</h3>`;
   const mine = portfolios.filter((p) => p.asset === etf.key);
@@ -1338,7 +1400,7 @@ function renderOneEtfBook(etf, portfolios, price) {
       ? '<span class="muted">kıyas</span>'
       : fmtSignedPct(total - benchmarkTotal);
     return `<tr${isBench ? ' class="benchmark"' : ""}>
-      <td>${label}</td>
+      <td>${label}<br><span class="muted tiny">${etfHoldingLine(etf, row, price, live, basis)}</span></td>
       <td>${fmtUsd(value)}</td>
       <td>${fmtPct(exposure)}</td>
       <td>${fmtPct(Number(row.target_exposure))}</td>
@@ -1359,7 +1421,19 @@ function renderOneEtfBook(etf, portfolios, price) {
     + `<p class="muted small">${etf.tv} $${shown}`
     + ` <span class="muted">(${ETF_DELAY_MINUTES} dk gecikmeli)</span>`
     + ` &mdash; her defter $${STARTING_CASH.toLocaleString("tr-TR")} ile başladı,`
-    + ` işlem başına $1,50 komisyon ödüyor. <br>Ölçülen: ${etf.claim}</p>`;
+    + ` işlem başına $1,50 komisyon ödüyor.`
+    + `<br>Defterler <strong>pay</strong> tutuyor, külçe değil. Gram karşılığı`
+    + ` ETF fiyatının spot fiyata oranından türetilmiş bir <strong>yaklaşıktır</strong>`
+    + ` (bugün 1 ${etf.label} ≈ ${gramsPerShareText(etf, price, live)});`
+    + ` ABD borsası kapalıyken ETF'in son kapanışı canlı spotla karşılaştırıldığı`
+    + ` için bir-iki puan sapabilir.`
+    + `<br>Ölçülen: ${etf.claim}</p>`;
+}
+
+function gramsPerShareText(etf, price, live) {
+  const perShare = metalOuncesPerShare(etf, price, live);
+  return perShare === null ? "—"
+    : `${fmtNumber(perShare * TROY_OUNCE_GRAMS, 3)} g`;
 }
 
 function renderAll() {

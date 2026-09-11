@@ -99,6 +99,9 @@ h1 { font-size: 1.5rem; margin: 0; letter-spacing: 0.02em; font-weight: 800; }
 h2 { font-size: 1.05rem; margin: 0 0 10px; font-weight: 700; }
 .muted { color: var(--muted); }
 .small { font-size: 0.82rem; }
+/* One step below .small, for the holdings line under an ETF strategy name:
+   it is context for the row above it, not a second row of its own. */
+.tiny { font-size: 0.72rem; line-height: 1.4; display: inline-block; }
 .center { text-align: center; }
 
 /* --- top bar ----------------------------------------------------------- */

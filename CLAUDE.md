@@ -946,6 +946,25 @@ stratejiler fiyat geçmişinden başka hiçbir şey istemiyor. İki gerekçenin
 bir varsayılan hepsini sessizce geçersiz kılardı. `trading.maybe_trade` artık
 `gross * fee_rate + flat_fee_usd` hesaplıyor.
 
+**`portfolios.ounces` bu defterlerde ONS DEĞİL, PAY tutar.** Tek tablo iki tür
+defteri birden taşıyor ve kolonun adı metallerden geliyor; ETF tarafında içindeki
+sayı adet hissedir. Bir GLD payı ~0,091 ons altın, bir SLV payı ~0,899 ons gümüş
+(2026-09-11'de ölçüldü) — yani bu sayıyı "ons" başlığı altında basmak altın
+tutarını **on bir kat** abartır. Arayüz ve mail ikisi de "pay" yazıyor.
+
+**Pay → gram çevrimi SPOT fiyatla yapılır, ve bu değerlemenin kuralının tam
+tersidir.** Defterler vadeliyle değerlenir çünkü işlemler o seride gerçekleşti;
+ama bir fonun külçesi spot piyasada değerlenir, dolayısıyla pay başına metal
+içeriğini vadeliye bölmek ~%1'lik bazı sessizce gram sayısına gömer. Çevrim
+ETF fiyatının spot fiyata **oranından** türetiliyor (fon neredeyse yalnızca
+külçe tutuyor, yani pay fiyatı ≈ pay başına metal × metal fiyatı) — sponsorun
+NAV dosyasına yeni bir canlı bağımlılık eklemeden. Ölçüldü: GLD 0,0913 ons,
+SLV 0,8989 ons; ikisi de sponsorun yayımladığı rakamın %1 içinde. İki sınırı da
+ekranda yazılı: **yaklaşıktır**, ve ABD borsası kapalıyken ETF'in son kapanışı
+canlı spotla karşılaştırıldığı için gece hareketi kadar sapar. Mail bu çevrimi
+**yapmıyor** — oraya spot kotasyonu hiç gelmiyor ve olmayan bir fiyatı
+uydurmaktansa gram satırını hiç basmamak doğrusu.
+
 **Ve bu defterlerin iddiası getiri değil.** 17. bölüm: $10.000'lik bir GLD
 hesabında 16,1 yılda `voltarget` $36.257, al-ve-tut $34.844 — fark gürültü.
 Kazanılan şey maksimum düşüşün %45,6'dan %39,2'ye inmesi, ve bu yılda ~8
