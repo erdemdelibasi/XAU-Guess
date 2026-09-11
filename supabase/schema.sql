@@ -151,14 +151,17 @@ on conflict (asset, strategy) do nothing;
 -- Tracked ETFs (assets.TRACKED). A SEPARATE seed because these books run a
 -- different and much smaller pipeline: backend/track_etf.py, mechanical
 -- strategies only, no prediction row and no model. See that module and
--- research/README.md section 17 -- on GLD the futures scoreboard's ranking
--- changes fundamentally, and only the mechanical strategies survive.
+-- research/README.md section 17 -- on GLD and SLV alike the futures
+-- scoreboard's ranking changes fundamentally, and only the mechanical
+-- strategies survive. BOTH metals get a book: the project is a two-metal one
+-- everywhere else, and stopping at gold precisely where the metal becomes
+-- buyable would have been a silent narrowing.
 --
 -- No `model_state` rows for these: model_state tracks ENSEMBLE COMPONENTS'
 -- live skill, and no component runs here.
 insert into portfolios (asset, strategy)
 select a.asset, s.strategy
-from (values ('gld')) as a(asset)
+from (values ('gld'), ('slv')) as a(asset)
 cross join (values
     ('buyhold'), ('voltarget'), ('trend'), ('defensive')
 ) as s(strategy)

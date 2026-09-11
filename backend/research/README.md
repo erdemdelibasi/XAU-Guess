@@ -1510,8 +1510,29 @@ al-ve-tut'tan $1.413 fazla** (+%4, yani gürültü mesafesinde) ama maksimum dü
 ~8 işlemle** yapıyor ($215 toplam komisyon), yani elle uygulanabilir ve sabit
 komisyona neredeyse duyarsız.
 
-**Dürüst özet: bu depoda $10.000'lik bir GLD hesabında al-ve-tut'tan anlamlı
-şekilde daha fazla PARA kazandıran hiçbir şey yok.** Olan şey, aynı parayı
+### Gümüş defteri de ölçüldü, ve aynı şeyi iddia etmiyor
+
+SLV, $10.000, 16,1 yıl, işlem başına $1,50 (aynı pencere, `slv_books`):
+
+| strateji | son değer | YBG | Sharpe | maks düşüş | Calmar | işlem | komisyon |
+|---|---|---|---|---|---|---|---|
+| `voltarget` | **$35.023** | %8,1 | 0,32 | %70,8 | 0,114 | 114 | $187 |
+| `defensive` | $34.140 | %7,9 | 0,39 | %60,4 | 0,131 | 229 | $474 |
+| **`buyhold`** | $33.286 | %7,7 | 0,24 | %76,3 | 0,101 | 1 | $2 |
+| `trend` | $32.205 | %7,5 | 0,29 | %64,3 | 0,117 | 149 | $349 |
+
+Aynı şekil, çok daha sert zeminde. **Gümüşün al-ve-tut düşüşü %76,3**, altınınki
+%45,6 — `assets.py`'nin 25 yıllık tablosu canlı bir defterde. `voltarget`'ın
+kestiği beş puan, altındaki altı puandan daha **büyük bir yaranın** üzerinde,
+ve parada fark yine gürültü ($1.737).
+
+Bir fark var: `defensive` burada al-ve-tut'u **hem** Calmar'da **hem** parada
+geçiyor (GLD'de parada geride kalıyordu) — ama 229 işlemle ve tek bir sütunda,
+yani bu bölümün kendi uyarısına tabi: 0,03'lük bir Calmar farkı tek başına
+karar gerekçesi değildir.
+
+**Dürüst özet: bu depoda $10.000'lik bir GLD ya da SLV hesabında al-ve-tut'tan
+anlamlı şekilde daha fazla PARA kazandıran hiçbir şey yok.** Olan şey, aynı parayı
 belirgin şekilde daha az acıyla kazandıran bir mekanizma — ve o mekanizma
 5. maddenin en baştan beri söylediği şey.
 

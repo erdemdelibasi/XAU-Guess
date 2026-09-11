@@ -31,9 +31,23 @@ def test_tracked_etfs_are_not_in_the_prediction_registry():
     predict.run_asset would then try to load `model_filename`, which is
     deliberately empty here.
     """
-    assert "gld" in assets.TRACKED
-    assert "gld" not in assets.ASSETS
+    assert {"gld", "slv"} <= set(assets.TRACKED)
     assert not set(assets.TRACKED) & set(assets.ASSETS)
+
+
+def test_both_metals_have_a_tradeable_book():
+    """Silver is tracked too, and the omission would have been invisible.
+
+    This project is a two-metal one in assets.ASSETS, in the panel, in the tab
+    strip and in the daily mail. A TRACKED registry holding only gold would
+    raise nothing anywhere -- track_etf.py would simply iterate one entry, the
+    mail would print one section and the page one table. The claim "these
+    strategies are measured on the instrument a person can buy" would then be
+    true for half the project.
+    """
+    assert {a.symbol for a in assets.TRACKED.values()} == {"GLD", "SLV"}
+    assert {a.symbol for a in assets.ASSETS.values()} == {
+        assets.GOLD.symbol, assets.SILVER.symbol}
 
 
 def test_a_tracked_etf_declares_no_model_and_no_drivers():
@@ -41,12 +55,50 @@ def test_a_tracked_etf_declares_no_model_and_no_drivers():
 
     An empty `model_filename` is what makes "mechanical only" checkable rather
     than a convention. Empty `leading_drivers` matters just as much: listing
-    gold's would imply a research/drivers.py measurement on GLD that nobody
-    has made, and macro_signal would then vote on it.
+    the metal's would imply a research/drivers.py measurement on the ETF that
+    nobody has made, and macro_signal would then vote on it.
     """
-    gld = assets.TRACKED["gld"]
-    assert gld.model_filename == ""
-    assert gld.leading_drivers == ()
+    for asset in assets.TRACKED.values():
+        assert asset.model_filename == "", asset.key
+        assert asset.leading_drivers == (), asset.key
+
+
+def test_each_etf_carries_its_own_measured_price_scales():
+    """The constant assets.py exists to stop anyone copying.
+
+    research/instrument.py measured 171.9/50.8/6.25 on GLD and 93.7/29.0/3.73
+    on SLV -- a factor of ~1.8 apart, which is silver's own realised
+    volatility showing up exactly where a price-derived scale should feel it.
+    Copying gold's onto the silver book is the documented failure that once had
+    silver's macd score saturating on 35.2% of sessions, and it raises nothing.
+    """
+    gld, slv = assets.TRACKED["gld"], assets.TRACKED["slv"]
+    assert gld.price_scales != slv.price_scales
+    for field in ("macd", "ema_cross", "sma200"):
+        ratio = getattr(gld.price_scales, field) / getattr(slv.price_scales, field)
+        assert 1.6 < ratio < 2.0, field
+    # And each ETF sits within a few percent of ITS OWN futures contract:
+    # all three scales normalise ratios, so the ~10x price-level gap between
+    # GLD and GC=F cannot matter by construction.
+    for etf, metal in ((gld, assets.GOLD), (slv, assets.SILVER)):
+        for field in ("macd", "ema_cross", "sma200"):
+            near = getattr(etf.price_scales, field) / getattr(metal.price_scales, field)
+            assert 0.95 < near < 1.05, (etf.key, field)
+
+
+def test_the_etf_inherits_its_metals_volatility_budget_not_its_own():
+    """target_volatility is a risk PREFERENCE, and re-measuring it is the trap.
+
+    Gold realises 18.1% and targets 15%; silver realises 33.7% and targets 28%
+    -- both about 83% of realised, i.e. a chosen budget rather than a property
+    of the series. GLD realises 18.3% and SLV 33.3%, so the metals' budgets are
+    the same choice on the same volatility. Letting each ETF target its own
+    realised figure would make `voltarget` on GLD a different strategy from
+    `voltarget` on gold, and research/README.md section 17's futures-vs-ETF
+    comparison would stop being about the instrument.
+    """
+    assert assets.TRACKED["gld"].target_volatility == assets.GOLD.target_volatility
+    assert assets.TRACKED["slv"].target_volatility == assets.SILVER.target_volatility
 
 
 def test_only_mechanical_strategies_are_traded():
@@ -74,7 +126,10 @@ def test_flat_fee_is_zero_for_the_metals_and_set_for_the_etf():
     """
     assert assets.GOLD.flat_fee_usd == 0.0
     assert assets.SILVER.flat_fee_usd == 0.0
-    assert assets.TRACKED["gld"].flat_fee_usd == 1.50
+    # Per TRADE, not per share -- which is why the same $1.50 lands on both
+    # books even though SLV's share price is a seventh of GLD's.
+    for asset in assets.TRACKED.values():
+        assert asset.flat_fee_usd == 1.50, asset.key
 
 
 def test_a_trade_pays_the_flat_fee_on_top_of_the_spread():
@@ -90,6 +145,12 @@ def test_a_trade_pays_the_flat_fee_on_top_of_the_spread():
     gross = 1_000.0
     expected = gross * gld.fee_rate + gld.flat_fee_usd
     assert expected == pytest.approx(0.10 + 1.50)
+    # SLV's assumed spread is twice GLD's: a one-cent quote is ~1.7 bp on a
+    # $57 share against ~0.25 bp on a $396 one. Still second-order -- on this
+    # trade size the flat fee is fifteen times the spread term.
+    slv = assets.TRACKED["slv"]
+    assert slv.fee_rate == pytest.approx(2 * gld.fee_rate)
+    assert gross * slv.fee_rate + slv.flat_fee_usd == pytest.approx(0.20 + 1.50)
     # And the metals' arithmetic is unchanged.
     assert 1_000.0 * assets.GOLD.fee_rate + assets.GOLD.flat_fee_usd == pytest.approx(0.50)
 
@@ -115,6 +176,16 @@ def test_voltarget_cuts_exposure_when_volatility_runs_hot():
     assert hot == pytest.approx(0.5, abs=0.01)  # 0.15 / 0.30
     assert hot < calm
 
+    # The same 30% is NOT hot for silver, and that is the whole point of the
+    # per-asset budget: SLV's 28% target leaves it near fully invested where
+    # gold is already halved. Gold's 15% applied here would not be volatility
+    # targeting, it would be "hold less silver".
+    slv = assets.TRACKED["slv"]
+    slv_same = trading.compute_target_exposure(
+        "voltarget", 57.0, 55.0, 0.30, "UP", 0.0, slv.target_volatility)
+    assert slv_same > hot
+    assert slv_same == pytest.approx(0.28 / 0.30, abs=0.01)
+
 
 def test_a_forecast_cannot_move_a_mechanical_book():
     """Direction and confidence are passed in and must be ignored.
@@ -125,13 +196,13 @@ def test_a_forecast_cannot_move_a_mechanical_book():
     ("UP", 0.0) explicitly rather than relying on defaults, so this stays a
     property of compute_target_exposure and not of the caller.
     """
-    gld = assets.TRACKED["gld"]
-    for strategy in trading.MECHANICAL:
-        bullish = trading.compute_target_exposure(
-            strategy, 400.0, 380.0, 0.18, "UP", 1.0, gld.target_volatility)
-        bearish = trading.compute_target_exposure(
-            strategy, 400.0, 380.0, 0.18, "DOWN", 1.0, gld.target_volatility)
-        assert bullish == bearish, strategy
+    for asset in assets.TRACKED.values():
+        for strategy in trading.MECHANICAL:
+            bullish = trading.compute_target_exposure(
+                strategy, 400.0, 380.0, 0.18, "UP", 1.0, asset.target_volatility)
+            bearish = trading.compute_target_exposure(
+                strategy, 400.0, 380.0, 0.18, "DOWN", 1.0, asset.target_volatility)
+            assert bullish == bearish, (asset.key, strategy)
 
 
 def test_realised_volatility_uses_the_production_lookback():

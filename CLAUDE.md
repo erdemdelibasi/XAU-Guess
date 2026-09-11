@@ -189,8 +189,8 @@ diğerlerinin yanında, kıyas rozetiyle duruyor.
 ## Önemli kısıtlar
 
 - **Gerçek para/emir yok.** Metal başına on bir portföy (onu `trading.py`'nin
-  motoruyla, biri Kanal Finans takipçisi) — toplam yirmi iki, artı GLD için
-  dört ETF defteri. Yirmi altısı da sanal.
+  motoruyla, biri Kanal Finans takipçisi) — toplam yirmi iki, artı GLD ve SLV
+  için dörder ETF defteri. Otuzu da sanal.
 - **Hiçbir piyasa verisi anahtarı gerekmiyor.** Yahoo Finance chart API
   (GC=F, SI=F + 14 makro seri), Binance'in kamuya açık
   `data-api.binance.vision` uç noktası (altının hafta sonu fiyatı için
@@ -896,8 +896,26 @@ duyan satırlarda susturur.
 `predict.py`'nin ürettiği yirmi iki portföyün hepsi **COMEX vadeli** fiyatıyla
 değerleniyor ve perakende bir hesap vadeli kontrat tutamaz. 16. ve 17. bölümler
 bunun kozmetik bir fark olmadığını ölçtü. `backend/track_etf.py` bu yüzden var:
-aynı kuralları **GLD** üzerinde, işlem başına **$1,50 sabit komisyonla** işleten
-dört defter.
+aynı kuralları **GLD ve SLV** üzerinde, işlem başına **$1,50 sabit komisyonla**
+işleten dörder defter.
+
+**İki metal de defter alır, ve ikisi aynı şeyi iddia etmez.** Proje her yerde
+iki metalli; tam da metal *alınabilir* hâle geldiği yerde altında durmak sessiz
+bir daralma olurdu. SLV'nin sabitleri SLV'de ölçüldü, GLD'den devralınmadı
+(`macd` 93,7 / `ema_cross` 29,0 / `sma200` 3,73 — SI=F'in 93,4/29,3/3,72'si ile
+birebir aynı aileden, GLD'ninkinin ~1,8 katı uzağında). $10.000'lik hesapta
+16,1 yıl:
+
+| | `voltarget` | `buyhold` | düşüş | Sharpe |
+|---|---|---|---|---|
+| GLD | $36.257 | $34.844 | %45,6 → %39,2 | 0,48 → 0,59 |
+| SLV | $35.023 | $33.286 | %76,3 → %70,8 | 0,24 → 0,32 |
+
+Aynı şekil, çok daha sert zeminde: gümüşün al-ve-tut düşüşü %76,3, altınınki
+%45,6. Yani SLV'de kesilen beş puan, altındaki altı puandan **daha büyük bir
+yaranın** üzerinde. Altının çiftini gümüş defterinin yanına basmak iki sayıyı
+birden yanlış söylerdi — `daily_report.ETF_CLAIM` ve frontend'in
+`TRACKED_ETFS`'i bu yüzden enstrüman başına ayrı bir dize taşıyor.
 
 **`assets.TRACKED`, `assets.ASSETS`'ten AYRI bir sözlüktür ve öyle kalmalı.**
 `ASSETS` `predict.py`'nin döndüğü şeydir: ML modeli, kalibratör, Claude çağrısı,

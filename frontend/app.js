@@ -177,11 +177,14 @@ const TV_FUTURES = { gold: "COMEX:GC1!", silver: "COMEX:SI1!" };
 // the SPOT tickers decide the "gecikmeli" badge. An ETF quote folded into
 // that calculation would let a delayed listing permanently brand the
 // real-time spot cards as delayed.
-const TV_ETFS = { gld: "AMEX:GLD" };
-// Measured 2026-09-11: AMEX:GLD comes back `delayed_streaming_900`, i.e. 15
-// minutes behind, against the futures legs' 600. Printed on the card for the
-// same reason the futures delay is -- a value that lags by a quarter hour and
-// one that does not are different claims, and the panel has to say which.
+const TV_ETFS = { gld: "AMEX:GLD", slv: "AMEX:SLV" };
+// Measured 2026-09-11, BOTH legs: AMEX:GLD and AMEX:SLV each come back
+// `delayed_streaming_900`, i.e. 15 minutes behind, against the futures legs'
+// 600. Printed on the card for the same reason the futures delay is -- a value
+// that lags by a quarter hour and one that does not are different claims, and
+// the panel has to say which. Checked for silver rather than assumed from
+// gold: a shared constant covering an unmeasured listing is how a delay claim
+// goes quietly wrong.
 const ETF_DELAY_MINUTES = 15;
 const TROY_OUNCE_GRAMS = 31.1034768;
 
@@ -531,7 +534,7 @@ async function fetchTradingView() {
       // The series the portfolios are valued on -- see the TV_FUTURES note.
       futures: { gold: read(TV_FUTURES.gold), silver: read(TV_FUTURES.silver) },
       // What the tracked-ETF books are marked to.
-      etfs: { gld: read(TV_ETFS.gld) },
+      etfs: { gld: read(TV_ETFS.gld), slv: read(TV_ETFS.slv) },
       // No fallback source (Binance) has a comparable "today's open" -- its
       // 24hr ticker has a rolling-window open, a different number wearing the
       // same name -- so this stays empty rather than mixing definitions, and
@@ -1250,36 +1253,54 @@ const ETF_STRATEGIES = [
   { key: "defensive", label: "Savunma" },
 ];
 
-// backend/assets.TRACKED. One entry today; a list so a second ETF is a data
-// change rather than a rewrite.
-const TRACKED_ETFS = [{ key: "gld", label: "GLD", tv: "AMEX:GLD" }];
+// backend/assets.TRACKED, in the same order. `claim` is each book's OWN
+// measured result from research/README.md section 17 -- gold's numbers are not
+// reused for silver, because the two are not the same claim: silver's
+// buy-and-hold drawdown is 76.3% against gold's 45.6%, so five points off
+// silver is a smaller cut on a much larger wound.
+const TRACKED_ETFS = [
+  { key: "gld", label: "GLD", metal: "altın", tv: "AMEX:GLD",
+    claim: "16,1 yılda $10.000'lik bir hesapta oynaklık hedefi $36.257, al-ve-tut $34.844 bitirdi; "
+         + "maksimum düşüş %45,6 → %39,2, Sharpe 0,48 → 0,59." },
+  { key: "slv", label: "SLV", metal: "gümüş", tv: "AMEX:SLV",
+    claim: "16,1 yılda $10.000'lik bir hesapta oynaklık hedefi $35.023, al-ve-tut $33.286 bitirdi; "
+         + "maksimum düşüş %76,3 → %70,8, Sharpe 0,24 → 0,32." },
+];
 
-/* Renders the tradeable-ETF books.
+/* Renders the tradeable-ETF books, one table per instrument.
  *
  * Separate from renderStrategies and NOT asset-scoped: these books do not
  * belong to the selected metal, they belong to the instrument. Reusing the
  * per-asset renderer would have meant filtering on `currentAsset`, which is
  * exactly the bug -- the card would blank itself whenever the silver tab was
- * open. */
+ * open. Both ETFs are on screen at once for the same reason the two live price
+ * cards are: they are different instruments, not two views of one.
+ *
+ * Built from TRACKED_ETFS rather than from fixed markup, so adding a third
+ * fund stays a data change. */
 function renderEtfBooks(portfolios, live) {
-  const body = document.querySelector("#etf-table tbody");
-  const note = document.getElementById("etf-note");
-  const etf = TRACKED_ETFS[0];
-  const price = live?.etfs?.[etf.key] ?? null;
-  const mine = (portfolios ?? []).filter((p) => p.asset === etf.key);
+  const host = document.getElementById("etf-books");
+  if (!host) return;
+  host.innerHTML = TRACKED_ETFS.map((etf) =>
+    renderOneEtfBook(etf, portfolios ?? [], live?.etfs?.[etf.key] ?? null)).join("");
+}
+
+function renderOneEtfBook(etf, portfolios, price) {
+  // h3.sub, the same heading style the other in-card sections use.
+  const head = `<h3 class="sub">${etf.label} &mdash; ${etf.metal} ETF</h3>`;
+  const mine = portfolios.filter((p) => p.asset === etf.key);
 
   if (!mine.length) {
-    body.innerHTML = `<tr><td colspan="6" class="muted">Defterler henüz kurulmadı.</td></tr>`;
-    note.textContent = "supabase/schema.sql'deki `gld` portföy migration'ı çalıştırılmamış.";
-    return;
+    return head + `<p class="muted small">Defterler henüz kurulmadı &mdash;`
+      + ` <code>supabase/schema.sql</code>'deki <code>${etf.key}</code> portföy`
+      + ` migration'ı çalıştırılmamış.</p>`;
   }
   // A missing quote must not silently value the books at zero. Showing the
   // last known cash+units without a mark would be a number with no defined
   // meaning, so the row says so instead.
   if (price === null) {
-    body.innerHTML = `<tr><td colspan="6" class="muted">${etf.tv} fiyatı alınamadı.</td></tr>`;
-    note.textContent = "Canlı ETF fiyatı gelmeden defterler değerlenemez.";
-    return;
+    return head + `<p class="muted small">${etf.tv} fiyatı alınamadı &mdash;`
+      + ` canlı fiyat gelmeden defterler değerlenemez.</p>`;
   }
 
   const byKey = new Map(mine.map((p) => [p.strategy, p]));
@@ -1287,7 +1308,7 @@ function renderEtfBooks(portfolios, live) {
   const benchmark = byKey.get("buyhold");
   const benchmarkTotal = benchmark ? valueOf(benchmark) / STARTING_CASH - 1 : null;
 
-  body.innerHTML = ETF_STRATEGIES.map(({ key, label, benchmark: isBench }) => {
+  const rows = ETF_STRATEGIES.map(({ key, label, benchmark: isBench }) => {
     const row = byKey.get(key);
     if (!row) return `<tr><td>${label}</td><td colspan="5" class="muted">—</td></tr>`;
     const value = valueOf(row);
@@ -1306,12 +1327,19 @@ function renderEtfBooks(portfolios, live) {
     </tr>`;
   }).join("");
 
-  note.innerHTML = `${etf.tv} $${price.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const shown = price.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return head
+    + `<div class="table-wrap"><table>
+         <thead>
+           <tr><th>Strateji</th><th>Değer</th><th>Pozisyon</th><th>Hedef</th>
+               <th>Toplam</th><th>vs Al-ve-tut</th></tr>
+         </thead>
+         <tbody>${rows}</tbody>
+       </table></div>`
+    + `<p class="muted small">${etf.tv} $${shown}`
     + ` <span class="muted">(${ETF_DELAY_MINUTES} dk gecikmeli)</span>`
     + ` &mdash; her defter $${STARTING_CASH.toLocaleString("tr-TR")} ile başladı,`
-    + ` işlem başına $1,50 komisyon ödüyor.`
-    + ` <strong>Calmar kâr değildir:</strong> ölçümde al-ve-tut'u Calmar'da geçen`
-    + ` stratejilerin çoğu parada ondan geride bitirdi.`;
+    + ` işlem başına $1,50 komisyon ödüyor. <br>Ölçülen: ${etf.claim}</p>`;
 }
 
 function renderAll() {

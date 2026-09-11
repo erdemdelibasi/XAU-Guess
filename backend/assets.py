@@ -197,7 +197,63 @@ GLD = Asset(
     flat_fee_usd=1.50,
 )
 
-TRACKED = {GLD.key: GLD}
+# Silver gets its OWN book, and leaving it out would have quietly turned a
+# two-metal project into a one-metal one at exactly the point where the metal
+# becomes buyable. Section 17 measured SLV alongside GLD and `voltarget`
+# survives on both -- but the two books do not make the same claim, and SLV's
+# was measured on SLV rather than inherited:
+#
+#   SLV, $10,000, 16.1 years, $1.50 per trade
+#     voltarget   $35,023   maxDD 70.8%   Sharpe 0.32   114 trades
+#     buyhold     $33,286   maxDD 76.3%   Sharpe 0.24     1 trade
+#
+# Same shape as gold's, on far rougher ground: silver's buy-and-hold drawdown
+# is 76.3% against gold's 45.6%, which is the 25-year table in this file's
+# header showing up in a live book. Five points of drawdown is a smaller cut
+# than gold's six on a much larger wound.
+SLV = Asset(
+    key="slv",
+    symbol="SLV",
+    label="SLV (gümüş ETF)",
+    label_en="iShares Silver Trust",
+    model_filename="",          # no model -- mechanical strategies only
+    # Measured on SLV's own panel (5124 sessions, 2006-2026): 0.524, against
+    # SI=F's 0.539. Lower than silver futures and lower than GLD's 0.553 --
+    # recorded because it is the asset's own number, not because anything here
+    # reads it (no ensemble and no calibrator run on these books).
+    base_rate_up=0.524,
+    # NOT re-measured, for the same reason as GLD above: a risk PREFERENCE,
+    # not a property. Silver futures realise 33.7% and target 28%; SLV
+    # realises 33.3%, so silver's budget is the same choice expressed on the
+    # same volatility. Letting each series target its own realised figure
+    # would make `voltarget` a different strategy in every column.
+    target_volatility=0.28,
+    # ASSUMPTION, like GLD's, and flagged as such. SLV trades near $57 where a
+    # one-cent quote is ~1.7 bp round trip; GLD near $396 where the same cent
+    # is ~0.25 bp. Twice GLD's assumed rate keeps the same conservative margin
+    # over the penny-spread arithmetic. It is second-order either way: at a
+    # $10,000 account the $1.50 commission alone is ~15 bp of a typical trade,
+    # so the flat fee dominates this line exactly as it does GLD's.
+    fee_rate=0.0002,
+    counterpart_key="gold",
+    counterpart_symbol="GLD",
+    # Empty on purpose -- see GLD. No MECHANICAL strategy reads a macro
+    # driver, and silver's measured drivers were measured on SI=F.
+    leading_drivers=(),
+    # Measured by research/instrument.py on SLV's own series: 93.7 / 29.0 /
+    # 3.73, against SI=F's 93.4 / 29.3 / 3.72. Nearly identical, the same way
+    # GLD's are to GC=F's -- all three scales normalise RATIOS, so SLV's ~$57
+    # against SI=F's ~$61 cannot matter by construction.
+    price_scales=PriceScales(macd=93.7, ema_cross=29.0, sma200=3.73),
+    # Flat, per trade, regardless of size -- the same broker as GLD. Note what
+    # this does to a silver book: the commission is a fixed number of dollars
+    # while SLV's share price is a seventh of GLD's, so the same $1.50 buys
+    # seven times as many shares. The fee is per TRADE, not per share, which
+    # is why it lands identically on both books.
+    flat_fee_usd=1.50,
+)
+
+TRACKED = {GLD.key: GLD, SLV.key: SLV}
 
 
 def get(key: str) -> Asset:

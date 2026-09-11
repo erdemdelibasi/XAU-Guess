@@ -395,7 +395,16 @@ ETF_STRATEGIES = ("buyhold", "voltarget", "trend", "defensive")
 # likely to be misread. research/README.md section 17 measured that on money
 # rather than Calmar nothing here beats doing nothing.
 ETF_NOTE = ("COMEX vadeli değil, gerçekten alınabilen ETF · işlem başına $1,50 · "
-            "iddia getiri değil, DÜŞÜŞ azalması (ölçümde %45,6 → %39,2)")
+            "iddia getiri değil, DÜŞÜŞ azalması")
+
+# Each book's OWN measured drawdown reduction, keyed by assets.TRACKED. Not one
+# shared string: silver's buy-and-hold drawdown is 76.3% against gold's 45.6%,
+# so printing gold's pair beside a silver book would misstate both the starting
+# wound and the size of the cut. research/README.md section 17.
+ETF_CLAIM = {
+    "gld": "ölçümde %45,6 → %39,2 (16,1 yıl, $10.000 hesap)",
+    "slv": "ölçümde %76,3 → %70,8 (16,1 yıl, $10.000 hesap)",
+}
 
 
 def build_etf_report(db) -> list[dict]:
@@ -575,9 +584,10 @@ def render_text(report: dict) -> str:
                   f"  {RATIO_NOTE}"]
 
     for etf in report.get("etfs", []):
+        claim = ETF_CLAIM.get(etf["asset"].key, "")
         lines += ["", f"ALINABİLİR ENSTRÜMAN — {etf['asset'].label} "
                       f"({fmt_usd(etf['price'], 2)})",
-                  f"  {ETF_NOTE}"]
+                  f"  {ETF_NOTE} · {claim}" if claim else f"  {ETF_NOTE}"]
         for strategy in ETF_STRATEGIES:
             book = etf["books"].get(strategy)
             if not book:
@@ -776,8 +786,11 @@ def _etf_table_html(etf: dict) -> str:
     beat = etf["beat_benchmark"]
     verdict = (", ".join(STRATEGY_LABELS[s] for s in beat) if beat
                else '<span style="color:%s;">HİÇBİRİ</span>' % BENCH)
-    note = (f'<tr><td colspan="5" style="padding:6px 9px 10px;font-size:11px;color:{MUTED};'
-            f'line-height:1.45;">Al-ve-tut\'u geçen: {verdict}<br>{ETF_NOTE}</td></tr>')
+    claim = ETF_CLAIM.get(etf["asset"].key, "")
+    tail = f" · {claim}" if claim else ""
+    note = ('<tr><td colspan="5" style="padding:6px 9px 10px;font-size:11px;'
+            f'color:{MUTED};line-height:1.45;">'
+            f"Al-ve-tut'u geçen: {verdict}<br>{ETF_NOTE}{tail}</td></tr>")
 
     return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
             f'style="background:{CARD};border-radius:10px;overflow:hidden;margin:0 0 14px;'

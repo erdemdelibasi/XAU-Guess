@@ -28,6 +28,24 @@ These books exist to watch whether that RISK reduction holds up live -- not
 to wait for it to make money. Three other strategies beat buy-and-hold on
 Calmar in the same test and finished with LESS money than doing nothing.
 
+BOTH METALS GET A BOOK, AND THEY DO NOT CLAIM THE SAME THING
+-------------------------------------------------------------
+This project is a two-metal one everywhere else, and stopping at gold exactly
+where the metal becomes buyable would have been a silent narrowing. SLV was
+measured on SLV rather than inherited from GLD:
+
+    SLV, $10,000, 16.1 years, $1.50 per trade
+      voltarget   $35,023   maxDD 70.8%   Sharpe 0.32   114 trades
+      buyhold     $33,286   maxDD 76.3%   Sharpe 0.24     1 trade
+
+Same shape, far rougher ground. Silver's buy-and-hold drawdown is 76.3%
+against gold's 45.6% -- the 25-year table in assets.py showing up in a live
+book -- so the five points `voltarget` cuts here are a smaller bite out of a
+much larger wound than gold's six. Reporting gold's pair beside a silver book
+would misstate both numbers, which is why daily_report.ETF_CLAIM and the
+frontend's TRACKED_ETFS carry one string per instrument rather than one
+shared one.
+
 ONLY MECHANICAL STRATEGIES RUN HERE
 ------------------------------------
 trading.MECHANICAL -- buyhold, voltarget, trend, defensive -- and that is a

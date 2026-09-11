@@ -321,35 +321,31 @@
        backend/research/README.md section 16 measured that this is not a
        cosmetic difference. -->
   <section class="card" id="etf-card">
-    <h2>Alınabilir Enstrüman &mdash; GLD (altın ETF)</h2>
+    <h2>Alınabilir Enstrümanlar &mdash; GLD ve SLV</h2>
     <p class="muted small">
       Yukarıdaki her portföy <strong>COMEX vadeli</strong> fiyatıyla değerleniyor ve
       perakende bir hesap vadeli kontrat tutamaz. Buradaki defterler aynı kuralları
-      gerçekten alınabilen ETF üzerinde, <strong>işlem başına $1,50 sabit komisyonla</strong>
-      işletiyor. Yalnızca mekanik stratejiler var, çünkü ölçüm bunları seçti.
+      gerçekten alınabilen ETF'ler üzerinde, <strong>işlem başına $1,50 sabit komisyonla</strong>
+      işletiyor &mdash; altın için GLD, gümüş için SLV. Yalnızca mekanik stratejiler var,
+      çünkü ölçüm bunları seçti.
     </p>
-    <div class="table-wrap">
-      <table id="etf-table">
-        <thead>
-          <tr><th>Strateji</th><th>Değer</th><th>Pozisyon</th><th>Hedef</th>
-              <th>Toplam</th><th>vs Al-ve-tut</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <p class="muted small" id="etf-note">-</p>
+    <div id="etf-books"></div>
 
     <details class="explain">
       <summary>Bu defterler ne iddia ediyor, ne iddia etmiyor</summary>
       <div>
         <p><strong>Para kazandırma iddiası yok.</strong> 16,1 yıllık ölçümde
-        $10.000'lik bir GLD hesabında <code>voltarget</code> $36.257, al-ve-tut
-        $34.844 bitirdi &mdash; aradaki $1.413 gürültü mesafesindedir.</p>
-        <p><strong>İddia risk tarafında:</strong> aynı ölçümde maksimum düşüş
-        %45,6'dan %39,2'ye, Sharpe 0,48'den 0,59'a indi &mdash; ve bu, yılda
-        yaklaşık <strong>8 işlemle</strong> yapıldı. Bu defterler o düşüş
-        azalmasının canlıda da tutup tutmadığını izlemek için var.</p>
-        <p>Aynı testte Calmar'da al-ve-tut'u geçen diğer üç stratejinin üçü de
+        $10.000'lik bir hesapta <code>voltarget</code> al-ve-tut'u GLD'de $1.413,
+        SLV'de $1.737 geçti &mdash; on altı yılda, ikisi de gürültü mesafesinde.</p>
+        <p><strong>İddia risk tarafında:</strong> aynı ölçümde maksimum düşüş GLD'de
+        %45,6'dan %39,2'ye, SLV'de %76,3'ten %70,8'e indi; Sharpe 0,48→0,59 ve
+        0,24→0,32 oldu. Bu, yılda yaklaşık <strong>7-8 işlemle</strong> yapıldı.
+        Bu defterler o düşüş azalmasının canlıda da tutup tutmadığını izlemek için var.</p>
+        <p><strong>İki defter aynı şeyi iddia etmiyor.</strong> Gümüşün al-ve-tut
+        düşüşü %76,3, altınınki %45,6 &mdash; yani SLV'de kesilen beş puan, çok daha
+        büyük bir yaranın üzerinde. Altının sayılarını gümüşe kopyalamak bu farkı
+        görünmez kılardı, o yüzden her defterin sabitleri kendi serisinde ölçüldü.</p>
+        <p>Aynı testte Calmar'da al-ve-tut'u geçen stratejilerin çoğu
         <strong>parada ondan geride bitirdi</strong>: düşüşü keserek kazanıyorlar,
         para kazanarak değil. Calmar bir risk-ayarlı ölçüttür, kâr değil.</p>
         <p>Sadece mekanik stratejiler (<code>buyhold</code>, <code>voltarget</code>,
