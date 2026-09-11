@@ -858,6 +858,33 @@ function renderRecords(records, asset, row) {
       + `geldikçe (5 işlem günü) dolmaya başlar.`;
 }
 
+/* One trade log row set, shared by the metals' log and the ETF card's.
+ *
+ * Extracted rather than copied: the two logs answer the same question about
+ * different books, and a second copy of this markup would drift the first
+ * time a column changed on one of them. The ETF log exists because the metals'
+ * log filters on `currentAsset` and an ETF's key is never that -- so before
+ * this, a GLD trade was written to the database and shown nowhere.
+ *
+ * Newest first; the cost-basis replay needs the opposite order and gets its
+ * own copy, so neither reverses the other's array in place. */
+function tradeRowsHtml(rows, labelFor, priceDigits, qtyDigits) {
+  return [...rows].reverse().slice(0, MAX_TRADE_ROWS).map((t) => {
+    const buy = t.side === "BUY";
+    return `
+      <tr>
+        <td>${fmtDateTime(t.created_at)}</td>
+        <td>${labelFor.get(t.strategy) ?? esc(t.strategy)}</td>
+        <td><span class="action action-${buy ? "buy" : "sell"}">${buy ? "AL" : "SAT"}</span></td>
+        <td class="num">${fmtUsd(t.price, priceDigits)}</td>
+        <td class="num">${fmtNumber(t.ounce_amount, qtyDigits)}</td>
+        <td class="num">${fmtUsd(t.usd_amount, 2)}</td>
+        <td class="num">${fmtUsd(t.fee_usd, 2)}</td>
+        <td class="summary-cell">${esc(t.reason ?? "")}</td>
+      </tr>`;
+  }).join("");
+}
+
 /* The trade log for the selected metal.
 
    Already downloaded in full for the average-cost replay below, so this is
@@ -877,23 +904,8 @@ function renderTrades(trades, asset) {
   }
 
   const labelFor = new Map(STRATEGIES.map((s) => [s.key, s.label]));
-  // Newest first here; the cost-basis replay upstream needs the opposite order
-  // and gets its own copy, so neither reverses the other's array in place.
-  const recent = [...mine].reverse().slice(0, MAX_TRADE_ROWS);
-  body.innerHTML = recent.map((t) => {
-    const buy = t.side === "BUY";
-    return `
-      <tr>
-        <td>${fmtDateTime(t.created_at)}</td>
-        <td>${labelFor.get(t.strategy) ?? esc(t.strategy)}</td>
-        <td><span class="action action-${buy ? "buy" : "sell"}">${buy ? "AL" : "SAT"}</span></td>
-        <td class="num">${fmtUsd(t.price, asset.digits)}</td>
-        <td class="num">${fmtNumber(t.ounce_amount, asset.digits === 3 ? 3 : 4)}</td>
-        <td class="num">${fmtUsd(t.usd_amount, 2)}</td>
-        <td class="num">${fmtUsd(t.fee_usd, 2)}</td>
-        <td class="summary-cell">${esc(t.reason ?? "")}</td>
-      </tr>`;
-  }).join("");
+  body.innerHTML = tradeRowsHtml(mine, labelFor, asset.digits,
+                                 asset.digits === 3 ? 3 : 4);
 
   // Total commission paid is the number that decides whether any of this was
   // worth doing: backend/backtest.py's whole cost ladder exists because the
@@ -1347,7 +1359,9 @@ function metalOuncesPerShare(etf, etfPrice, live) {
  * for the cost basis, so this costs no extra request. */
 function etfHoldingLine(etf, row, price, live, basis) {
   const shares = Number(row.ounces);
-  if (!Number.isFinite(shares) || shares <= 1e-9) return '<span class="muted">pozisyon yok</span>';
+  if (!Number.isFinite(shares) || shares <= 1e-9) {
+    return `tamamen nakitte &mdash; ${fmtUsd(Number(row.cash_usd))}`;
+  }
   const parts = [`${fmtNumber(shares, 4)} pay`];
 
   const perShare = metalOuncesPerShare(etf, price, live);
@@ -1355,6 +1369,11 @@ function etfHoldingLine(etf, row, price, live, basis) {
     const grams = shares * perShare * TROY_OUNCE_GRAMS;
     parts.push(`≈ ${fmtNumber(grams, 2)} g ${etf.metalLabel}`);
   }
+  // Cash is half of what the book IS, and a percentage exposure hides it: a
+  // book at 35% is also a book sitting on 650 dollars, and that number is the
+  // one a person checks against their own account. Printed even when zero --
+  // "fully invested" is a fact, not a missing value.
+  parts.push(`${fmtUsd(Number(row.cash_usd))} nakit`);
   const cost = basis?.get(`${etf.key}|${row.strategy}`) ?? null;
   if (cost?.avgPrice) parts.push(`ort. ${fmtUsd(cost.avgPrice)}/pay`);
   if (cost?.lastAt) parts.push(`son işlem ${fmtShortDate(cost.lastAt)}`);
@@ -1427,7 +1446,60 @@ function renderOneEtfBook(etf, portfolios, price, live, basis) {
     + ` (bugün 1 ${etf.label} ≈ ${gramsPerShareText(etf, price, live)});`
     + ` ABD borsası kapalıyken ETF'in son kapanışı canlı spotla karşılaştırıldığı`
     + ` için bir-iki puan sapabilir.`
-    + `<br>Ölçülen: ${etf.claim}</p>`;
+    + `<br>Ölçülen: ${etf.claim}</p>`
+    + etfTradeLogHtml(etf);
+}
+
+/* The ETF card's own trade log.
+ *
+ * The question this answers is "what changed since last time", and no other
+ * panel here can: the strategy table shows a position, which looks identical
+ * whether it was set this morning or a month ago. A separate TAB was the
+ * obvious alternative and would have been wrong -- the tab strip means METAL,
+ * and a third meaning in the same control makes both worse. This belongs next
+ * to the books it describes.
+ *
+ * Folded into a <details> so it is closed by default: it grows without bound
+ * and the four position rows above it are what a reader came for. */
+function etfTradeLogHtml(etf) {
+  const trades = (cache.trades ?? []).filter((t) => t.asset === etf.key);
+  if (!trades.length) {
+    return `<p class="muted small">Bu defterlerde henüz işlem yok.</p>`;
+  }
+  const labelFor = new Map(ETF_STRATEGIES.map((s) => [s.key, s.label]));
+  const rows = tradeRowsHtml(trades, labelFor, 2, 4);
+
+  const fees = trades.reduce((sum, t) => sum + (Number(t.fee_usd) || 0), 0);
+  const gross = trades.reduce((sum, t) => sum + (Number(t.usd_amount) || 0), 0);
+  // The MEASURED effective rate, not an assumed one. backend/backtest.py's
+  // flat_fee_ladder prints the same number for the same reason: dividing
+  // $1.50 by the smallest possible trade gives 60 bp at a $5,000 account
+  // while the measured figure is 11.7, because trades do not stay at that
+  // floor. A flat fee has no basis-point value until it is divided by the
+  // trades that actually happened.
+  const bps = gross > 0 ? (fees / gross) * 10_000 : null;
+
+  return `<details class="explain">
+      <summary>Son işlemler (${trades.length})</summary>
+      <div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Tarih</th><th>Strateji</th><th>İşlem</th><th>Fiyat</th>
+                  <th>Pay</th><th>Tutar</th><th>Komisyon</th><th>Gerekçe</th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <p class="muted small">${trades.length} işlem, toplam
+          <strong>${fmtUsd(fees, 2)}</strong> komisyon (dört defterin tamamı).
+          En yenisi üstte. Buradaki ücret bir oran değil, işlem başına
+          <strong>sabit $1,50</strong>&#39;dır${bps === null ? "" :
+            ` &mdash; bugüne kadarki işlemlerde tek yönde <strong>${fmtNumber(bps, 1)} baz puana</strong> denk geldi`}.
+          Küçük işlemlerde bu oran yükselir, büyük işlemlerde düşer; hesap
+          büyüdükçe de düşer.</p>
+      </div>
+    </details>`;
 }
 
 function gramsPerShareText(etf, price, live) {

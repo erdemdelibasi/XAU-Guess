@@ -314,15 +314,16 @@
     <p class="muted small" id="trades-note">-</p>
   </section>
 
-  <!-- The tradeable-ETF books. NOT asset-scoped and NOT under the tab strip:
-       these are not a third metal, they are the same rules run on the thing a
-       retail account can actually hold. Everything above is valued in COMEX
-       futures, which no retail account can hold at all -- and
+  <!-- The tradeable-ETF books: the same rules run on the thing a retail
+       account can actually hold. Everything above is valued in COMEX futures,
+       which no retail account can hold at all, and
        backend/research/README.md section 16 measured that this is not a
-       cosmetic difference. -->
-  <!-- asset-scoped: the card follows the tab strip, so the gold page shows GLD
-       and the silver page SLV. See renderEtfBooks for why it did not, while
-       GLD was the only tracked fund. -->
+       cosmetic difference.
+
+       ASSET-SCOPED: the card follows the tab strip, so the gold page shows GLD
+       and the silver page SLV. It did not, while GLD was the only tracked
+       fund -- filtering on currentAsset would have blanked the card on the
+       silver tab. See renderEtfBooks. -->
   <section class="card asset-scoped" id="etf-card">
     <h2 id="etf-card-title">Alınabilir Enstrüman</h2>
     <p class="muted small">

@@ -483,6 +483,10 @@ def build_etf_report(db) -> list[dict]:
                 # tenths of an ounce of silver -- printing this under an
                 # "ons" heading would overstate the gold holding elevenfold.
                 "shares": float(row["ounces"]),
+                # Cash is half of what the book is, and an exposure percentage
+                # hides it: 35% invested is also $650 sitting idle, which is
+                # the number a person checks against their own account.
+                "cash": float(row["cash_usd"]),
                 "avg_price": paid.get("avg_price"),
                 "last_trade": paid.get("last"),
             }
@@ -819,12 +823,16 @@ def _holding_line(book: dict) -> str:
     page does that conversion, where the spot quote is already on hand.
     """
     shares = book.get("shares") or 0.0
+    cash = book.get("cash")
     if shares <= 1e-9:
-        return "pozisyon yok"
+        return ("tamamen nakitte" if cash is None
+                else f"tamamen nakitte — {fmt_usd(cash, 2)}")
     # fmt_num, not an f-string format spec: the rest of the mail writes
     # decimals with a comma and mixing both conventions on one line is the
     # same defect fmtNumber fixed on the page.
     parts = [f"{fmt_num(shares, 4)} pay"]
+    if cash is not None:
+        parts.append(f"{fmt_usd(cash, 2)} nakit")
     if book.get("avg_price"):
         parts.append(f"ort. {fmt_usd(book['avg_price'], 2)}/pay")
     if book.get("last_trade"):

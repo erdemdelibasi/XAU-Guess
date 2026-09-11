@@ -965,6 +965,27 @@ canlı spotla karşılaştırıldığı için gece hareketi kadar sapar. Mail bu
 **yapmıyor** — oraya spot kotasyonu hiç gelmiyor ve olmayan bir fiyatı
 uydurmaktansa gram satırını hiç basmamak doğrusu.
 
+**ETF kartının kendi işlem defteri var, ve bu bir sekme DEĞİL.** "Yeni bir alım
+satım olduğunda nasıl göreceğim" sorusunu başka hiçbir panel cevaplamıyor: bir
+pozisyon satırı, bu sabah da bir ay önce de ayarlanmış olsa aynı görünür.
+Metallerin işlem defteri (`renderTrades`) `currentAsset`'e göre filtreliyor ve
+bir ETF'in anahtarı hiçbir zaman o olmadığı için **GLD işlemleri veritabanına
+yazılıp hiçbir yerde gösterilmiyordu**. Çözüm ayrı bir sekme değil, kartın
+içinde kapalı bir `<details>`: sekme şeridi **metal** demek, aynı kontrole
+ikinci bir anlam yüklemek ikisini birden bozar. Satır biçimlendirmesi iki defter
+arasında `tradeRowsHtml` ile **paylaşılıyor** — kopyalansaydı ilk kolon
+değişikliğinde ayrışırdı.
+
+Defterin özeti **ölçülen** efektif baz puanı basıyor (`komisyon / işlem hacmi`),
+varsayılanı değil — `backtest.flat_fee_ladder`'ın aynı sebeple yaptığı şey.
+$1,50'yi mümkün olan en küçük işleme bölmek 60 bp verir, gerçekleşen işlemlere
+bölmek 11,7; sabit bir ücretin kendisine ait bir baz puan değeri yoktur.
+
+**Nakit hem kartta hem mailde yazılı, sıfırken bile.** Yüzdelik pozisyon nakdi
+gizler: %35 yatırımda olan bir defter aynı zamanda $650 bekleten bir defterdir
+ve kişinin kendi hesabıyla karşılaştırdığı sayı odur. "Tam yatırımda" bir
+bilgidir, eksik veri değil.
+
 **Ve bu defterlerin iddiası getiri değil.** 17. bölüm: $10.000'lik bir GLD
 hesabında 16,1 yılda `voltarget` $36.257, al-ve-tut $34.844 — fark gürültü.
 Kazanılan şey maksimum düşüşün %45,6'dan %39,2'ye inmesi, ve bu yılda ~8
