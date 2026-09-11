@@ -1459,12 +1459,17 @@ function renderOneEtfBook(etf, portfolios, price, live, basis) {
  * and a third meaning in the same control makes both worse. This belongs next
  * to the books it describes.
  *
- * Folded into a <details> so it is closed by default: it grows without bound
- * and the four position rows above it are what a reader came for. */
+ * Always open. The first version hid it behind a <details> on the grounds
+ * that the position rows are what a reader came for; that was wrong, because
+ * "did anything change" is checked on every visit and a panel that must be
+ * opened each time is a panel read once. Capped at MAX_TRADE_ROWS, which is
+ * what keeps an unbounded ledger from taking over the card, and the note says
+ * so when rows are being left out. */
 function etfTradeLogHtml(etf) {
   const trades = (cache.trades ?? []).filter((t) => t.asset === etf.key);
   if (!trades.length) {
-    return `<p class="muted small">Bu defterlerde henüz işlem yok.</p>`;
+    return `<h3 class="sub">Son işlemler &mdash; ${etf.label}</h3>`
+      + `<p class="muted small">Bu defterlerde henüz işlem yok.</p>`;
   }
   const labelFor = new Map(ETF_STRATEGIES.map((s) => [s.key, s.label]));
   const rows = tradeRowsHtml(trades, labelFor, 2, 4);
@@ -1479,27 +1484,31 @@ function etfTradeLogHtml(etf) {
   // trades that actually happened.
   const bps = gross > 0 ? (fees / gross) * 10_000 : null;
 
-  return `<details class="explain">
-      <summary>Son işlemler (${trades.length})</summary>
-      <div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Tarih</th><th>Strateji</th><th>İşlem</th><th>Fiyat</th>
-                  <th>Pay</th><th>Tutar</th><th>Komisyon</th><th>Gerekçe</th></tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-        <p class="muted small">${trades.length} işlem, toplam
-          <strong>${fmtUsd(fees, 2)}</strong> komisyon (dört defterin tamamı).
-          En yenisi üstte. Buradaki ücret bir oran değil, işlem başına
-          <strong>sabit $1,50</strong>&#39;dır${bps === null ? "" :
-            ` &mdash; bugüne kadarki işlemlerde tek yönde <strong>${fmtNumber(bps, 1)} baz puana</strong> denk geldi`}.
-          Küçük işlemlerde bu oran yükselir, büyük işlemlerde düşer; hesap
-          büyüdükçe de düşer.</p>
+  // ALWAYS OPEN, not a <details>. It was folded shut on the argument that the
+  // position rows are what a reader came for -- but the question this log
+  // answers ("what changed since last time") is one a person checks on every
+  // visit, and a panel that has to be opened every time is a panel that gets
+  // read once. The metals' log above is always open for the same reason; the
+  // two should not behave differently.
+  return `<h3 class="sub">Son işlemler &mdash; ${etf.label}</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Tarih</th><th>Strateji</th><th>İşlem</th><th>Fiyat</th>
+                <th>Pay</th><th>Tutar</th><th>Komisyon</th><th>Gerekçe</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>
-    </details>`;
+      <p class="muted small">${trades.length} işlem, toplam
+        <strong>${fmtUsd(fees, 2)}</strong> komisyon (dört defterin tamamı).
+        En yenisi üstte${trades.length > MAX_TRADE_ROWS
+          ? `, en son ${MAX_TRADE_ROWS} tanesi gösteriliyor` : ""}.
+        Buradaki ücret bir oran değil, işlem başına
+        <strong>sabit $1,50</strong>&#39;dır${bps === null ? "" :
+          ` &mdash; bugüne kadarki işlemlerde tek yönde <strong>${fmtNumber(bps, 1)} baz puana</strong> denk geldi`}.
+        Küçük işlemlerde bu oran yükselir, büyük işlemlerde düşer; hesap
+        büyüdükçe de düşer.</p>`;
 }
 
 function gramsPerShareText(etf, price, live) {
