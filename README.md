@@ -122,12 +122,14 @@ tutturur — ve tek yönlü davranan bir bileşen tabloda açıkça işaretlenir
 | `technical` / `ml` / `macro` / `claude` | Tek sinyal, tek portföy |
 | `kanalfinans` | Tunç Şatıroğlu ne derse o. Tam giriş/çıkış, zarar-kes takipli |
 
-Portföy kartlarının altında **Son işlemler** defteri var: her dolumun
-tarihi, fiyatı, miktarı, komisyonu ve gerekçesi. Bir kartın "%17 pozisyon"
-yazması, o pozisyonun dün mü üç hafta önce mi ayarlandığını söylemez;
-defter söyler. Altındaki toplam komisyon satırı da tesadüf değil —
-`backtest.py`'nin maliyet merdiveni tam olarak bu sayının stratejileri
-sıraladığını gösteriyor.
+Her portföy kutusunun içinde, kendi **son altı işlemi** duruyor: tarihi,
+yönü, tutarı ve dolum fiyatı, üstünde de o defterin toplam işlem sayısı ve
+ödediği komisyon. Bir kartın "%17 pozisyon" yazması, o pozisyonun dün mü üç
+hafta önce mi ayarlandığını söylemez; kutunun kendi defteri söyler. Tek bir
+birleşik liste bunu yapamıyordu — zamana göre sıralandığında on bir defter iç
+içe geçiyor ve sessiz kalan defter listeden tamamen düşüyordu. Panellerin
+altındaki toplam komisyon cümlesi de tesadüf değil: `backtest.py`'nin maliyet
+merdiveni tam olarak bu sayının stratejileri sıraladığını gösteriyor.
 
 ### Kanal Finans TŞ
 

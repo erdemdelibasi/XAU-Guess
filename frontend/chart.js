@@ -37,7 +37,11 @@
        the reference for.
 
    Every visible line is ALSO direct-labelled at its right end, so identity
-   never rests on colour alone. */
+   never rests on colour alone -- which is what carries identity here, because
+   these charts have NO hover layer. The first version had a crosshair that
+   rewrote a readout line under the plot on every pointer move; the numbers a
+   reader had just read changed as the pointer left them. The caption is fixed
+   instead, and the caller fills it with each series' final value. */
 
 /* Everything below lives inside one IIFE and reaches app.js through a single
    global, `Viz`. Both files are plain <script> tags sharing one global scope,
@@ -259,23 +263,22 @@ function timeSeriesPanel({ series, dates, width, height, yType, yFormat, refLine
     + ` fill="${colourFor(e.key)}" font-size="11" font-weight="600"`
     + ` dominant-baseline="middle">${esc(e.label)}</text>`).join("");
 
-  const hover = `<g class="crosshair" style="display:none">`
-    + `<line y1="${padT}" y2="${padT + plotH}" stroke="${AXIS}" stroke-width="1"/>`
-    + ordered.map((s) => `<circle r="4" fill="${colourFor(s.key)}" stroke="#15120d"`
-      + ` stroke-width="2" data-key="${esc(s.key)}"/>`).join("")
-    + `</g>`;
-
-  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img"`
-    + ` data-padl="${padL}" data-padr="${padR}" data-plotw="${plotW}">`
-    + grid + xAxis + zero + paths + labels + hover
-    + `<rect class="hit" x="${padL}" y="${padT}" width="${plotW}" height="${plotH}"`
-    + ` fill="transparent"/></svg>`;
+  // NO hover layer, and that is the user's explicit call: the numbers under a
+  // chart stay put. A crosshair that moved them meant the one line of text on
+  // the card said something different every time the pointer crossed it, so
+  // there was no reading of it to remember or to compare against. The panel
+  // is now a picture with a fixed caption: every line is direct-labelled at
+  // its right end, and the caller prints the final value of each drawn series
+  // below the plot, permanently.
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img">`
+    + grid + xAxis + zero + paths + labels + `</svg>`;
 }
 
 /* ------------------------------------------------------- public renderer */
 
 /**
- * Draws the equity + drawdown pair into `root` and wires the shared crosshair.
+ * Draws the equity + drawdown pair into `root`. No interaction layer: see the
+ * note at the end of timeSeriesPanel.
  *
  * The two panels are stacked and share one x-axis on purpose. They answer the
  * two halves of the same question -- "what did it earn" and "what did it cost
@@ -283,7 +286,7 @@ function timeSeriesPanel({ series, dates, width, height, yType, yFormat, refLine
  * where the measurable difference is. Side by side, a reader compares them;
  * stacked and aligned, they read as one statement about the same weeks.
  */
-function renderBacktestCharts(root, { dates, series, readout, panels = ["equity", "drawdown"] }) {
+function renderBacktestCharts(root, { dates, series, panels = ["equity", "drawdown"] }) {
   const width = Math.max(280, root.clientWidth || 640);
   const tall = width > 620;
   const money = (v) => "$" + v.toLocaleString("tr-TR", { maximumFractionDigits: 0 });
@@ -334,78 +337,6 @@ function renderBacktestCharts(root, { dates, series, readout, panels = ["equity"
         })
       + `</div>`;
   }).join("");
-
-  wireCrosshair(root, dates, series, readout);
-}
-
-/* The hover layer. An HTML chart IS interactive; a 19.5-year curve with no
-   way to ask "what was it in March 2020" is a picture of data rather than a
-   view of it. Pointer events rather than mouse events so the same code path
-   serves touch. */
-function wireCrosshair(root, dates, series, readout) {
-  const svgs = [...root.querySelectorAll("svg")];
-  if (!svgs.length) return;
-
-  const show = (index) => {
-    svgs.forEach((svg) => {
-      const g = svg.querySelector(".crosshair");
-      const padL = +svg.dataset.padl, plotW = +svg.dataset.plotw;
-      const x = padL + (dates.length < 2 ? plotW / 2 : (index / (dates.length - 1)) * plotW);
-      g.style.display = "";
-      g.querySelector("line").setAttribute("x1", x);
-      g.querySelector("line").setAttribute("x2", x);
-      const isEquity = svg.closest(".chart-panel").dataset.panel === "equity";
-      g.querySelectorAll("circle").forEach((dot) => {
-        const s = series.find((one) => one.key === dot.dataset.key);
-        const v = s && (isEquity ? s.equity : s.drawdown)[index];
-        if (v == null || !isFinite(v)) { dot.style.display = "none"; return; }
-        dot.style.display = "";
-        dot.setAttribute("cx", x);
-        // The path geometry is already on screen; rather than recompute the
-        // scale here, read the y straight off the rendered path so the dot
-        // can never sit somewhere the line does not.
-        dot.setAttribute("cy", yOnPath(svg, s.key, x));
-      });
-    });
-    readout(index);
-  };
-
-  const hide = () => {
-    svgs.forEach((svg) => { svg.querySelector(".crosshair").style.display = "none"; });
-    readout(null);
-  };
-
-  svgs.forEach((svg) => {
-    const hit = svg.querySelector(".hit");
-    const toIndex = (event) => {
-      const box = svg.getBoundingClientRect();
-      const padL = +svg.dataset.padl, plotW = +svg.dataset.plotw;
-      const scale = box.width / svg.viewBox.baseVal.width;
-      const t = (event.clientX - box.left - padL * scale) / (plotW * scale);
-      return Math.max(0, Math.min(dates.length - 1, Math.round(t * (dates.length - 1))));
-    };
-    hit.addEventListener("pointermove", (e) => show(toIndex(e)));
-    hit.addEventListener("pointerdown", (e) => show(toIndex(e)));
-    hit.addEventListener("pointerleave", hide);
-  });
-}
-
-// Nearest point on a rendered <path> at a given x. Uses the browser's own
-// geometry (getPointAtLength) rather than a second copy of the scale maths --
-// two implementations of one mapping is how a dot ends up half a pixel, or
-// half a decade, off the line it belongs to.
-function yOnPath(svg, key, x) {
-  const paths = [...svg.querySelectorAll("path")];
-  const order = [...svg.querySelectorAll("circle")].map((c) => c.dataset.key);
-  const path = paths[order.indexOf(key)];
-  if (!path) return 0;
-  const total = path.getTotalLength();
-  let lo = 0, hi = total;
-  for (let i = 0; i < 18; i++) {
-    const mid = (lo + hi) / 2;
-    if (path.getPointAtLength(mid).x < x) lo = mid; else hi = mid;
-  }
-  return path.getPointAtLength((lo + hi) / 2).y;
 }
 
 // Peak-to-trough decline at every point, as a negative percentage. Computed

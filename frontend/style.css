@@ -365,6 +365,52 @@ tr.pending td { background: var(--metal-tint); }
 .next-action.buy  { color: var(--up);   border-color: rgba(78, 201, 138, 0.35); }
 .next-action.sell { color: var(--down); border-color: rgba(226, 99, 92, 0.35); }
 .next-action.hold { color: var(--muted); }
+/* --- one book's own last fills ----------------------------------------- */
+/* A list, NOT a table. Below 700px every table on this page becomes
+   label/value blocks (see labelTableCells), which for a four-column log would
+   be twenty-four lines per book; this reads the same at every width.
+
+   The row wraps rather than scrolls or spills: in the narrowest two-column
+   layout a panel's inside is ~170px, and the price is the item that drops to
+   its own line there. Nothing on this page scrolls inside itself. */
+.book-log {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+.book-log-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 8px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.book-log ul { list-style: none; margin: 5px 0 0; padding: 0; }
+.book-log li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1px 6px;
+  font-size: 0.73rem;
+  padding: 2px 0;
+  font-variant-numeric: tabular-nums;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.book-log li:first-child { border-top: 0; }
+.book-log .when { color: var(--muted); min-width: 3.1em; }
+.book-log .action { padding: 0 6px; font-size: 0.66rem; }
+.book-log .amt { font-weight: 600; }
+/* The fill price, marked as a price rather than as a second amount: two bare
+   dollar figures side by side read as two amounts. */
+.book-log .at { margin-left: auto; color: var(--muted); }
+.book-log .at::before { content: "@ "; opacity: 0.6; }
+/* The ETF panel's holding line: shares, grams, cash, average price, last fill.
+   Prose rather than rows because the five parts are not comparable measures. */
+.holding-line { margin: 8px 0 0; line-height: 1.45; }
+
 /* Exposure bar: how much of this portfolio is currently in the metal. */
 .exposure-bar { height: 5px; background: rgba(255, 255, 255, 0.06); border-radius: 999px; margin-top: 10px; overflow: hidden; }
 .exposure-bar > div { height: 100%; background: var(--metal-2); border-radius: 999px; }
@@ -439,11 +485,6 @@ h3.sub {
    in words. Deliberately NOT metal-tinted -- it is not per-asset, and it is
    not ours. */
 .kanal-finans { border-left: 3px solid var(--benchmark); }
-/* The trade log's free-text `reason`. It is the column that absorbs whatever
-   width the numeric ones leave, so it carries no min-width any more: a 260px
-   floor in a 690px column pushed the seven columns beside it off the card,
-   which is the overflow that used to be hidden behind a sideways scroll. */
-.summary-cell { color: var(--muted); }
 .action {
   display: inline-block;
   padding: 1px 8px;
@@ -714,8 +755,9 @@ code {
 .chart-panel svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
 .chart-panel .hit { cursor: crosshair; }
 
-/* The hover readout. Fixed min-height so the charts do not jump a line up
-   and down as the pointer enters and leaves. */
+/* The chart's caption: every drawn series' FINAL value, and it never changes
+   -- there is no hover layer (see chart.js). min-height is kept so a card
+   whose chart is still loading does not shift a line when the caption lands. */
 .chart-readout {
   display: flex;
   flex-wrap: wrap;

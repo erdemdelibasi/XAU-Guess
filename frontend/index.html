@@ -320,23 +320,11 @@
 
         <div id="strategy-panels"></div>
 
-        <!-- The trade log. It was already being downloaded in full (the average
-             purchase price is replayed from it) and then thrown away after that
-             one calculation, so showing it costs nothing and answers the question
-             no other panel on this page does: did the system actually DO anything
-             lately, and why. A portfolio card can look perfectly healthy while the
-             backend has not fired in weeks. -->
-        <h3 class="sub">Son işlemler &mdash; <span id="trades-asset-name">Altın</span></h3>
-        <div class="table-wrap">
-          <table id="trades-table">
-            <thead>
-              <tr><th>Tarih</th><th>Strateji</th><th>İşlem</th><th>Fiyat</th>
-                  <th>Miktar</th><th>Tutar</th><th>Komisyon</th><th>Gerekçe</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <p class="muted small" id="trades-note">-</p>
+        <!-- No combined trade log. Every book carries its own last six fills
+             inside its own panel (see bookLogHtml): one ledger sorted by time
+             interleaved eleven books, so "what did THIS rule do" meant scanning
+             a strategy column, and a book that had been quiet for a fortnight
+             dropped out of the log while looking healthy in its panel. -->
       </section>
 
       <!-- The tradeable-ETF books: the same rules run on the thing a retail

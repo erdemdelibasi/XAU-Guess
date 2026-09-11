@@ -88,8 +88,12 @@ const STARTING_CASH = 1000;
 // overstatement backend/research/ablation.py exists to prevent.
 const MIN_ROWS_FOR_VERDICT = 60;
 
-// Rows shown in the trade log.
-const MAX_TRADE_ROWS = 15;
+// Fills shown inside one book's panel. The user's number, and it fits the
+// question: "did this rule do anything lately", not "what is its history".
+// Every book on the page carries its own log now, so this is a per-panel cap
+// rather than a cap on one interleaved ledger -- eleven metal books plus four
+// ETF books at six lines each, instead of fifteen lines shared by all of them.
+const BOOK_LOG_ROWS = 6;
 
 // Mirrors ensemble.SHRINK_ALPHA. Below this many calls on one side, the
 // backend's own pooling still shrinks that side hard toward its
@@ -338,6 +342,14 @@ const fmtSignedPct = (v, digits = 2) =>
 const fmtPct = (v, digits = 1) =>
   v === null || v === undefined || Number.isNaN(Number(v)) ? "-" : `%${fmtNumber(Number(v) * 100, digits)}`;
 
+// A drawdown, already in percentage points and always <= 0. Turkish puts the
+// sign OUTSIDE the percent sign, so this is "−%12" and never "-12%" -- the
+// same rule the chart's own y-axis labels follow.
+const fmtDrawdown = (v) =>
+  v === null || v === undefined || Number.isNaN(Number(v))
+    ? "-"
+    : `${Number(v) < 0 ? "−%" : "%"}${fmtNumber(Math.abs(Number(v)), 0)}`;
+
 const fmtPoints = (v, digits = 1) =>
   v === null || v === undefined || Number.isNaN(Number(v))
     ? "-"
@@ -345,9 +357,17 @@ const fmtPoints = (v, digits = 1) =>
 
 const fmtDate = (v) => (v ? String(v).slice(0, 10) : "-");
 
-// A datetime, for the trade log: two trades on the same day are common (nine
-// portfolios rebalance off one signal) and a date column alone would print
-// them as nine identical rows.
+// DD.MM, for a book's own log. The combined log needed the clock because nine
+// portfolios rebalance off one signal and printed as nine same-day rows; a
+// single book fills at most once on most days, so the time was noise in a
+// column that has to fit a panel.
+const fmtDayMonth = (v) => {
+  const when = new Date(v);
+  if (Number.isNaN(when.getTime())) return fmtDate(v);
+  return `${String(when.getDate()).padStart(2, "0")}.`
+    + String(when.getMonth() + 1).padStart(2, "0");
+};
+
 const fmtDateTime = (v) => {
   if (!v) return "-";
   const when = new Date(v);
@@ -914,64 +934,70 @@ function renderRecords(records, asset, row) {
       + `geldikçe (5 işlem günü) dolmaya başlar.`;
 }
 
-/* One trade log row set, shared by the metals' log and the ETF card's.
+/* The fill price at READING precision, about five significant digits.
  *
- * Extracted rather than copied: the two logs answer the same question about
- * different books, and a second copy of this markup would drift the first
- * time a column changed on one of them. The ETF log exists because the metals'
- * log filters on `currentAsset` and an ETF's key is never that -- so before
- * this, a GLD trade was written to the database and shown nowhere.
+ * Not the asset's own `digits`: that is the precision a price is QUOTED at,
+ * and the log is not the place it is needed -- the same panel prints the
+ * book's average purchase price two rows above, in full. What the log needs
+ * is a number that fits beside a date, a side and an amount inside a panel
+ * that is ~170px wide in the narrowest two-column layout. "$4.476,60" wraps
+ * to its own line there; "$4.477" does not, and says the same thing about a
+ * fill. Silver keeps its cents, because "$66" would not.
+ */
+function logPriceDigits(price) {
+  const p = Math.abs(Number(price));
+  if (!Number.isFinite(p)) return 2;
+  return p >= 1000 ? 0 : p >= 100 ? 1 : 2;
+}
+
+/* EACH BOOK'S OWN LAST FEW FILLS, drawn inside that book's own panel.
+ *
+ * This replaced two combined trade logs -- one under the metals' portfolios,
+ * one at the foot of the ETF card -- and the change is not cosmetic. A single
+ * log sorted by time interleaves eleven books, so the question a reader
+ * actually has ("what did THIS rule do") was answered by scanning a strategy
+ * column across fifteen rows, and any book quiet for a fortnight vanished
+ * from the log entirely while looking perfectly healthy in its panel. Six
+ * fills per book answers it per book, and a book with nothing to show says so.
+ *
+ * What it deliberately does NOT carry: the reason string (a sentence of prose
+ * cannot share a 220px panel with four numbers) and the per-fill commission
+ * (rolled into the header, where the total is the number that decides whether
+ * any of this was worth doing). The full history is a query away, and the
+ * page is not the place to hold it.
+ *
+ * No <table>: below 700px every table on this page turns into label/value
+ * blocks, which for a four-column log would be twenty-four lines per book.
+ * This is a list, so it reads the same at every width.
  *
  * Newest first; the cost-basis replay needs the opposite order and gets its
  * own copy, so neither reverses the other's array in place. */
-function tradeRowsHtml(rows, labelFor, priceDigits, qtyDigits) {
-  return [...rows].reverse().slice(0, MAX_TRADE_ROWS).map((t) => {
-    const buy = t.side === "BUY";
-    return `
-      <tr>
-        <td>${fmtDateTime(t.created_at)}</td>
-        <td>${labelFor.get(t.strategy) ?? esc(t.strategy)}</td>
-        <td><span class="action action-${buy ? "buy" : "sell"}">${buy ? "AL" : "SAT"}</span></td>
-        <td class="num">${fmtUsd(t.price, priceDigits)}</td>
-        <td class="num">${fmtNumber(t.ounce_amount, qtyDigits)}</td>
-        <td class="num">${fmtUsd(t.usd_amount, 2)}</td>
-        <td class="num">${fmtUsd(t.fee_usd, 2)}</td>
-        <td class="summary-cell">${esc(t.reason ?? "")}</td>
-      </tr>`;
-  }).join("");
-}
-
-/* The trade log for the selected metal.
-
-   Already downloaded in full for the average-cost replay below, so this is
-   free. It answers the one question the portfolio cards cannot: whether the
-   backend actually fired, and when -- a card showing "%17 pozisyon" looks
-   identical whether it was set yesterday or three weeks ago. */
-function renderTrades(trades, asset) {
-  const body = document.querySelector("#trades-table tbody");
-  document.getElementById("trades-asset-name").textContent = asset.label;
-  const mine = trades.filter((t) => t.asset === currentAsset);
-  const note = document.getElementById("trades-note");
-
+function bookLogHtml(assetKey, strategyKey) {
+  const mine = (cache.trades ?? []).filter(
+    (t) => t.asset === assetKey && t.strategy === strategyKey);
   if (!mine.length) {
-    body.innerHTML = `<tr><td colspan="8" class="silenced">Bu varlıkta henüz işlem yok.</td></tr>`;
-    note.textContent = "";
-    return;
+    // Said out loud rather than left blank: "this book has not traded" is a
+    // fact about the rule (buy-and-hold fills once, ever), and an empty space
+    // there reads as a panel that failed to load.
+    return `<div class="book-log"><div class="book-log-head">`
+      + `<span>işlemler</span><span class="muted">henüz yok</span></div></div>`;
   }
-
-  const labelFor = new Map(STRATEGIES.map((s) => [s.key, s.label]));
-  body.innerHTML = tradeRowsHtml(mine, labelFor, asset.digits,
-                                 asset.digits === 3 ? 3 : 4);
-
-  // Total commission paid is the number that decides whether any of this was
-  // worth doing: backend/backtest.py's whole cost ladder exists because the
-  // same strategy beats buy-and-hold at 2 bp and loses badly at 150 bp.
   const fees = mine.reduce((sum, t) => sum + (Number(t.fee_usd) || 0), 0);
-  note.innerHTML =
-    `${mine.length} işlem, toplam <strong>${fmtUsd(fees, 2)}</strong> komisyon `
-    + `(on portföyün tamamı). En yenisi üstte. Komisyon oranı bu metal için `
-    + `tek yönde ${fmtNumber(asset.feeBps, 0)} baz puandır &mdash; bir stratejinin `
-    + `al-ve-tut'u geçip geçmediğini çoğu zaman sinyal değil bu sayı belirler.`;
+  const rows = [...mine].reverse().slice(0, BOOK_LOG_ROWS).map((t) => {
+    const buy = t.side === "BUY";
+    return `<li><span class="when">${fmtDayMonth(t.created_at)}</span>`
+      + `<span class="action action-${buy ? "buy" : "sell"}">${buy ? "AL" : "SAT"}</span>`
+      + `<span class="amt">${fmtUsd(t.usd_amount, 0)}</span>`
+      + `<span class="at">${fmtUsd(t.price, logPriceDigits(t.price))}</span></li>`;
+  }).join("");
+  return `<div class="book-log">
+      <div class="book-log-head">
+        <span>${mine.length} işlem${mine.length > BOOK_LOG_ROWS
+          ? ` · son ${BOOK_LOG_ROWS}` : ""}</span>
+        <span class="muted">${fmtUsd(fees, 2)} komisyon</span>
+      </div>
+      <ul>${rows}</ul>
+    </div>`;
 }
 
 /* Weighted-average purchase price per (asset, strategy), replayed from the
@@ -1181,20 +1207,17 @@ function renderLiveChart(asset, price) {
     .map((key) => built.series.find((s) => s.key === key))
     .filter(Boolean);
 
-  const readout = (index) => {
-    if (index === null) {
-      note.innerHTML = `Her defter <strong>$1.000</strong> ile ve aynı gün başladı. `
-        + `Kesikli gri çizgi al-ve-tut. Grafiğin üzerinde gezinerek bir günü okuyabilirsin.`;
-      return;
-    }
-    note.innerHTML = `<span class="readout-date">${esc(built.dates[index])}</span> `
-      + series.map((s) =>
-          `<span class="readout-item"><i style="background:${Viz.colourFor(s.key)}"></i>`
-          + `${esc(s.label)} <strong>${fmtUsd(s.equity[index], 2)}</strong></span>`).join(" ");
-  };
+  // FIXED caption, same rule as the measured chart: the last point of every
+  // drawn book, which on this chart is the "şimdi" mark -- i.e. the same
+  // valuation the panels below use, at the same mark price.
+  const last = built.dates.length - 1;
+  note.innerHTML = `<span class="readout-date">şimdi</span> ` + series.map((s) =>
+      `<span class="readout-item"><i style="background:${Viz.colourFor(s.key)}"></i>`
+      + `${esc(s.label)} <strong>${fmtUsd(s.equity[last], 2)}</strong></span>`).join(" ")
+    + ` <span class="muted">&mdash; her defter <strong>$1.000</strong> ile ve aynı gün`
+    + ` başladı; kesikli gri çizgi al-ve-tut.</span>`;
 
-  Viz.renderBacktestCharts(root, { dates: built.dates, series, readout, panels: ["equity"] });
-  readout(null);
+  Viz.renderBacktestCharts(root, { dates: built.dates, series, panels: ["equity"] });
 }
 
 document.addEventListener("click", (event) => {
@@ -1278,6 +1301,7 @@ function renderStrategies(portfolios, price, asset, costBasis) {
             <span class="${sincePurchase >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(sincePurchase)}</span></div>`}
         </div>
         <div class="next-action ${action.kind}">Sonraki işlem: ${action.text}</div>
+        ${bookLogHtml(currentAsset, strategy.key)}
       </div>`;
   };
 
@@ -1323,6 +1347,10 @@ function renderStrategies(portfolios, price, asset, costBasis) {
     ` &mdash; ama defterler <strong>${days} gün</strong>lük, yani bu sıralama henüz `
     + `bir ölçüm değil. Ölçülmüş sıralama yukarıdaki 19,5 yıllık grafikte.`;
 
+  const ledger = (cache.trades ?? []).filter((t) => t.asset === currentAsset);
+  const totalTrades = ledger.length;
+  const totalFees = ledger.reduce((sum, t) => sum + (Number(t.fee_usd) || 0), 0);
+
   // Two labelled groups, BOTH fully visible. An earlier version folded the
   // signalled seven into a <details>; nothing on this page is hidden behind a
   // click except the "what does this mean" explainers, because a panel that
@@ -1344,7 +1372,20 @@ function renderStrategies(portfolios, price, asset, costBasis) {
       Yön tahminine göre pozisyon alanlar. Şu an <strong>${ahead}</strong>/${signalled.length}
       tanesi al-ve-tut'un üzerinde${age}
     </p>
-    <div class="strategy-grid signalled">${signalled.map(panelFor).join("")}</div>`;
+    <div class="strategy-grid signalled">${signalled.map(panelFor).join("")}</div>
+
+    <!-- The one number the combined trade log carried that a per-book log
+         cannot: what all eleven books have paid between them, and the rate
+         they pay it at. backend/backtest.py's whole cost ladder exists because
+         the same strategy beats buy-and-hold at 2 bp and loses badly at 150,
+         so this is not a footnote. -->
+    <p class="muted small">
+      Her defterin kendi son işlemleri kutusunun içinde. On bir defter bugüne
+      kadar toplam <strong>${totalTrades}</strong> işlem yaptı ve
+      <strong>${fmtUsd(totalFees, 2)}</strong> komisyon ödedi; oran bu metal için
+      tek yönde ${fmtNumber(asset.feeBps, 0)} baz puandır &mdash; bir stratejinin
+      al-ve-tut'u geçip geçmediğini çoğu zaman sinyal değil bu sayı belirler.
+    </p>`;
 }
 
 // How long the paper books have been running, from the first fill on record.
@@ -1685,108 +1726,84 @@ function renderOneEtfBook(etf, portfolios, price, live, basis) {
   const byKey = new Map(mine.map((p) => [p.strategy, p]));
   const valueOf = (row) => Number(row.cash_usd) + Number(row.ounces) * price;
   const benchmark = byKey.get("buyhold");
-  const benchmarkTotal = benchmark ? valueOf(benchmark) / STARTING_CASH - 1 : null;
 
-  const rows = ETF_STRATEGIES.map(({ key, label, benchmark: isBench }) => {
+  // PANELS, not table rows, and not because four rows were too wide: each book
+  // now carries its own last fills, and a log cannot live in a table cell. The
+  // form is deliberately the SAME as the metals' books above -- these are the
+  // same four rules, and two shapes for one rule set says they are two kinds
+  // of thing.
+  //
+  // "al-ve-tut'a göre" is computed the same way as in renderStrategies
+  // (value / benchmarkValue - 1) rather than as the difference of the two
+  // total returns the table used. The two agree to a rounding error because
+  // every book starts at exactly $1,000, but identical-looking panels must not
+  // mean two different things.
+  const benchmarkValue = benchmark ? valueOf(benchmark) : null;
+  const panels = ETF_STRATEGIES.map(({ key, label, benchmark: isBench }) => {
     const row = byKey.get(key);
-    if (!row) return `<tr><td>${label}</td><td colspan="5" class="muted">—</td></tr>`;
+    if (!row) {
+      return `<div class="strategy-panel"><div class="name">${label}</div>
+              <div class="value">-</div>
+              <p class="muted tiny">Bu defter kurulmamış.</p></div>`;
+    }
     const value = valueOf(row);
     const total = value / STARTING_CASH - 1;
     const exposure = value > 0 ? (Number(row.ounces) * price) / value : 0;
-    const versus = isBench || benchmarkTotal === null
-      ? '<span class="muted">kıyas</span>'
-      : fmtSignedPct(total - benchmarkTotal);
-    return `<tr${isBench ? ' class="benchmark"' : ""}>
-      <td>${label}<br><span class="muted tiny">${etfHoldingLine(etf, row, price, live, basis)}</span></td>
-      <td>${fmtUsd(value)}</td>
-      <td>${fmtPct(exposure)}</td>
-      <td>${fmtPct(Number(row.target_exposure))}</td>
-      <td>${fmtSignedPct(total)}</td>
-      <td>${versus}</td>
-    </tr>`;
+    const versus = isBench || !benchmarkValue ? null : value / benchmarkValue - 1;
+    return `
+      <div class="strategy-panel${isBench ? " benchmark" : ""}">
+        <div class="name">${label}${isBench ? ' <span class="badge">kıyas</span>' : ""}</div>
+        <div class="value">${fmtUsd(value)}</div>
+        <div class="pnl ${total >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(total)}</div>
+        <div class="row"><span>pozisyon</span><span>${fmtPct(exposure)}</span></div>
+        <div class="row"><span>hedef</span><span>${fmtPct(Number(row.target_exposure))}</span></div>
+        ${versus === null ? "" : `
+        <div class="row"><span>al-ve-tut'a göre</span>
+          <span class="${versus >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(versus)}</span></div>`}
+        <div class="exposure-bar"><div style="width:${Math.min(100, exposure * 100).toFixed(1)}%"></div></div>
+        <p class="muted tiny holding-line">${etfHoldingLine(etf, row, price, live, basis)}</p>
+        ${bookLogHtml(etf.key, key)}
+      </div>`;
   }).join("");
 
   const shown = price.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return head
-    + `<div class="table-wrap"><table>
-         <thead>
-           <tr><th>Strateji</th><th>Değer</th><th>Pozisyon</th><th>Hedef</th>
-               <th>Toplam</th><th>vs Al-ve-tut</th></tr>
-         </thead>
-         <tbody>${rows}</tbody>
-       </table></div>`
+    + `<div class="strategy-grid measured">${panels}</div>`
     + `<p class="muted small">${etf.tv} $${shown}`
     + ` <span class="muted">(${ETF_DELAY_MINUTES} dk gecikmeli)</span>`
-    + ` &mdash; her defter $${STARTING_CASH.toLocaleString("tr-TR")} ile başladı,`
-    + ` işlem başına $1,50 komisyon ödüyor.`
+    + ` &mdash; her defter $${STARTING_CASH.toLocaleString("tr-TR")} ile başladı.`
+    + ` Komisyon bir oran değil, işlem başına <strong>sabit $1,50</strong>&#39;dır`
+    + `${effectiveFeeText(etf)}. Küçük işlemlerde bu oran yükselir, büyük`
+    + ` işlemlerde düşer; hesap büyüdükçe de düşer.`
     + `<br>Defterler <strong>pay</strong> tutuyor, külçe değil. Gram karşılığı`
     + ` ETF fiyatının spot fiyata oranından türetilmiş bir <strong>yaklaşıktır</strong>`
     + ` (bugün 1 ${etf.label} ≈ ${gramsPerShareText(etf, price, live)});`
     + ` ABD borsası kapalıyken ETF'in son kapanışı canlı spotla karşılaştırıldığı`
     + ` için bir-iki puan sapabilir.`
-    + `<br>Ölçülen: ${etf.claim}</p>`
-    + etfTradeLogHtml(etf);
+    + `<br>Ölçülen: ${etf.claim}</p>`;
 }
 
-/* The ETF card's own trade log.
+/* What the flat fee has actually COST these four books, as a rate.
  *
- * The question this answers is "what changed since last time", and no other
- * panel here can: the strategy table shows a position, which looks identical
- * whether it was set this morning or a month ago. A separate TAB was the
- * obvious alternative and would have been wrong -- the tab strip means METAL,
- * and a third meaning in the same control makes both worse. This belongs next
- * to the books it describes.
+ * The MEASURED effective rate, never an assumed one -- backend/backtest.py's
+ * flat_fee_ladder prints the same number for the same reason: dividing $1.50
+ * by the smallest possible trade gives 60 bp on a $5,000 account while the
+ * measured figure is 11.7, because trades do not stay at that floor and the
+ * book compounds. A flat fee has no basis-point value until it is divided by
+ * the trades that actually happened.
  *
- * Always open. The first version hid it behind a <details> on the grounds
- * that the position rows are what a reader came for; that was wrong, because
- * "did anything change" is checked on every visit and a panel that must be
- * opened each time is a panel read once. Capped at MAX_TRADE_ROWS, which is
- * what keeps an unbounded ledger from taking over the card, and the note says
- * so when rows are being left out. */
-function etfTradeLogHtml(etf) {
+ * This sentence used to live under the ETF card's combined trade log. That log
+ * is gone -- each book now shows its own fills, and each shows its own fee
+ * total -- but the RATE is a property of all four together and had to survive
+ * the change: it is the number that decides whether a $1,000 book can carry
+ * this rule at all. */
+function effectiveFeeText(etf) {
   const trades = (cache.trades ?? []).filter((t) => t.asset === etf.key);
-  if (!trades.length) {
-    return `<h3 class="sub">Son işlemler &mdash; ${etf.label}</h3>`
-      + `<p class="muted small">Bu defterlerde henüz işlem yok.</p>`;
-  }
-  const labelFor = new Map(ETF_STRATEGIES.map((s) => [s.key, s.label]));
-  const rows = tradeRowsHtml(trades, labelFor, 2, 4);
-
   const fees = trades.reduce((sum, t) => sum + (Number(t.fee_usd) || 0), 0);
   const gross = trades.reduce((sum, t) => sum + (Number(t.usd_amount) || 0), 0);
-  // The MEASURED effective rate, not an assumed one. backend/backtest.py's
-  // flat_fee_ladder prints the same number for the same reason: dividing
-  // $1.50 by the smallest possible trade gives 60 bp at a $5,000 account
-  // while the measured figure is 11.7, because trades do not stay at that
-  // floor. A flat fee has no basis-point value until it is divided by the
-  // trades that actually happened.
-  const bps = gross > 0 ? (fees / gross) * 10_000 : null;
-
-  // ALWAYS OPEN, not a <details>. It was folded shut on the argument that the
-  // position rows are what a reader came for -- but the question this log
-  // answers ("what changed since last time") is one a person checks on every
-  // visit, and a panel that has to be opened every time is a panel that gets
-  // read once. The metals' log above is always open for the same reason; the
-  // two should not behave differently.
-  return `<h3 class="sub">Son işlemler &mdash; ${etf.label}</h3>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Tarih</th><th>Strateji</th><th>İşlem</th><th>Fiyat</th>
-                <th>Pay</th><th>Tutar</th><th>Komisyon</th><th>Gerekçe</th></tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <p class="muted small">${trades.length} işlem, toplam
-        <strong>${fmtUsd(fees, 2)}</strong> komisyon (dört defterin tamamı).
-        En yenisi üstte${trades.length > MAX_TRADE_ROWS
-          ? `, en son ${MAX_TRADE_ROWS} tanesi gösteriliyor` : ""}.
-        Buradaki ücret bir oran değil, işlem başına
-        <strong>sabit $1,50</strong>&#39;dır${bps === null ? "" :
-          ` &mdash; bugüne kadarki işlemlerde tek yönde <strong>${fmtNumber(bps, 1)} baz puana</strong> denk geldi`}.
-        Küçük işlemlerde bu oran yükselir, büyük işlemlerde düşer; hesap
-        büyüdükçe de düşer.</p>`;
+  if (!(gross > 0)) return "";
+  return ` &mdash; bugüne kadarki ${trades.length} işlemde tek yönde`
+    + ` <strong>${fmtNumber((fees / gross) * 10_000, 1)} baz puana</strong> denk geldi`;
 }
 
 function gramsPerShareText(etf, price, live) {
@@ -1942,22 +1959,23 @@ function renderBacktest(asset) {
              equity, drawdown: Viz.drawdownOf(equity) };
   });
 
-  const readoutBox = document.getElementById("backtest-readout");
-  const readout = (index) => {
-    if (index === null) {
-      readoutBox.innerHTML = `<span class="muted">Grafiğin üzerinde gezinerek `
-        + `herhangi bir haftayı okuyabilirsin.</span>`;
-      return;
-    }
-    readoutBox.innerHTML = `<span class="readout-date">${payload.dates[index]}</span>`
-      + series.map((s) =>
-        `<span class="readout-item"><i style="background:${Viz.colourFor(s.key)}"></i>`
-        + `${esc(s.label)} <strong>${fmtUsd(s.equity[index], 0)}</strong>`
-        + ` <em>${fmtNumber(s.drawdown[index], 0)}%</em></span>`).join("");
-  };
+  // A FIXED caption, not a hover readout. It used to follow a crosshair and
+  // rewrite itself on every pointer move; the numbers moved out from under the
+  // reader, and nothing on the card could be quoted or compared. It now states
+  // where each drawn curve ENDED -- the value and how far below its own peak
+  // that value sits, which is the pair this project's claim is about and the
+  // second number is not in the table below (that column is the WORST
+  // drawdown, not today's).
+  const last = payload.dates.length - 1;
+  document.getElementById("backtest-readout").innerHTML =
+    `<span class="muted">son seans</span> `
+    + `<span class="readout-date">${payload.dates[last]}</span>`
+    + series.map((s) =>
+      `<span class="readout-item"><i style="background:${Viz.colourFor(s.key)}"></i>`
+      + `${esc(s.label)} <strong>${fmtUsd(s.equity[last], 0)}</strong>`
+      + ` <em>${fmtDrawdown(s.drawdown[last])}</em></span>`).join("");
 
-  Viz.renderBacktestCharts(root, { dates: payload.dates, series, readout });
-  readout(null);
+  Viz.renderBacktestCharts(root, { dates: payload.dates, series });
 
   // The table view. Required rather than optional: it is the non-visual path
   // to the same numbers, and it is also the only place the trade COUNT shows
@@ -2075,7 +2093,6 @@ function renderAll() {
   renderStrategies(cache.portfolios, mark.price, asset, cache.costBasis);
   renderLiveChart(asset, mark.price);
   renderValuationNote(asset, mark);
-  renderTrades(cache.trades, asset);
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
   renderKanalFinans(cache.mentions, cache.themes);
   // Asset-scoped -- see renderEtfBooks. Rendered from renderAll anyway

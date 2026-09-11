@@ -826,9 +826,9 @@ sayar ve dokuz portföyün `maybe_trade()`'i iki kez ateşlenirdi.
 
 ---
 
-### Sayfada hiçbir şey katlanmaz, ve hiçbir yerde iç kaydırma yoktur
+### Sayfada hiçbir şey katlanmaz, iç kaydırma ve gezinen sayı yoktur
 
-İki kural, ve ikisi de kullanıcının açık talebi:
+Üç kural, ve üçü de kullanıcının açık talebi:
 
 1. **Açıklamalar dışında hiçbir şey açılır-kapanır değildir.** `.explain`
    blokları ("bu tahmin ne işe yarar") kalır; onlar içeriğin kendisi değil,
@@ -841,6 +841,17 @@ sayar ve dokuz portföyün `maybe_trade()`'i iki kez ateşlenirdi.
    büyümesine izin veren şeydi: yana kayan bir tablo, sütunları çoğu okuyucunun
    hiç yapmadığı bir hareketin arkasına saklar — ve saklananlar önemsiz olanlar
    değil, sonuncu olanlardır.
+3. **Grafiklerin altındaki sayılar sabittir; fareyle değişmez.** İlk sürümde
+   iki grafiğin de bir nişangâhı vardı ve altındaki satırı her imleç
+   hareketinde yeniden yazıyordu. `dataviz` becerisinin varsayılanı budur ve
+   burada yanlıştı: okuyucunun **az önce okuduğu sayılar, imleç üzerlerinden
+   geçerken değişiyordu**, yani kartta akılda tutulacak ya da karşılaştırılacak
+   tek bir okuma yoktu. Satır artık her çizili eğrinin **nerede bittiğini**
+   yazıyor — ölçülmüş grafikte son seansın değeri ve o değerin kendi zirvesinden
+   uzaklığı (ikincisi tablodaki kolon değil: orada **en kötü** düşüş var, burada
+   bugünkü), canlı grafikte "şimdi" işaretindeki defter değerleri.
+   `chart.js` artık `.hit` dikdörtgeni ve `.crosshair` grubu **üretmiyor**;
+   kimlik zaten her çizginin sağ ucundaki doğrudan etikette.
 
 **Bu ikincisi göz kararı doğrulanamaz.** `scratchpad/overflow.js` her öğeyi
 dolaşıp `scrollWidth > clientWidth` arıyor ve 300px–1400px arası her genişlikte
@@ -910,6 +921,14 @@ aynı görsel ağırlığa sahipti: karar, 19,5 yıllık ölçüm, ve Brier bece
 her ufukta negatif ölçülmüş bir bileşen — üçü de tam genişlik kart, aynı başlık
 puntosu. Yeni düzen `research/README.md`'nin düzyazıyla söylediğini **yerleşimle**
 söylüyor. Ölçülen sonuç: 8.157 → **5.607 piksel**, kolonlar 3.324 / 3.010.
+
+> **Bu iki sayı aynı anda ölçülmedi ve yan yana okunmamalı.** Sayfa yüksekliği
+> görüntü genişliğine ve o gün kaç işlem yapıldığına bağlı; yukarıdaki çift
+> yeniden tasarım anındaki ölçüm. Defter kutuları eklendiğinde (2026-09-11,
+> `bookLogHtml`) **1280px'te** ölçülen çift **8.213 → 7.501 piksel** oldu: on
+> beş defterin her biri kendi dolumlarını kazandı, ama iki birleşik tablo
+> (metallerin on beş satırı ve ETF kartınınki) gitti ve net 712 piksel kısaldı.
+> Bir yükseklik iddiası yazarken hangi genişlikte ölçtüğünü de yaz.
 
 Üç bant:
 
@@ -1136,6 +1155,30 @@ başka hiçbir panelde yok — "sistem son zamanlarda gerçekten bir şey yaptı
 Bir portföy kartı, pozisyonu dün de üç hafta önce de ayarlanmış olsa aynı
 görünür.
 
+**Ama tek bir birleşik defter yanlış soruyu cevaplıyordu, ve 2026-09-11'de
+defter başına ayrıldı** (`bookLogHtml`). Zamana göre sıralı tek bir liste on
+bir defteri **iç içe geçiriyor**: okuyucunun sorusu "bu kural ne yaptı",
+cevabı ise on beş satır boyunca bir strateji kolonunu taramaktı. Daha kötüsü,
+iki haftadır sessiz duran bir defter listeden **tamamen** düşüyordu — yani
+"hiçbir şey yapmadı" tam olarak görünmez olan durumdu, oysa sorulan soru oydu.
+Artık her defter kendi kutusunda kendi son altı dolumunu taşıyor, dolumu
+olmayan defter de bunu yazıyor.
+
+Kutunun taşımadığı iki şey bilerek dışarıda: **gerekçe metni** (bir cümlelik
+düzyazı, dört sayıyla birlikte 220 pikselik bir panele girmez) ve **dolum başı
+komisyon** (başlıkta toplanıyor — karar veren sayı tek bir dolumun ücreti değil,
+o defterin bugüne kadar ödediği toplam). Tam geçmiş bir sorgu uzaklıkta;
+sayfanın işi onu barındırmak değil. `<table>` de değil: 700px altında bu
+sayfadaki her tablo etiket/değer bloklarına dönüşüyor ve dört kolonluk bir
+defter orada defter başına yirmi dört satır olurdu.
+
+**Dolum fiyatı `asset.digits` ile değil, okuma hassasiyetiyle basılıyor**
+(`logPriceDigits`, ~5 anlamlı hane). Kotasyon hassasiyeti aynı panelde iki satır
+yukarıda zaten var (`aldığı fiyat`); kutunun ihtiyacı bir tarihin, bir yönün ve
+bir tutarın yanına sığan bir sayı. Ölçüldü: 1140px'te iki kolonlu düzende panel
+içi ~170px ve "$4.476,60" orada kendi satırına kayıyor, "$4.477" kaymıyor.
+Gümüş kuruşlarını koruyor, çünkü "$66" kaybolurdu.
+
 **Sicil özeti artık örneklem küçükken hüküm vermiyor.** "Model hep-YÜKSELİŞ
 demekten iyi" cümlesi 8 satırın üzerine basıldığında bir ölçüm değil bir yazı
 turadır. Eşik 60 çözülmüş satır (~bir çeyrek), ve iki oran arasındaki fark
@@ -1214,21 +1257,35 @@ canlı spotla karşılaştırıldığı için gece hareketi kadar sapar. Mail bu
 **yapmıyor** — oraya spot kotasyonu hiç gelmiyor ve olmayan bir fiyatı
 uydurmaktansa gram satırını hiç basmamak doğrusu.
 
-**ETF kartının kendi işlem defteri var, ve bu bir sekme DEĞİL.** "Yeni bir alım
-satım olduğunda nasıl göreceğim" sorusunu başka hiçbir panel cevaplamıyor: bir
-pozisyon satırı, bu sabah da bir ay önce de ayarlanmış olsa aynı görünür.
-Metallerin işlem defteri (`renderTrades`) `currentAsset`'e göre filtreliyor ve
-bir ETF'in anahtarı hiçbir zaman o olmadığı için **GLD işlemleri veritabanına
-yazılıp hiçbir yerde gösterilmiyordu**. Çözüm ayrı bir sekme değil, kartın
-içinde hep açık bir bölüm: sekme şeridi **metal** demek, aynı kontrole
-ikinci bir anlam yüklemek ikisini birden bozar. Satır biçimlendirmesi iki defter
-arasında `tradeRowsHtml` ile **paylaşılıyor** — kopyalansaydı ilk kolon
-değişikliğinde ayrışırdı.
+**ETF defterleri de kutudur ve her biri kendi dolumlarını taşır.** Kart bir
+zamanlar dört satırlık bir tabloydu ve altında kendi birleşik işlem defteri
+vardı; o defter, metallerin defteri `currentAsset`'e göre filtrelediği ve bir
+ETF'in anahtarı hiçbir zaman o olmadığı için var olmuştu — **GLD işlemleri
+veritabanına yazılıp hiçbir yerde gösterilmiyordu**. Ayrı bir sekme o zaman da
+yanlış cevaptı (sekme şeridi **metal** demek, aynı kontrole ikinci bir anlam
+yüklemek ikisini birden bozar) ama birleşik defter de öyleydi: bir defterin
+dolumları o defterin kutusuna aittir.
 
-Defterin özeti **ölçülen** efektif baz puanı basıyor (`komisyon / işlem hacmi`),
+Biçim artık metallerin panelleriyle **aynı**, ve bu bilinçli: bunlar aynı dört
+kural (`trading.MECHANICAL`), ve tek bir kural kümesi için iki ayrı şekil
+kullanmak onların iki ayrı şey olduğunu söyler. "al-ve-tut'a göre" de aynı
+hesapla üretiliyor (`değer / kıyas değeri − 1`), tablonun kullandığı "iki toplam
+getirinin farkı" ile değil: her defter tam $1.000'dan başladığı için ikisi
+yuvarlama farkı kadar aynı, ama **birebir aynı görünen iki panel iki farklı şey
+anlatamaz**.
+
+Kartın özeti **ölçülen** efektif baz puanı basıyor (`komisyon / işlem hacmi`),
 varsayılanı değil — `backtest.flat_fee_ladder`'ın aynı sebeple yaptığı şey.
 $1,50'yi mümkün olan en küçük işleme bölmek 60 bp verir, gerçekleşen işlemlere
-bölmek 11,7; sabit bir ücretin kendisine ait bir baz puan değeri yoktur.
+bölmek 11,7; sabit bir ücretin kendisine ait bir baz puan değeri yoktur. Bu
+cümle birleşik defterle birlikte silinemezdi: **oran dört defterin ortak
+özelliği**, defter başına komisyon toplamı ise ayrı bir sayı, ve $1.000'lık bir
+defterin bu kuralı taşıyıp taşıyamayacağına karar veren o orandır.
+
+`test_track_etf.test_every_book_on_the_page_shows_its_own_fills` her iki
+ailenin de kendi defterini çizdiğini kilitliyor — yeni bir defter türü artık
+"paylaşılan deftere eklemeyi unutmak" ile görünmez kalamaz, çünkü paylaşılan
+defter yok.
 
 **Nakit hem kartta hem mailde yazılı, sıfırken bile.** Yüzdelik pozisyon nakdi
 gizler: %35 yatırımda olan bir defter aynı zamanda $650 bekleten bir defterdir

@@ -145,6 +145,40 @@ def test_every_tracked_book_is_reachable_on_the_page():
         assert key in assets.TRACKED, f"{key} is on the page but not TRACKED"
 
 
+def test_every_book_on_the_page_shows_its_own_fills():
+    """A book whose fills are invisible is a position with no history.
+
+    This guards the shape of a bug that already happened once: GLD traded
+    every weekday, wrote to `trades`, and appeared in no log at all, because
+    the only log on the page filtered on `currentAsset` and an ETF's key is
+    never that. The fix then was a second combined log; the fix now is that
+    each book carries its own, so a new book type cannot be added without one
+    -- there is no shared log left for it to be missing from.
+
+    Text-level for the same reason as the test above: there is no JS test
+    runner here and the failure being guarded is a missing edit, not a wrong
+    computation.
+    """
+    app_js = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "frontend", "app.js")
+    source = io.open(app_js, encoding="utf-8").read()
+
+    def body(name):
+        start = source.index(f"function {name}(")
+        rest = source[start + 1:]
+        end = rest.find("\nfunction ")
+        return rest[:end if end != -1 else len(rest)]
+
+    # Both families of book -- the metals' eleven and the ETF's four.
+    for builder in ("renderStrategies", "renderOneEtfBook"):
+        assert "bookLogHtml(" in body(builder), f"{builder} draws no fill log"
+
+    # And the combined logs really are gone: two sources for one answer is how
+    # the ETF log came to be capped differently from the metals' one.
+    assert "function renderTrades" not in source
+    assert "trades-table" not in source
+
+
 # ---------------------------------------------------------------------------
 # Boundary 2: the cost is the one the broker actually charges
 # ---------------------------------------------------------------------------
