@@ -826,6 +826,83 @@ sayar ve dokuz portföyün `maybe_trade()`'i iki kez ateşlenirdi.
 
 ---
 
+### Sayfada hiçbir şey katlanmaz, ve hiçbir yerde iç kaydırma yoktur
+
+İki kural, ve ikisi de kullanıcının açık talebi:
+
+1. **Açıklamalar dışında hiçbir şey açılır-kapanır değildir.** `.explain`
+   blokları ("bu tahmin ne işe yarar") kalır; onlar içeriğin kendisi değil,
+   içeriğin *tarifi*. Geri kalan her şey açıktır. Bir zamanlar sinyal
+   defterleri bir `<details>` içindeydi ve gerekçesi "asıl bakılan şey ölçülmüş
+   kurallar"dı — ama tıklanması gereken panel, bir kez okunan paneldir.
+   Ayrım artık bir katlama değil, bir **başlık ve bir cümle**.
+2. **Hiçbir öğe kendi içinde kaymaz.** `.table-wrap`'in eski
+   `overflow-x: auto` kuralı kolay çözümdü ve sekiz sütunlu tabloların
+   büyümesine izin veren şeydi: yana kayan bir tablo, sütunları çoğu okuyucunun
+   hiç yapmadığı bir hareketin arkasına saklar — ve saklananlar önemsiz olanlar
+   değil, sonuncu olanlardır.
+
+**Bu ikincisi göz kararı doğrulanamaz.** `scratchpad/overflow.js` her öğeyi
+dolaşıp `scrollWidth > clientWidth` arıyor ve 300px–1400px arası her genişlikte
+koşuluyor. Bir kolon genişliği değiştirdiğinde bunu tekrar koş; "bana normal
+göründü" bu sayfada yeterli değil.
+
+Üç şey ölçülerek düzeltildi:
+
+- **Tek-kolon eşiği 960 değil 1100.** 1024px'te iki kolon ~594/~382 çıkıyor ve
+  382'de altı sütunlu bileşen sicili karttan taşıyordu — **sessizce**, çünkü
+  artık hiçbir şey kaymıyor.
+- **Başlıklar sarar, sayılar sarmaz.** `th { white-space: nowrap }` her sütuna
+  bir taban genişlik koyuyordu; "Hedef seans"ın iki satıra inmesi bir kerelik
+  bir satır yüksekliği, tek satırda kalması ise kalıcı bir taban.
+- **700px altında tablolar satır-kartına dönüşür.** Her hücre kendi sütununu
+  yazar; etiketi `labelTableCells()` render anında `<th>`'den **okur**, render
+  fonksiyonlarının ayrıca yazmasıyla değil. Altı ayrı fonksiyon satır üretiyor
+  ve değerin yanına ikinci kez yazılan bir etiket, sütun ilk yeniden
+  adlandırıldığında başlığından ayrışan bir etikettir.
+
+**Kanal Finans tablosu kart listesine dönüştü, ve bu bir form düzeltmesi.**
+Sekiz sütunun yedisi kısa etiket ve seviye, sekizincisi transkript edilmiş
+konuşmadan bir paragraf — bunlar karşılaştırılabilir sekiz ölçü değil. 444px'lik
+yan kolonda hiçbir sıkıştırma onu sığdıramıyordu. Kartta seviyeler saran
+çiplere, özet ise tam genişliğe kavuşuyor. Seviye çipleri **yalnızca
+konuşmacının verdikleri**: her videoda tire basan bir satır "bahsetti ve boştu"
+der, oysa eksik seviye "değişmedi" demektir.
+
+### Canlı defterlerin eğrisi: tarayıcıda kurulur, ikinci bir kaynak yoktur
+
+Ölçülmüş geçmiş kartı "bu kurallar 19,5 yılda işe yaradı mı" sorusunu
+cevaplıyor; `Defterlerin seyri` ise **"benim bin dolarım ne yaptı"** sorusunu,
+ki onu hiçbir panel cevaplayamıyordu — bir pozisyon kutusu, bu sabah da bir ay
+önce de ayarlanmış olsa aynı görünür.
+
+`liveEquitySeries` `trades`'i baştan oynatıyor ve her günü o günün
+`predictions.price_at_prediction`'ıyla değerliyor. **Fiyat serisi bu, başka bir
+şey değil**: aynı koşu, aynı an, aynı besleme. Defterleri başka bir seriyle
+(spot kotasyonu, başka bir kapanış) markalamak, pozisyonu hiç alınmadığı bir
+para biriminde fiyatlamak olur — değerleme notundaki vadeli/spot hatasının
+günlük hâli. İkisi de zaten indiriliyor (ortalama maliyet için), yani grafik
+ek bir istek getirmiyor.
+
+İki incelik:
+- **İşlemler günün SONUNDA kesilir.** `predict.py` önce tahmini yazıyor, bir
+  saniye sonra işlem yapıyor; tahminin kendi damgasında kesmek her defteri
+  kendi doldurmalarının bir gün gerisinde gösterirdi.
+- **`predictions` limiti 30 değil 400.** Sicil tablosu bir pencere gösteriyor
+  ama eğri **her satırı** kullanıyor — her biri bir günün mark fiyatı. 30'luk
+  bir tavan, bir ay sonra grafiği sessizce son altı haftaya kırpardı.
+
+**Palet 8'den 10 slota çıktı ve yeniden doğrulandı.** `claude` backtest
+edilemiyor, `kanalfinans` bir arşive bağlı — ikisi de yalnızca canlı grafikte
+var. `LIVE_SERIES`, `BACKTEST_SERIES`'i **yayarak** genişletiyor, yeniden
+sıralayarak değil: renk varlığı takip eder, yani "mavi = oynaklık hedefi" iki
+grafikte de geçerli olmalı. Ve sıra kritik: `claude`'u `STRATEGIES`'teki
+komşusunun yanına koyunca tan ile kırmızı bitişik oldu ve çift normal-görüş
+tabanını geçemedi (ΔE 13,7 < 15); sona eklenince 19,3.
+`test_export_backtest.py` bu iki değişmezi de kilitliyor.
+
+---
+
 ### Düzen: üç bant, ve hangi kartın nerede durduğu ölçümden geliyor
 
 Sayfa 2026-09-11'e kadar **tek bir 8.157 piksellik kolondu** ve içinde her kart
@@ -1143,7 +1220,7 @@ pozisyon satırı, bu sabah da bir ay önce de ayarlanmış olsa aynı görünü
 Metallerin işlem defteri (`renderTrades`) `currentAsset`'e göre filtreliyor ve
 bir ETF'in anahtarı hiçbir zaman o olmadığı için **GLD işlemleri veritabanına
 yazılıp hiçbir yerde gösterilmiyordu**. Çözüm ayrı bir sekme değil, kartın
-içinde kapalı bir `<details>`: sekme şeridi **metal** demek, aynı kontrole
+içinde hep açık bir bölüm: sekme şeridi **metal** demek, aynı kontrole
 ikinci bir anlam yüklemek ikisini birden bozar. Satır biçimlendirmesi iki defter
 arasında `tradeRowsHtml` ile **paylaşılıyor** — kopyalansaydı ilk kolon
 değişikliğinde ayrışırdı.

@@ -253,8 +253,29 @@ h2 { font-size: 1.05rem; margin: 0 0 10px; font-weight: 700; }
 /* --- tables ------------------------------------------------------------ */
 /* Wide content scrolls inside its own container; the page body must never
    scroll horizontally. */
-.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; white-space: nowrap; }
+/* NO inner scrolling, anywhere on this page. A table that scrolls sideways
+   inside a card hides columns behind a gesture most readers never make, and
+   the hidden ones are not the unimportant ones -- they are whichever happen to
+   be last. Tables are made to FIT instead: cells wrap, numbers do not, and the
+   one or two free-text columns absorb the slack.
+
+   The rule this replaces (`overflow-x: auto`) is the easy fix and the reason
+   the eight-column tables were allowed to grow in the first place. If a new
+   column will not fit, the answer is a narrower column or a different form --
+   see renderKanalFinans, whose eight-column table became a card list because
+   no amount of tightening was going to fit it in a 444px sidebar. */
+.table-wrap { overflow: visible; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+/* Numbers never wrap -- a price broken across two lines is unreadable and a
+   wrapped date reads as two dates. Free text wraps; that is what it is for. */
+/* Numbers never wrap -- a price broken across two lines is unreadable and a
+   wrapped date reads as two dates. HEADERS do wrap: "Hedef seans" over two
+   lines costs one row of height once, while forcing it onto one line sets a
+   floor under the whole column and was a large part of why these tables did
+   not fit. */
+td.num { white-space: nowrap; }
+th { white-space: normal; letter-spacing: 0.02em; }
+td { overflow-wrap: anywhere; }
 th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--line); }
 th:first-child, td:first-child { text-align: left; }
 th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -418,12 +439,11 @@ h3.sub {
    in words. Deliberately NOT metal-tinted -- it is not per-asset, and it is
    not ours. */
 .kanal-finans { border-left: 3px solid var(--benchmark); }
-.summary-cell {
-  white-space: normal;
-  min-width: 260px;
-  max-width: 460px;
-  color: var(--muted);
-}
+/* The trade log's free-text `reason`. It is the column that absorbs whatever
+   width the numeric ones leave, so it carries no min-width any more: a 260px
+   floor in a 690px column pushed the seven columns beside it off the card,
+   which is the overflow that used to be hidden behind a sideways scroll. */
+.summary-cell { color: var(--muted); }
 .action {
   display: inline-block;
   padding: 1px 8px;
@@ -823,29 +843,35 @@ tr.benchmark-row td { background: rgba(127, 168, 216, 0.07); }
 .col-side .prediction-meta { gap: 14px; }
 .col-side .meta-item strong { font-size: 1rem; }
 
-/* The strategy grid lives in a ~690px column now instead of the full 1148.
-   At the old 232px floor that is two columns and eleven panels become six
-   rows -- taller than before the redesign. 196px restores three. */
-/* The two groups want different shapes. The measured four land 2x2 in a
-   ~690px column -- four across one row would be 160px each, and three across
-   leaves a single orphan under a half-empty row. The signalled seven want the
-   tighter floor: at 232px that column fits two and the group becomes four
-   rows, taller than before the redesign. */
-#strategy-panels > .strategy-grid { grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
-.strategy-more .strategy-grid { grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); }
+/* The two groups want different shapes, and both were measured in the ~690px
+   column they actually live in. The measured four land 2x2 -- four across
+   would be 160px each, three across leaves one orphan under a half-empty row.
+   The signalled seven need the tighter floor: at 268px that column fits two
+   and the group runs four rows, taller than before the redesign.
+
+   Explicit classes rather than sibling selectors: the two grids are siblings
+   today and a third heading between them would silently repaint both. */
+.strategy-grid.measured { grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); }
+.strategy-grid.signalled { grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); }
 .col-main .strategy-panel { padding: 10px; }
+#strategy-panels > h3.sub:first-child { margin-top: 4px; }
 
 @media (max-width: 1080px) {
   .topbar-quotes { display: none; }
 }
 
-/* One column, main first. The breakpoint is where the side column stops
-   being able to hold a table without the main one starving. */
-@media (max-width: 960px) {
+/* One column, main first.
+
+   1100px, not 960: MEASURED, by walking every element for scrollWidth >
+   clientWidth at a range of widths. At 1024 the two columns are ~594 and
+   ~382, and at 382 the six-column component-record table spills out of the
+   card -- silently, because nothing scrolls any more. The two-column band is
+   therefore narrow (1100-1180) and that is the honest range for it. */
+@media (max-width: 1100px) {
   .hero, .columns { grid-template-columns: 1fr; }
   .hero > .card { margin-bottom: 0; }
-  #strategy-panels > .strategy-grid,
-  .strategy-more .strategy-grid { grid-template-columns: repeat(auto-fit, minmax(216px, 1fr)); }
+  .strategy-grid.measured,
+  .strategy-grid.signalled { grid-template-columns: repeat(auto-fit, minmax(216px, 1fr)); }
   .col > .card:last-child { margin-bottom: 16px; }
 }
 
@@ -869,29 +895,113 @@ tr.benchmark-row td { background: rgba(127, 168, 216, 0.07); }
   #gs-ratio-context { display: none; }
 }
 
-/* The seven signal-driven books, behind a summary that states the result
-   rather than hiding it. See renderStrategies for why the split is
-   trading.MECHANICAL and not an aesthetic choice. */
-.strategy-more { margin-top: 12px; }
-.strategy-more > summary {
-  list-style: none;
-  cursor: pointer;
-  padding: 9px 12px;
-  border: 1px dashed var(--line);
-  border-radius: 10px;
-  font-size: 0.84rem;
+/* The note under each strategy group's heading. Carries the finding that used
+   to live in the fold's summary. */
+.group-note { margin: 0 0 10px; max-width: 62ch; }
+
+/* --- Kanal Finans mentions, as cards ----------------------------------- */
+/* Was an eight-column table. See renderKanalFinans for why the form changed:
+   seven short labels plus one paragraph of transcribed speech is not a table,
+   and in a 444px column the paragraph had nothing left to it. */
+.kf-mention {
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 10px 12px;
+  margin-bottom: 9px;
+}
+.kf-mention:last-of-type { margin-bottom: 0; }
+.kf-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+.kf-date { color: var(--muted); font-variant-numeric: tabular-nums; }
+.kf-asset {
   color: var(--text);
-  line-height: 1.45;
-  transition: border-color 150ms;
+  font-weight: 600;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
 }
-.strategy-more > summary::-webkit-details-marker { display: none; }
-.strategy-more > summary::before {
-  content: "▸";
-  color: var(--metal);
-  margin-right: 8px;
-  display: inline-block;
-  transition: transform 150ms;
+.kf-stance { font-weight: 700; }
+/* The levels the speaker actually gave. Absent ones are absent, not dashes --
+   a missing level means "unchanged", never "cancelled". */
+.kf-levels { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.kf-level {
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 2px 7px;
 }
-.strategy-more[open] > summary::before { transform: rotate(90deg); }
-.strategy-more > summary:hover { border-color: var(--metal-line); }
-.strategy-more[open] > summary { margin-bottom: 4px; }
+.kf-level i { color: var(--muted); font-style: normal; margin-right: 5px; }
+.kf-summary { margin: 8px 0 0; font-size: 0.84rem; line-height: 1.5; color: var(--text); }
+
+/* --- narrow screens: tables become rows of label/value ------------------ */
+/* Below this width no eight-column table fits, and the answer this page is
+   allowed to use is not a sideways scroll. Each row becomes its own small
+   block and every cell states its own column, from the `data-label` that
+   labelTableCells() copies off the <th> at render time.
+
+   The header row is hidden rather than removed: it is still the source of
+   every label below it, and screen readers still get the association from the
+   markup, which is unchanged. */
+@media (max-width: 700px) {
+  table thead { display: none; }
+  table, table tbody, table tr, table td { display: block; width: 100%; }
+  table tr {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 7px 10px;
+    margin-bottom: 8px;
+  }
+  table tbody tr:last-child { margin-bottom: 0; }
+  table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 14px;
+    border-bottom: none;
+    padding: 3px 0;
+    text-align: right;
+  }
+  table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.74rem;
+    text-align: left;
+    flex: 0 0 auto;
+  }
+  /* A cell with no label is a placeholder spanning the row ("henüz işlem
+     yok"); it keeps the plain centred treatment. */
+  table td:not([data-label]) { display: block; text-align: left; }
+  table td:first-child { text-align: right; }
+  /* The pending-row tint has to move to the block, or it paints one cell. */
+  tr.pending { background: var(--metal-tint); }
+  tr.pending td { background: none; }
+  tr.benchmark-row { background: rgba(127, 168, 216, 0.07); }
+  tr.benchmark-row td { background: none; }
+}
+
+/* Tables inside the two columns get tighter cells than the full-width ones.
+   Measured: at 1140px the eight-column trade log and the six-column component
+   record were spilling by 4-7px, and 3px per side across eight columns buys
+   back 48. The full-width backtest table keeps the roomier padding because it
+   has the width to spend. */
+.columns table th, .columns table td { padding: 7px 7px; }
+.columns table { font-size: 0.82rem; }
+
+/* The last two things that spilled, at 320px. Both are the same mistake in
+   two places: a fixed minimum that is wider than the smallest screen.
+   `min(Xpx, 100%)` lets the track collapse instead of overflowing. */
+.live-grid { grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); }
+@media (max-width: 420px) {
+  /* The explainer's term/definition grid stacks: a nowrap <dt> beside a
+     flexible <dd> sets a floor the viewport cannot meet. */
+  .explain-body dl { grid-template-columns: 1fr; gap: 2px 0; }
+  .explain-body dt { white-space: normal; margin-top: 6px; }
+}

@@ -304,6 +304,20 @@
              different claims; the panel has to say which one is on screen. -->
         <p class="muted small valuation-note" id="valuation-note">-</p>
 
+        <!-- The live books' own curve, from the day they opened. The measured
+             chart far above answers "did these rules work over 19.5 years";
+             this one answers "what have MY thousand dollars done", and no
+             panel could: a position box looks identical whether it was set
+             this morning or a month ago.
+
+             Rebuilt in the browser from `trades` and the daily
+             `price_at_prediction` series -- both already downloaded for the
+             average-cost replay, so the chart costs no extra round trip. -->
+        <h3 class="sub">Defterlerin seyri</h3>
+        <div class="series-toggle" id="live-toggle"></div>
+        <div class="chart-root" id="live-chart"></div>
+        <p class="muted small chart-readout" id="live-chart-note">-</p>
+
         <div id="strategy-panels"></div>
 
         <!-- The trade log. It was already being downloaded in full (the average
@@ -584,14 +598,11 @@
         </p>
 
         <h3 class="sub">Son görüşler</h3>
-        <div class="table-wrap">
-          <table id="kf-mentions-table">
-            <thead>
-              <tr><th>Tarih</th><th>Varlık</th><th>Görüş</th><th>Aksiyon</th><th>Hedef</th><th>Zarar-kes</th><th>Direnç</th><th>Özet</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <!-- Cards, not a table. Seven short labels and one paragraph of
+             transcribed speech are not eight comparable measures, and in this
+             column the paragraph had no width left to it. See
+             renderKanalFinans. -->
+        <div id="kf-mentions"></div>
 
         <h3 class="sub">Gerekçeler (makro temalar)</h3>
         <p class="muted small">

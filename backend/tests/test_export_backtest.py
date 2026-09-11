@@ -94,18 +94,45 @@ def test_every_exported_strategy_is_drawable(payload):
             assert name in colours, f"{key}/{name} has no series colour in chart.js"
 
 
-def test_every_drawable_strategy_is_listed_in_the_legend_order():
-    """chart.js's palette was validated pair-by-pair in BACKTEST_SERIES' order.
+def _series_list(name):
+    listed = re.search(rf"const {name} = \[(.*?)\];", read(APP_JS), re.S)
+    assert listed, f"{name} not found in app.js"
+    return re.findall(r'"(\w+)"', listed.group(1))
 
-    A strategy with a colour but no place in that list gets a hue and never a
-    chip, so it can never be turned on -- and the adjacency the colorblind
-    check scored would no longer be the adjacency on screen.
+
+def test_every_drawable_strategy_is_listed_in_the_legend_order():
+    """chart.js's palette was validated pair-by-pair in the legend's order.
+
+    A strategy with a colour but no place in a legend list gets a hue and
+    never a chip, so it can never be turned on -- and the adjacency the
+    colorblind check scored would no longer be the adjacency on screen.
+
+    LIVE_SERIES is the superset: the measured chart cannot show `claude` (no
+    backtest is possible) or `kanalfinans` (no archive), so both exist only on
+    the live books' chart.
     """
-    colours = set(re.findall(r"^\s{2}(\w+):\s*\"#", read(CHART_JS), re.M))
-    listed = re.search(r"const BACKTEST_SERIES = \[(.*?)\];", read(APP_JS), re.S)
-    assert listed
-    order = set(re.findall(r'"(\w+)"', listed.group(1)))
-    assert colours == order, f"colours {colours ^ order} are in one list and not the other"
+    colours = set(re.findall(r"^\s{2,4}(\w+):\s*\"#", read(CHART_JS), re.M))
+    live = set(_series_list("BACKTEST_SERIES")) | {"claude", "kanalfinans"}
+    assert colours == live, f"colours {colours ^ live} are in one list and not the other"
+
+
+def test_live_legend_extends_the_measured_one_rather_than_reordering_it():
+    """The two charts share their first eight slots, in order.
+
+    Colour follows the entity, so "blue is voltarget" has to hold in BOTH
+    charts -- a reader who learns the mapping on one and finds it repainted on
+    the other has learned nothing. Appending is also what keeps the validated
+    adjacency intact: slotting `claude` in beside its neighbour in STRATEGIES
+    put the tan next to the red and that pair failed the palette's
+    normal-vision floor.
+    """
+    measured = _series_list("BACKTEST_SERIES")
+    live_src = re.search(r"const LIVE_SERIES = (.*?);", read(APP_JS), re.S)
+    assert live_src, "LIVE_SERIES not found"
+    assert "...BACKTEST_SERIES" in live_src.group(1),         "LIVE_SERIES must spread BACKTEST_SERIES, not restate it"
+    appended = re.findall(r'"(\w+)"', live_src.group(1))
+    assert appended == ["claude", "kanalfinans"], appended
+    assert measured[:1] == ["voltarget"]
 
 
 def test_short_labels_exist_for_every_drawn_series():
@@ -114,8 +141,9 @@ def test_short_labels_exist_for_every_drawn_series():
     shorts = re.search(r"const BACKTEST_SHORT = \{(.*?)\};", read(APP_JS), re.S)
     assert shorts
     named = set(re.findall(r"(\w+):", shorts.group(1)))
-    listed = re.search(r"const BACKTEST_SERIES = \[(.*?)\];", read(APP_JS), re.S)
-    assert set(re.findall(r'"(\w+)"', listed.group(1))) | {"buyhold"} <= named
+    # LIVE_SERIES, not BACKTEST_SERIES: the live books' chart draws two more.
+    drawn = set(_series_list("BACKTEST_SERIES")) | {"claude", "kanalfinans", "buyhold"}
+    assert drawn <= named, f"no short label for {drawn - named}"
 
 
 # ---------------------------------------------------------------------------

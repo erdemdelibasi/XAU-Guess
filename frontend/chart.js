@@ -60,6 +60,15 @@ const SERIES_COLOURS = {
   ml:        "#008300",   // slot 6  green
   macro:     "#9085e9",   // slot 7  violet
   miners:    "#e66767",   // slot 8  red
+  // Slots 9-10 exist only for the LIVE books chart: `claude` cannot be
+  // backtested at all and `kanalfinans` follows a person rather than a rule,
+  // so neither appears in the measured chart. The ten were re-validated as a
+  // set in the legend order the chips actually use -- and that order is why
+  // `miners` stays at slot 8: with `claude` between macro and miners, the
+  // tan sat next to the red and the pair failed the normal-vision floor
+  // (dE 13.7 against a 15 minimum). Moving it two places fixed it at 19.3.
+  claude:      "#1f9aa8",   // slot 9   teal
+  kanalfinans: "#a86a2a",   // slot 10  tan
 };
 const BENCHMARK_COLOUR = "#b9ae99";   // muted ink, not a categorical slot
 
@@ -124,7 +133,7 @@ function niceTicks(min, max, count = 5) {
  * `series`  [{ key, label, values:[number|null] }]  -- aligned to `dates`
  * `yType`   "log" (equity) | "linear" (drawdown, percentages <= 0)
  */
-function timeSeriesPanel({ series, dates, width, height, yType, yFormat, zeroLine,
+function timeSeriesPanel({ series, dates, width, height, yType, yFormat, refLine = null,
                           xLabels = true }) {
   // padR holds the direct labels. Measured rather than guessed: the longest
   // is "Al-ve-tut" at 11px/600, which needs ~64px plus the 6px leader.
@@ -144,8 +153,13 @@ function timeSeriesPanel({ series, dates, width, height, yType, yFormat, zeroLin
     lo = snapLog(lo, "down");
     hi = snapLog(hi, "up");
   } else {
-    hi = Math.max(hi, 0);
-    lo = lo - (hi - lo) * 0.04;
+    // A reference line the data never reaches still has to be ON the axis --
+    // the drawdown panel's 0 and the live books' $1,000 start are both worth
+    // more than the 4% of headroom they cost.
+    if (refLine !== null) { hi = Math.max(hi, refLine); lo = Math.min(lo, refLine); }
+    const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.01 || 1;
+    hi += pad;
+    lo -= pad;
   }
 
   const xAt = (i) => padL + (dates.length < 2 ? plotW / 2 : (i / (dates.length - 1)) * plotW);
@@ -164,13 +178,35 @@ function timeSeriesPanel({ series, dates, width, height, yType, yFormat, zeroLin
       + ` dominant-baseline="middle">${esc(yFormat(v))}</text>`;
   }).join("");
 
-  // Year boundaries, thinned so labels never collide at phone width.
+  // The x labels adapt to the SPAN, because one rule cannot serve both charts
+  // here. Over 19.5 years the useful marks are year boundaries; over the live
+  // books' first week every point is the same year, and printing "2026" twice
+  // under a five-day curve tells the reader nothing about which day is which.
+  //
+  // Under ~400 days the labels become dates (DD.MM). A non-date entry -- the
+  // live chart's final "şimdi" point -- is printed verbatim rather than being
+  // sliced into "şimd".
+  const asDate = (d) => (/^\d{4}-\d{2}-\d{2}/.test(d) ? new Date(d) : null);
+  const first = asDate(dates[0]);
+  const lastReal = [...dates].reverse().find(asDate);
+  const spanDays = first && lastReal
+    ? (asDate(lastReal) - first) / 86400000 : Infinity;
+
   const yearAt = [];
-  let lastYear = null;
-  dates.forEach((d, i) => {
-    const y = d.slice(0, 4);
-    if (y !== lastYear) { yearAt.push({ i, y }); lastYear = y; }
-  });
+  if (spanDays < 400) {
+    // Every point is a candidate; the thinning below picks how many fit.
+    dates.forEach((d, i) => {
+      const t = asDate(d);
+      yearAt.push({ i, y: t ? `${String(t.getUTCDate()).padStart(2, "0")}.`
+                             + String(t.getUTCMonth() + 1).padStart(2, "0") : d });
+    });
+  } else {
+    let lastYear = null;
+    dates.forEach((d, i) => {
+      const y = d.slice(0, 4);
+      if (y !== lastYear) { yearAt.push({ i, y }); lastYear = y; }
+    });
+  }
   const everyN = Math.ceil(yearAt.length / Math.max(3, Math.floor(plotW / 62)));
   // Gridlines on both panels, the year TEXT only on the lower one. They are
   // stacked on one shared x-axis, so printing the years twice labels the
@@ -183,9 +219,9 @@ function timeSeriesPanel({ series, dates, width, height, yType, yFormat, zeroLin
          + ` text-anchor="middle">${y}</text>`
        : "")).join("");
 
-  const zero = zeroLine
-    ? `<line x1="${padL}" x2="${padL + plotW}" y1="${yAt(0).toFixed(1)}" y2="${yAt(0).toFixed(1)}"`
-      + ` stroke="${AXIS}" stroke-width="1"/>` : "";
+  const zero = refLine === null ? ""
+    : `<line x1="${padL}" x2="${padL + plotW}" y1="${yAt(refLine).toFixed(1)}"`
+      + ` y2="${yAt(refLine).toFixed(1)}" stroke="${AXIS}" stroke-width="1"/>`;
 
   // 2px lines; the benchmark dashed so it reads as a reference rather than a
   // competitor, and drawn FIRST so live strategies sit above it.
@@ -247,25 +283,57 @@ function timeSeriesPanel({ series, dates, width, height, yType, yFormat, zeroLin
  * where the measurable difference is. Side by side, a reader compares them;
  * stacked and aligned, they read as one statement about the same weeks.
  */
-function renderBacktestCharts(root, { dates, series, readout }) {
+function renderBacktestCharts(root, { dates, series, readout, panels = ["equity", "drawdown"] }) {
   const width = Math.max(280, root.clientWidth || 640);
   const tall = width > 620;
+  const money = (v) => "$" + v.toLocaleString("tr-TR", { maximumFractionDigits: 0 });
 
-  const equity = series.map((s) => ({ ...s, values: s.equity }));
-  const drawdown = series.map((s) => ({ ...s, values: s.drawdown }));
+  // `equity` is drawn on a LOG axis when it spans a decade (the 19.5-year
+  // backtest runs $1,000 -> $9,700) and a LINEAR one when it does not (the
+  // live books have moved a couple of percent). Log on a $977-$1,002 range
+  // magnifies rounding into what looks like structure.
+  const values = series.flatMap((s) => s.equity).filter((v) => v != null && isFinite(v));
+  const spansDecade = values.length && Math.max(...values) / Math.min(...values) > 2.5;
 
-  root.innerHTML =
-    `<div class="chart-panel" data-panel="equity">`
-    + `<div class="chart-label">Sermaye &mdash; $1.000 başlangıç, logaritmik eksen</div>`
-    + timeSeriesPanel({ series: equity, dates, width, height: tall ? 250 : 200, xLabels: false,
-                        yType: "log", yFormat: (v) => "$" + v.toLocaleString("tr-TR") })
-    + `</div>`
-    + `<div class="chart-panel" data-panel="drawdown">`
-    + `<div class="chart-label">Düşüş &mdash; zirveden ne kadar aşağıda</div>`
-    + timeSeriesPanel({ series: drawdown, dates, width, height: tall ? 190 : 150,
-                        yType: "linear", zeroLine: true,
-                        yFormat: (v) => (v < 0 ? "−%" : "%") + Math.abs(Math.round(v)) })
-    + `</div>`;
+  const SPEC = {
+    equity: {
+      label: spansDecade
+        ? "Sermaye &mdash; $1.000 başlangıç, logaritmik eksen"
+        : "Sermaye &mdash; $1.000 başlangıç",
+      values: (s) => s.equity,
+      height: tall ? 250 : 200,
+      yType: spansDecade ? "log" : "linear",
+      yFormat: money,
+      // The line every book started on. On a linear axis a few percent of
+      // movement fills the panel, and without the reference a book that is
+      // down 2% looks like a collapse.
+      refLine: spansDecade ? null : 1000,
+    },
+    drawdown: {
+      label: "Düşüş &mdash; zirveden ne kadar aşağıda",
+      values: (s) => s.drawdown,
+      height: tall ? 190 : 150,
+      yType: "linear",
+      refLine: 0,
+      yFormat: (v) => (v < 0 ? "−%" : "%") + Math.abs(Math.round(v)),
+    },
+  };
+
+  root.innerHTML = panels.map((name, i) => {
+    const spec = SPEC[name];
+    return `<div class="chart-panel" data-panel="${name}">`
+      + `<div class="chart-label">${spec.label}</div>`
+      + timeSeriesPanel({
+          series: series.map((s) => ({ ...s, values: spec.values(s) })),
+          dates, width, height: spec.height, yType: spec.yType,
+          refLine: spec.refLine, yFormat: spec.yFormat,
+          // Years are printed once, under the LAST panel -- the panels are
+          // stacked on one shared x-axis and labelling it twice reads as two
+          // separate charts.
+          xLabels: i === panels.length - 1,
+        })
+      + `</div>`;
+  }).join("");
 
   wireCrosshair(root, dates, series, readout);
 }

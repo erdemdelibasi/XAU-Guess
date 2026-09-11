@@ -65,6 +65,21 @@ const STRATEGIES = [
     desc: "Tunç Şatıroğlu ne derse onu yapar. Tam giriş/çıkış, zarar-kes takipli." },
 ];
 
+// Order is the legend order AND the order chart.js's palette was validated
+// in, adjacent pair by adjacent pair. Reordering this list silently changes
+// which hues sit next to each other and invalidates that check.
+const BACKTEST_SERIES = ["voltarget", "trend", "defensive", "ensemble",
+                         "technical", "ml", "macro", "miners"];
+
+// What the line is called ON the plot, where the label has to fit inside the
+// right margin rather than a legend row. "Oynaklık hedefi" clipped to
+// "Oynaklık h" at the first render, which is worse than no label.
+const BACKTEST_SHORT = {
+  buyhold: "Al-ve-tut", voltarget: "Oynaklık", trend: "Trend", defensive: "Savunma",
+  ensemble: "Harman", technical: "Teknik", ml: "ML", macro: "Makro", miners: "Madenci",
+  claude: "Claude", kanalfinans: "Kanal F.",
+};
+
 const STARTING_CASH = 1000;
 
 // Resolved rows needed before the track-record panel is willing to rank the
@@ -1072,6 +1087,125 @@ function nextActionFor(state, price, exposure, value) {
   };
 }
 
+/* ------------------------------------------------- the live books, charted */
+
+// Legend order for the live chart. The first eight are BACKTEST_SERIES, in
+// the same order and the same colours, so "blue is voltarget" survives
+// between the two charts. `claude` and `kanalfinans` only exist here -- the
+// first cannot be backtested at all, the second follows a person rather than
+// a rule -- and they are APPENDED rather than slotted in beside their
+// neighbours in STRATEGIES: with `claude` sitting between macro and miners,
+// the tan and the red became adjacent and that pair failed the palette's
+// normal-vision floor. See chart.js.
+const LIVE_SERIES = [...BACKTEST_SERIES, "claude", "kanalfinans"];
+
+let liveSelection = new Set(["voltarget", "ensemble"]);
+
+/* Replays `trades` into a daily equity curve per strategy.
+
+   The books hold ounces, so their value only exists against a price, and the
+   price series this uses is `predictions.price_at_prediction` -- one row per
+   trading day, written by the same run that placed the day's trades, at the
+   same moment, from the same feed. Marking the books with anything else (a
+   spot quote, a close from another series) would price a position in a
+   currency it was never bought in; it is the same futures-vs-spot mistake
+   the valuation note warns about, a day at a time.
+
+   Trades are cut off at the END of each point's day: predict.py writes the
+   prediction first and trades a second later, so a cutoff at the prediction's
+   own timestamp would show every book one day behind its own fills. */
+function liveEquitySeries(assetKey, markPrice) {
+  const days = (cache.predictions[assetKey] ?? [])
+    .filter((r) => r.created_at && r.price_at_prediction)
+    .slice().reverse();                       // fetched newest-first
+  if (!days.length) return null;
+
+  const trades = (cache.trades ?? [])
+    .filter((t) => t.asset === assetKey)
+    .map((t) => ({ ...t, at: new Date(t.created_at).getTime() }))
+    .sort((a, b) => a.at - b.at);
+
+  const points = days.map((row) => ({
+    date: String(row.created_at).slice(0, 10),
+    cutoff: new Date(String(row.created_at).slice(0, 10) + "T23:59:59.999Z").getTime(),
+    price: Number(row.price_at_prediction),
+  }));
+  // "Now", at the price every other panel on this card is marked at, so the
+  // last point of the chart and the number in the box below it agree.
+  if (markPrice > 0) {
+    points.push({ date: "şimdi", cutoff: Date.now(), price: markPrice });
+  }
+
+  const series = LIVE_SERIES.concat("buyhold").map((key) => {
+    let cash = STARTING_CASH, ounces = 0, i = 0;
+    const mine = trades.filter((t) => t.strategy === key);
+    const equity = points.map((pt) => {
+      while (i < mine.length && mine[i].at <= pt.cutoff) {
+        const t = mine[i++];
+        const gross = Number(t.usd_amount) || 0;
+        const qty = Number(t.ounce_amount) || 0;
+        if (t.side === "BUY") { cash -= gross; ounces += qty; }
+        else { cash += gross - (Number(t.fee_usd) || 0); ounces -= qty; }
+      }
+      return cash + ounces * pt.price;
+    });
+    return { key, label: backtestLabel(key), short: BACKTEST_SHORT[key] ?? key, equity };
+  });
+
+  return { dates: points.map((p) => p.date), series };
+}
+
+function renderLiveChart(asset, price) {
+  const root = document.getElementById("live-chart");
+  const toggle = document.getElementById("live-toggle");
+  const note = document.getElementById("live-chart-note");
+  if (!root) return;
+
+  const built = liveEquitySeries(currentAsset, price);
+  if (!built || built.dates.length < 2) {
+    root.innerHTML = "";
+    toggle.innerHTML = "";
+    note.textContent = "Defterler yeni açıldı — eğri için en az iki seans gerekiyor.";
+    return;
+  }
+
+  toggle.innerHTML = LIVE_SERIES.map((key) => {
+    const on = liveSelection.has(key);
+    return `<button class="chip${on ? " on" : ""}" data-live-series="${key}"`
+      + ` style="--chip:${Viz.colourFor(key)}" aria-pressed="${on}">`
+      + `${esc(backtestLabel(key))}</button>`;
+  }).join("");
+
+  const shown = ["buyhold", ...LIVE_SERIES.filter((k) => liveSelection.has(k))];
+  const series = shown
+    .map((key) => built.series.find((s) => s.key === key))
+    .filter(Boolean);
+
+  const readout = (index) => {
+    if (index === null) {
+      note.innerHTML = `Her defter <strong>$1.000</strong> ile ve aynı gün başladı. `
+        + `Kesikli gri çizgi al-ve-tut. Grafiğin üzerinde gezinerek bir günü okuyabilirsin.`;
+      return;
+    }
+    note.innerHTML = `<span class="readout-date">${esc(built.dates[index])}</span> `
+      + series.map((s) =>
+          `<span class="readout-item"><i style="background:${Viz.colourFor(s.key)}"></i>`
+          + `${esc(s.label)} <strong>${fmtUsd(s.equity[index], 2)}</strong></span>`).join(" ");
+  };
+
+  Viz.renderBacktestCharts(root, { dates: built.dates, series, readout, panels: ["equity"] });
+  readout(null);
+}
+
+document.addEventListener("click", (event) => {
+  const chip = event.target.closest("#live-toggle .chip");
+  if (!chip) return;
+  const key = chip.dataset.liveSeries;
+  if (liveSelection.has(key)) liveSelection.delete(key);
+  else liveSelection.add(key);
+  renderLiveChart(ASSETS[currentAsset], valuationPrice(currentAsset).price);
+});
+
 function renderStrategies(portfolios, price, asset, costBasis) {
   const mine = portfolios.filter((p) => p.asset === currentAsset);
   const byKey = new Map(mine.map((p) => [p.strategy, p]));
@@ -1189,16 +1323,28 @@ function renderStrategies(portfolios, price, asset, costBasis) {
     ` &mdash; ama defterler <strong>${days} gün</strong>lük, yani bu sıralama henüz `
     + `bir ölçüm değil. Ölçülmüş sıralama yukarıdaki 19,5 yıllık grafikte.`;
 
+  // Two labelled groups, BOTH fully visible. An earlier version folded the
+  // signalled seven into a <details>; nothing on this page is hidden behind a
+  // click except the "what does this mean" explainers, because a panel that
+  // must be opened is a panel read once.
+  //
+  // The separation still carries the finding -- it is a heading and a
+  // sentence rather than a fold.
   document.getElementById("strategy-panels").innerHTML = `
-    <div class="strategy-grid">${measured.map(panelFor).join("")}</div>
-    <details class="strategy-more">
-      <summary>
-        <strong>${signalled.length} sinyal defteri</strong> &mdash; yön tahminine göre
-        pozisyon alanlar. Şu an <strong>${ahead}</strong> tanesi al-ve-tut'un
-        üzerinde${age}
-      </summary>
-      <div class="strategy-grid">${signalled.map(panelFor).join("")}</div>
-    </details>`;
+    <h3 class="sub">Ölçülen risk kuralları</h3>
+    <p class="muted small group-note">
+      Hiçbiri tahmin yapmaz &mdash; gerçekleşen oynaklığa ve fiyatın kendi uzun
+      ortalamasına tepki verirler. Alınabilir ETF üzerinde al-ve-tut'u geçenlerin
+      biri hariç hepsi bu gruptan çıktı.
+    </p>
+    <div class="strategy-grid measured">${measured.map(panelFor).join("")}</div>
+
+    <h3 class="sub">Sinyal defterleri</h3>
+    <p class="muted small group-note">
+      Yön tahminine göre pozisyon alanlar. Şu an <strong>${ahead}</strong>/${signalled.length}
+      tanesi al-ve-tut'un üzerinde${age}
+    </p>
+    <div class="strategy-grid signalled">${signalled.map(panelFor).join("")}</div>`;
 }
 
 // How long the paper books have been running, from the first fill on record.
@@ -1283,34 +1429,60 @@ function renderHistory(rows, asset) {
   summary.textContent = scoreboard + verdict;
 }
 
+/* A CARD LIST, not a table -- and that is a form correction rather than a
+   layout workaround.
+
+   The eight columns (date, asset, stance, action, target, stop, resistance,
+   summary) were never eight comparable measures. Seven are short labels and
+   levels, and the eighth is a paragraph of transcribed speech; a table makes
+   the paragraph fight six numeric columns for width and loses. In the 444px
+   sidebar this card now lives in, no amount of tightening fits it, and the
+   previous answer -- scroll it sideways -- hid whichever columns happened to
+   come last behind a gesture most readers never make.
+   
+   As cards the levels become chips that wrap, the summary gets the full width
+   it needs, and nothing is off screen at any viewport. */
 function renderKanalFinans(mentions, themes) {
-  const body = document.querySelector("#kf-mentions-table tbody");
+  const box0 = document.getElementById("kf-mentions");
   // GENEL ("kıymetli madenler", neither metal named) applies to both tabs;
   // ALTIN/GUMUS belong on their own tab only. Without this filter every tab
-  // showed the same mixed list and the "Varlık" column did the sorting a
-  // reader expects the tab strip itself to do.
+  // showed the same mixed list and the asset label did the sorting a reader
+  // expects the tab strip itself to do.
   const wanted = currentAsset === "gold" ? "ALTIN" : "GUMUS";
   const filtered = mentions.filter((m) => m.asset === wanted || m.asset === "GENEL");
+
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="8" class="silenced">Henüz işlenmiş video yok.</td></tr>`;
+    box0.innerHTML = `<p class="muted small">Henüz işlenmiş video yok.</p>`;
   } else {
-    body.innerHTML = filtered.slice(0, 12).map((m) => {
+    box0.innerHTML = filtered.slice(0, 12).map((m) => {
       const stanceClass = m.stance === "UP" ? "up-text" : m.stance === "DOWN" ? "down-text" : "silenced";
       // Every field that is not one of this file's own constants goes through
       // esc(): `summary` is Claude's transcription of speech and can contain
       // anything a person said out loud, angle brackets included.
       const action = String(m.action ?? "").toLowerCase();
+      // Only the levels the speaker actually gave. An always-present row of
+      // dashes says "he mentioned a stop and it was empty", which is the
+      // opposite of what a missing level means here -- see the "eksik =
+      // değişmedi" rule in kanal_finans_trading.
+      const levels = [
+        ["hedef", m.ounce_target],
+        ["zarar-kes", m.stop_loss_price],
+        ["direnç", m.resistance_price],
+      ].filter(([, v]) => v)
+       .map(([label, v]) => `<span class="kf-level"><i>${label}</i>${fmtUsd(v)}</span>`)
+       .join("");
+
       return `
-        <tr>
-          <td>${fmtDate(m.published_at)}</td>
-          <td>${KF_ASSET_LABEL[m.asset] ?? esc(m.asset)}</td>
-          <td class="${stanceClass}">${KF_STANCE[m.stance] ?? esc(m.stance)}</td>
-          <td><span class="action action-${esc(action)}">${KF_ACTION[m.action] ?? esc(m.action)}</span></td>
-          <td class="num">${m.ounce_target ? fmtUsd(m.ounce_target) : "-"}</td>
-          <td class="num">${m.stop_loss_price ? fmtUsd(m.stop_loss_price) : "-"}</td>
-          <td class="num">${m.resistance_price ? fmtUsd(m.resistance_price) : "-"}</td>
-          <td class="summary-cell">${esc(m.summary)}</td>
-        </tr>`;
+        <article class="kf-mention">
+          <div class="kf-head">
+            <span class="kf-date">${fmtDate(m.published_at)}</span>
+            <span class="kf-asset">${KF_ASSET_LABEL[m.asset] ?? esc(m.asset)}</span>
+            <span class="${stanceClass} kf-stance">${KF_STANCE[m.stance] ?? esc(m.stance)}</span>
+            <span class="action action-${esc(action)}">${KF_ACTION[m.action] ?? esc(m.action)}</span>
+          </div>
+          ${levels ? `<div class="kf-levels">${levels}</div>` : ""}
+          <p class="kf-summary">${esc(m.summary)}</p>
+        </article>`;
     }).join("");
   }
 
@@ -1731,23 +1903,11 @@ function renderToday(portfolios, price, asset, row) {
 // actually hold. Everything else is one click away.
 let backtestSelection = new Set([HEADLINE_STRATEGY, "ensemble"]);
 
-// Order is the legend order AND the order chart.js's palette was validated
-// in, adjacent pair by adjacent pair. Reordering this list silently changes
-// which hues sit next to each other and invalidates that check.
-const BACKTEST_SERIES = ["voltarget", "trend", "defensive", "ensemble",
-                         "technical", "ml", "macro", "miners"];
 
 function backtestLabel(key) {
   return STRATEGIES.find((s) => s.key === key)?.label ?? key;
 }
 
-// What the line is called ON the plot, where the label has to fit inside the
-// right margin rather than a legend row. "Oynaklık hedefi" clipped to
-// "Oynaklık h" at the first render, which is worse than no label.
-const BACKTEST_SHORT = {
-  buyhold: "Al-ve-tut", voltarget: "Oynaklık", trend: "Trend", defensive: "Savunma",
-  ensemble: "Harman", technical: "Teknik", ml: "ML", macro: "Makro", miners: "Madenci",
-};
 
 function renderBacktest(asset) {
   const card = document.getElementById("backtest-card");
@@ -1821,6 +1981,7 @@ function renderBacktest(asset) {
         <td class="num">${fmtUsd(m.fees, 0)}</td>
       </tr>`;
     }).join("");
+  labelTableCells(card);
 
   const beat = BACKTEST_SERIES.filter((k) => payload.strategies[k]
     && payload.strategies[k].calmar > bench.calmar);
@@ -1868,6 +2029,34 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => renderBacktest(ASSETS[currentAsset]), 150);
 });
 
+/* Stamps every table cell with the header text above it.
+
+   Needed because below ~700px no eight-column table fits a phone, and the
+   answer this page is allowed to use is NOT a sideways scroll -- the rows
+   turn into "label: value" blocks instead (see style.css). That needs each
+   cell to carry its own label.
+
+   Done by READING the <th> row rather than by having each render function
+   write `data-label` itself. Six different functions emit table rows here,
+   and a label typed out a second time next to the value is a label that
+   drifts from its header the first time someone renames a column. This
+   cannot drift: it is the header, at render time.
+
+   Cells that span (the "no rows yet" placeholder) are skipped -- they have no
+   single header and a label on them would read as a column that does exist. */
+function labelTableCells(root = document) {
+  for (const table of root.querySelectorAll("table")) {
+    const headers = [...table.querySelectorAll("thead th")].map((th) => th.textContent.trim());
+    if (!headers.length) continue;
+    for (const row of table.querySelectorAll("tbody tr")) {
+      [...row.cells].forEach((cell, i) => {
+        if (cell.colSpan > 1) return;
+        if (headers[i]) cell.setAttribute("data-label", headers[i]);
+      });
+    }
+  }
+}
+
 function renderAll() {
   const asset = ASSETS[currentAsset];
   // Repaints every asset-scoped card in the selected metal's colour. The
@@ -1884,6 +2073,7 @@ function renderAll() {
   renderComponents(row, asset);
   renderRecords(cache.records, asset, row);
   renderStrategies(cache.portfolios, mark.price, asset, cache.costBasis);
+  renderLiveChart(asset, mark.price);
   renderValuationNote(asset, mark);
   renderTrades(cache.trades, asset);
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
@@ -1891,6 +2081,9 @@ function renderAll() {
   // Asset-scoped -- see renderEtfBooks. Rendered from renderAll anyway
   // so a tab switch repaints it with whatever the price loop last had.
   renderEtfBooks(cache.portfolios, cache.live);
+  // LAST, and after every table on the page has been written. See
+  // labelTableCells: the narrow-screen layout reads these labels.
+  labelTableCells();
 }
 
 /* ------------------------------------------------------------------ load */
@@ -1937,8 +2130,13 @@ async function loadData() {
     // trip to every five-minute cycle for a file that is fetched once.
     const [, gold, silver, portfolios, trades, records, mentions, themes] = await Promise.all([
       loadBacktest(),
-      api("predictions?select=*&asset=eq.gold&order=target_date.desc&limit=30"),
-      api("predictions?select=*&asset=eq.silver&order=target_date.desc&limit=30"),
+      // 400, not 30. The track-record table shows a window, but the live
+      // equity curve is rebuilt from EVERY row -- each one is a day's mark
+      // price -- so a 30-row cap would quietly truncate the chart to its last
+      // six weeks about a month from now, with nothing on screen saying so.
+      // One row per trading day per metal: 400 is roughly a year and a half.
+      api("predictions?select=*&asset=eq.gold&order=target_date.desc&limit=400"),
+      api("predictions?select=*&asset=eq.silver&order=target_date.desc&limit=400"),
       api("portfolios?select=*"),
       // Ascending and complete: the average-cost replay has to see every fill
       // in the order it happened, so this is the one query that pages.
@@ -2077,6 +2275,7 @@ async function refreshPrices() {
     const asset = ASSETS[currentAsset];
     const mark = valuationPrice(currentAsset);
     renderStrategies(cache.portfolios, mark.price, asset, cache.costBasis);
+  renderLiveChart(asset, mark.price);
     renderValuationNote(asset, mark);
     // The ETF books are ounces x price too, and their price arrives on this
     // same tick. Left out, the card would sit at whatever loadData last saw
