@@ -178,6 +178,11 @@ const TV_FUTURES = { gold: "COMEX:GC1!", silver: "COMEX:SI1!" };
 // that calculation would let a delayed listing permanently brand the
 // real-time spot cards as delayed.
 const TV_ETFS = { gld: "AMEX:GLD" };
+// Measured 2026-09-11: AMEX:GLD comes back `delayed_streaming_900`, i.e. 15
+// minutes behind, against the futures legs' 600. Printed on the card for the
+// same reason the futures delay is -- a value that lags by a quarter hour and
+// one that does not are different claims, and the panel has to say which.
+const ETF_DELAY_MINUTES = 15;
 const TROY_OUNCE_GRAMS = 31.1034768;
 
 /* Live prices refresh on their own fast loop, separate from Supabase.
@@ -1302,6 +1307,7 @@ function renderEtfBooks(portfolios, live) {
   }).join("");
 
   note.innerHTML = `${etf.tv} $${price.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    + ` <span class="muted">(${ETF_DELAY_MINUTES} dk gecikmeli)</span>`
     + ` &mdash; her defter $${STARTING_CASH.toLocaleString("tr-TR")} ile başladı,`
     + ` işlem başına $1,50 komisyon ödüyor.`
     + ` <strong>Calmar kâr değildir:</strong> ölçümde al-ve-tut'u Calmar'da geçen`
