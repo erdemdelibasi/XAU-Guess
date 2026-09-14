@@ -1042,6 +1042,51 @@ tr.benchmark-row td { background: rgba(127, 168, 216, 0.07); }
 .columns table th, .columns table td { padding: 7px 7px; }
 .columns table { font-size: 0.82rem; }
 
+/* Tighter padding was not enough for the six-column component-record table
+   (Bileşen sicili): the side column sits at 385-416px of usable width on
+   EVERY desktop size, because #app caps at 1180px -- a 4K monitor gives it no
+   more room than a 1200px laptop does. A `max-width` media query cannot see
+   this: the viewport is wide, only the column is narrow. Below, the same
+   label/value block layout the page already uses under a 700px-wide viewport
+   is repeated, driven by a size container query keyed to the column itself
+   instead of the window -- so it also self-corrects if the column ratio in
+   `.columns` ever changes, rather than needing a second measured breakpoint. */
+.col-side .table-wrap { container-type: inline-size; }
+
+@container (max-width: 500px) {
+  table thead { display: none; }
+  table, table tbody, table tr, table td { display: block; width: 100%; }
+  table tr {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 7px 10px;
+    margin-bottom: 8px;
+  }
+  table tbody tr:last-child { margin-bottom: 0; }
+  table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 14px;
+    border-bottom: none;
+    padding: 3px 0;
+    text-align: right;
+  }
+  table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.74rem;
+    text-align: left;
+    flex: 0 0 auto;
+  }
+  table td:not([data-label]) { display: block; text-align: left; }
+  table td:first-child { text-align: right; }
+  tr.pending { background: var(--metal-tint); }
+  tr.pending td { background: none; }
+  tr.benchmark-row { background: rgba(127, 168, 216, 0.07); }
+  tr.benchmark-row td { background: none; }
+}
+
 /* The last two things that spilled, at 320px. Both are the same mistake in
    two places: a fixed minimum that is wider than the smallest screen.
    `min(Xpx, 100%)` lets the track collapse instead of overflowing. */
