@@ -572,6 +572,106 @@
         </details>
       </section>
 
+      <!-- Kırılım Takibi -- the breakout regime (order flow / anchored VWAP /
+           volume profile), with RSI, MACD, CCI, momentum, stochastic and
+           Fibonacci as confirmations.
+
+           IT IS IN THE INPUT COLUMN AND THAT IS THE MEASUREMENT, NOT A
+           PREFERENCE. The main column is results -- books with money on them
+           and rules measured to be worth running. research/flow.py scored
+           this rule against a bar declared before the results were seen and
+           it did not clear it: on gold it beat buy-and-hold on Calmar and
+           finished a third behind it in money; on silver it lost on both.
+           So there is no `breakout` portfolio, and a full-width card would
+           say the page backs this more than the books it does back.
+
+           It gets a chart anyway because a level is not a number: "price is
+           $392 and the value area tops at $405" is arithmetic the reader has
+           to do, while the same two marks on one axis is a glance. -->
+      <section class="card asset-scoped breakout" id="breakout-card">
+        <div class="prediction-head">
+          <h2>Kırılım Takibi &mdash; <span id="breakout-asset-name">Altın</span></h2>
+          <span class="muted small" id="breakout-updated">-</span>
+        </div>
+        <p class="muted small">
+          Bir <strong>kırılımda pozisyona girip</strong>, trend gerçekten kırılana ya da
+          stop seviyesine değene kadar <strong>tutan</strong> kural. Kararı üç şey veriyor:
+          <strong>emir akışı</strong>, <strong>çapalı VWAP</strong> ve
+          <strong>hacim profili</strong>; RSI, MACD, CCI, momentum, stokastik ve Fibonacci
+          yalnızca <em>onaylıyor</em>.
+        </p>
+
+        <div id="breakout-state">-</div>
+
+        <div class="chart-root" id="breakout-chart"></div>
+        <p class="muted small chart-readout" id="breakout-readout">-</p>
+
+        <h3 class="sub">Seviyeler</h3>
+        <div id="breakout-levels"></div>
+
+        <h3 class="sub">Onay göstergeleri</h3>
+        <p class="muted small">
+          Altısı da kendi <em>geleneksel</em> nötr noktasına göre okunuyor (RSI 50, MACD
+          histogramı sıfır, CCI &plusmn;100, momentum sıfır, stokastik 50, Fibonacci %38,2
+          düzeltmesi). Bunlar sinyal değil <strong>onay</strong>: giriş için en az
+          <span id="breakout-minconf">-</span> tanesinin olumlu olması gerekiyor.
+        </p>
+        <div class="table-wrap">
+          <table id="breakout-votes-table">
+            <thead>
+              <tr><th>Gösterge</th><th>Okuma</th><th>Eşik</th><th>Oy</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- The measured result, on the card, in the same type as everything
+             else. It is a loss and it says so. -->
+        <p class="verdict" id="breakout-verdict">-</p>
+        <p class="muted small footnote" id="breakout-note">-</p>
+
+        <details class="explain">
+          <summary>Bu kart ne diyor, neye yaramaz?</summary>
+          <div class="explain-body">
+            <p><strong>Ne diyor:</strong> sayfadaki diğer her şey &ldquo;5 seans sonra ne
+            olacak&rdquo; sorusunu cevaplıyor. Bu kart başka bir soruyu cevaplıyor:
+            <strong>şu anda pozisyonda mıyım, ve beni oradan ne çıkarır.</strong>
+            Pozisyon günlerce, haftalarca sürebilir; her sabah yeniden ayarlanmaz.</p>
+            <dl>
+              <dt>Hacim profili</dt>
+              <dd>Son 60 seansın hacmi fiyata göre dağıtılır. Hacmin %70'ini içeren aralık
+                  <strong>değer alanı</strong>dır (VAL&ndash;VAH), en çok işlem gören fiyat
+                  <strong>POC</strong>'tur. Kırılım = kapanışın VAH'ın üstüne çıkması.</dd>
+              <dt>Çapalı VWAP</dt>
+              <dd>Son 1 yılın <em>en düşük kapanışından</em> bu yana hacimle ağırlıklı
+                  ortalama fiyat. Alıcıların o dipten beri ödediği ortalama &mdash; altına
+                  düşmek trendin kırılması sayılıyor.</dd>
+              <dt>Emir akışı</dt>
+              <dd><strong>Vekildir, gerçek emir defteri değildir.</strong> Gerçek emir akışı
+                  tik tik alış/satış kaydıdır; bu projenin böyle bir kaynağı yok. Günlük
+                  mumun verdiği en iyi yaklaşım, kapanışın gün aralığının neresinde
+                  olduğunun hacimle ağırlıklandırılmasıdır (Chaikin para akışı).</dd>
+              <dt>Stop</dt>
+              <dd>Girişten sonraki en yüksek kapanışın belirli bir oynaklık katı altı.
+                  <strong>Yalnızca yukarı hareket eder</strong> &mdash; fiyatı aşağı takip
+                  eden bir seviye stop değil, dipte satış makinesidir.</dd>
+            </dl>
+            <p><strong>Hacim neden ETF'ten okunuyor:</strong> Yahoo'nun vadeli hacmi bu
+            proje için kullanılamaz durumda &mdash; <strong>ölçüldü</strong>. GC=F'in aynı
+            250 seansı, günler arayla iki çekişte <strong>%3,6 oranında</strong> tutuyor
+            (korelasyon &minus;0,10; medyan 622'ye karşı 170.868 kontrat). SI=F ise kararlı
+            ama her derinlikte gerçek dışı: medyan 40&ndash;124 kontrat, oysa COMEX gümüşü
+            günde ~60 bin işliyor. GLD ve SLV üç testi de geçiyor. Yani fiyatı metalin,
+            hacmi fonun &mdash; ve bu ayrım kartta açıkça yazılı.</p>
+            <p><strong>Neye yaramaz:</strong> ölçüm sonucu yukarıda, kartın kendi
+            üzerindedir. Kısaca: <strong>bu kural al-ve-tut'u geçmiyor.</strong> Altında
+            düşüşü ciddi şekilde azaltıyor ama parada geride kalıyor; gümüşte her iki
+            ölçüde de geride. Bu yüzden bu kurala bağlı <em>hiçbir kâğıt portföy yok</em> ve
+            sayfadaki hiçbir pozisyon buna göre ayarlanmıyor.</p>
+          </div>
+        </details>
+      </section>
+
       <!-- Kanal Finans: a person's opinion, reported not adopted. Styled
            differently from the model's own output so the two are never confused,
            and labelled in Turkish ("Olumlu/Olumsuz") where the model's own calls

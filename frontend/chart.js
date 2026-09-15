@@ -75,6 +75,14 @@ const SERIES_COLOURS = {
   kanalfinans: "#a86a2a",   // slot 10  tan
 };
 const BENCHMARK_COLOUR = "#b9ae99";   // muted ink, not a categorical slot
+// The price itself, on the breakout panel. Declared HERE beside the
+// benchmark rather than inside BREAKOUT_INK because it belongs to the same
+// category: an ink for something that is not one of the competing series.
+// tests/test_export_backtest.py reads the indented `name: "#hex"` entries
+// as THE categorical palette and compares them against the legend lists --
+// so a non-series hue written in that shape is not just untidy, it breaks a
+// check that exists to catch a series with a colour and no chip.
+const PRICE_COLOUR = "#f2ede4";      // --text; the subject, not a slot
 
 const AXIS = "#6f6552";
 const GRID = "rgba(255,255,255,0.06)";
@@ -339,6 +347,199 @@ function renderBacktestCharts(root, { dates, series, panels = ["equity", "drawdo
   }).join("");
 }
 
+/* ------------------------------------------------- the breakout panel */
+
+/* A PRICE chart, which is a different animal from the two equity panels
+   above, and the differences are all consequences of that.
+
+   Those charts compare competing books on one axis, so every line is a
+   categorical series and the reader's question is "which one is higher". Here
+   there is one subject -- the price -- and everything else is a LEVEL drawn
+   against it. Levels are not competitors, so:
+
+     * The price is the brightest mark on the panel and is NOT one of the ten
+       categorical slots, for the same reason `buyhold` is not one: giving the
+       thing being measured a competitor's colour puts it into the comparison
+       it is the subject of.
+     * The value area is a BAND, not two lines. It is one object -- the range
+       the market accepted over the trailing quarter -- and drawing its edges
+       as separate series would invite reading "price crossed VAH" as a line
+       crossing rather than as leaving a region.
+     * Position is shaded behind everything. "The rule was long here" is a
+       property of the time axis, not a value on the price axis, and a line
+       at some arbitrary height would have claimed otherwise.
+
+   The four accent hues are SLOTS 1, 3, 4 and 8 of the palette already
+   validated on this card surface. No new hue is introduced here -- that is
+   the claim, and it is a weaker one than "this combination was validated",
+   which would need the validator re-run on these four together. */
+
+const BREAKOUT_INK = {
+  price: PRICE_COLOUR,               // the subject, deliberately not a slot
+  avwap: SERIES_COLOURS.voltarget,   // slot 1, blue
+  area: SERIES_COLOURS.ensemble,     // slot 4, yellow -- the value area
+  stop: SERIES_COLOURS.miners,       // slot 8, red
+  position: SERIES_COLOURS.defensive, // slot 3, aqua -- the "long here" band
+};
+
+function breakoutPanel({ dates, rows, width, height, yFormat }) {
+  const padL = 52, padR = 66, padT = 10, padB = 20;
+  const w = Math.max(280, width), h = height;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const n = rows.length;
+  if (n < 2) return "";
+
+  const pool = [];
+  rows.forEach((r) => ["close", "avwap", "vah", "val", "stop"].forEach((k) => {
+    if (r[k] != null && isFinite(r[k])) pool.push(r[k]);
+  }));
+  if (!pool.length) return "";
+  let lo = Math.min(...pool), hi = Math.max(...pool);
+  const pad = (hi - lo) * 0.06 || hi * 0.01 || 1;
+  lo -= pad; hi += pad;
+
+  const xAt = (i) => padL + (i / (n - 1)) * plotW;
+  const yAt = (v) => padT + plotH - ((v - lo) / (hi - lo || 1)) * plotH;
+
+  // 6, not the equity panel's 4, and it is a fix rather than a preference.
+  // niceTicks rounds the step UP to the next 1-2-5 multiple, so a request for
+  // 4 can return 2: gold's window spans $309-$520, whose raw step of 52.8
+  // rounds to 100 and leaves exactly two gridlines ($400, $500) on a chart
+  // whose entire job is placing a price between levels. Asking for 6 rounds
+  // 35.2 down to 50 and gives four. Measured on both metals' real windows;
+  // silver returns four either way.
+  const ticks = niceTicks(lo, hi, 6);
+  const grid = ticks.map((v) => {
+    const y = yAt(v).toFixed(1);
+    return `<line x1="${padL}" x2="${padL + plotW}" y1="${y}" y2="${y}" stroke="${GRID}"/>`
+      + `<text x="${padL - 8}" y="${y}" fill="${INK}" font-size="11" text-anchor="end"`
+      + ` dominant-baseline="middle">${esc(yFormat(v))}</text>`;
+  }).join("");
+
+  // Month boundaries. Over ~9 sessions-a-week months the day-of-month ticks
+  // the equity panel uses would crowd this narrower plot into illegibility.
+  const months = [];
+  let lastMonth = null;
+  dates.forEach((d, i) => {
+    const m = String(d).slice(0, 7);
+    if (m !== lastMonth) { months.push({ i, label: String(d).slice(5, 7) + "." + String(d).slice(2, 4) }); lastMonth = m; }
+  });
+  const everyN = Math.max(1, Math.ceil(months.length / Math.max(2, Math.floor(plotW / 54))));
+  const xAxis = months.filter((_, k) => k % everyN === 0).map(({ i, label }) =>
+    `<line x1="${xAt(i).toFixed(1)}" x2="${xAt(i).toFixed(1)}" y1="${padT}" y2="${padT + plotH}"`
+    + ` stroke="${GRID}"/>`
+    + `<text x="${xAt(i).toFixed(1)}" y="${h - 5}" fill="${INK}" font-size="10"`
+    + ` text-anchor="middle">${esc(label)}</text>`).join("");
+
+  // Position bands: contiguous runs of state === 1, drawn first so every
+  // line sits on top of them.
+  const bands = [];
+  let runStart = null;
+  rows.forEach((r, i) => {
+    if (r.state && runStart === null) runStart = i;
+    if ((!r.state || i === n - 1) && runStart !== null) {
+      const end = r.state ? i : i - 1;
+      bands.push([runStart, Math.max(end, runStart)]);
+      runStart = null;
+    }
+  });
+  const positionBands = bands.map(([a, b]) => {
+    const x = xAt(a), width2 = Math.max(xAt(b) - x, 1.5);
+    return `<rect x="${x.toFixed(1)}" y="${padT}" width="${width2.toFixed(1)}"`
+      + ` height="${plotH}" fill="${BREAKOUT_INK.position}" opacity="0.13"/>`;
+  }).join("");
+
+  // The value area as one filled region: up the VAH, back down the VAL.
+  const areaTop = [], areaBottom = [];
+  rows.forEach((r, i) => {
+    if (r.vah != null && isFinite(r.vah) && r.val != null && isFinite(r.val)) {
+      areaTop.push(`${xAt(i).toFixed(1)} ${yAt(r.vah).toFixed(1)}`);
+      areaBottom.unshift(`${xAt(i).toFixed(1)} ${yAt(r.val).toFixed(1)}`);
+    }
+  });
+  const valueArea = areaTop.length
+    ? `<path d="M${areaTop.join("L")}L${areaBottom.join("L")}Z"`
+      + ` fill="${BREAKOUT_INK.area}" opacity="0.12"/>`
+    : "";
+
+  const line = (key, colour, { dash = "", opacity = 1, width: sw = 2, only = null } = {}) => {
+    let d = "", pen = false;
+    rows.forEach((r, i) => {
+      const v = r[key];
+      const skip = v == null || !isFinite(v) || (only && !only(r));
+      if (skip) { pen = false; return; }
+      d += `${pen ? "L" : "M"}${xAt(i).toFixed(1)} ${yAt(v).toFixed(1)}`;
+      pen = true;
+    });
+    if (!d) return "";
+    return `<path d="${d}" fill="none" stroke="${colour}" stroke-width="${sw}"`
+      + ` stroke-linejoin="round" stroke-linecap="round"`
+      + `${dash ? ` stroke-dasharray="${dash}"` : ""} opacity="${opacity}"/>`;
+  };
+
+  // The stop is drawn ONLY inside a position. A stop level plotted while the
+  // rule is flat is a level that is not armed, and a reader cannot tell the
+  // two apart from the line alone.
+  const paths = [
+    line("poc", BREAKOUT_INK.area, { dash: "2 4", opacity: 0.7, width: 1 }),
+    line("avwap", BREAKOUT_INK.avwap, { width: 1.75 }),
+    line("stop", BREAKOUT_INK.stop, { dash: "5 3", width: 1.5, only: (r) => r.state }),
+    line("close", BREAKOUT_INK.price, { width: 2 }),
+  ].join("");
+
+  // Entry and exit marks. A band edge says WHEN; these say what happened --
+  // an exit on the stop and an exit on the trend break are different events
+  // and the panel would otherwise show them as the same grey edge.
+  const marks = bands.map(([a, b]) => {
+    const entry = rows[a], exitRow = rows[Math.min(b + 1, n - 1)];
+    const ex = xAt(a), ey = yAt(entry.close);
+    let out = `<path d="M${ex.toFixed(1)} ${(ey + 7).toFixed(1)}l-4 7h8Z"`
+      + ` fill="${BREAKOUT_INK.position}"/>`;
+    if (b + 1 < n) {
+      const xx = xAt(b + 1), yy = yAt(exitRow.close);
+      out += `<path d="M${(xx - 3.5).toFixed(1)} ${(yy - 3.5).toFixed(1)}l7 7M${(xx + 3.5).toFixed(1)}`
+        + ` ${(yy - 3.5).toFixed(1)}l-7 7" stroke="${BREAKOUT_INK.stop}" stroke-width="1.6"`
+        + ` stroke-linecap="round" fill="none"/>`;
+    }
+    return out;
+  }).join("");
+
+  // Direct labels, nudged apart exactly as the equity panel does.
+  const last = rows[n - 1];
+  const ends = [
+    { v: last.close, label: "fiyat", colour: BREAKOUT_INK.price },
+    { v: last.avwap, label: "AVWAP", colour: BREAKOUT_INK.avwap },
+    { v: last.vah, label: "VAH", colour: BREAKOUT_INK.area },
+    { v: last.val, label: "VAL", colour: BREAKOUT_INK.area },
+    last.state ? { v: last.stop, label: "stop", colour: BREAKOUT_INK.stop } : null,
+  ].filter((e) => e && e.v != null && isFinite(e.v))
+   .map((e) => ({ ...e, y: yAt(e.v) }))
+   .sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) {
+    if (ends[i].y - ends[i - 1].y < 12) ends[i].y = ends[i - 1].y + 12;
+  }
+  const labels = ends.map((e) =>
+    `<text x="${padL + plotW + 5}" y="${Math.min(e.y, h - padB).toFixed(1)}"`
+    + ` fill="${e.colour}" font-size="10" font-weight="600"`
+    + ` dominant-baseline="middle">${esc(e.label)}</text>`).join("");
+
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img">`
+    + positionBands + valueArea + grid + xAxis + paths + marks + labels + `</svg>`;
+}
+
+/**
+ * Draws the breakout panel into `root`. `rows` is oldest-first and carries
+ * whatever breakout_state holds; missing levels are simply not drawn.
+ */
+function renderBreakoutChart(root, { dates, rows, yFormat }) {
+  const width = Math.max(280, root.clientWidth || 420);
+  root.innerHTML = `<div class="chart-panel" data-panel="breakout">`
+    + `<div class="chart-label">Fiyat, değer alanı ve çapalı VWAP &mdash; `
+    + `yeşil bant: kuralın pozisyonda olduğu seanslar</div>`
+    + breakoutPanel({ dates, rows, width, height: width > 620 ? 260 : 220, yFormat })
+    + `</div>`;
+}
+
 // Peak-to-trough decline at every point, as a negative percentage. Computed
 // in the browser rather than shipped in backtest.json: it is a pure function
 // of the equity curve already in the payload, so storing it would double the
@@ -351,5 +552,6 @@ function drawdownOf(equity) {
   });
 }
 
-return { renderBacktestCharts, drawdownOf, colourFor };
+return { renderBacktestCharts, renderBreakoutChart, drawdownOf, colourFor,
+         BREAKOUT_INK };
 })();

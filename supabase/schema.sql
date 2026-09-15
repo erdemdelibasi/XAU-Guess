@@ -310,6 +310,80 @@ create table if not exists kanal_finans_themes (
 create index if not exists kf_themes_idx on kanal_finans_themes (theme, published_at desc);
 
 -- ---------------------------------------------------------------------------
+-- breakout_state  -- the breakout panel's history, one row per session
+-- ---------------------------------------------------------------------------
+-- Written by track_breakout.py, read by the frontend's "Kırılım Takibi" card
+-- and the chart under it. NOT a prediction and NOT a portfolio: no row here
+-- sizes a position, and `breakout` is deliberately absent from
+-- trading.STRATEGIES (research/flow.py measured the rule against a
+-- pre-registered bar and it did not clear it -- see section 18 of
+-- research/README.md).
+--
+-- WHY THE WHOLE WINDOW IS REWRITTEN EVERY RUN, not appended to
+-- ------------------------------------------------------------
+-- Every column below is a deterministic function of the ETF's own price and
+-- volume history, so recomputing a past session yields the same numbers --
+-- an append-only log would carry exactly the same values with the added
+-- property that the chart starts empty and fills in over six months. The
+-- upsert makes the panel complete on its first run.
+--
+-- The one case where a rewrite changes a past row is a Yahoo revision, and
+-- that is the correct outcome: the levels a person sees should be the levels
+-- the current price history implies, not the ones a stale fetch implied.
+--
+-- `close` is the ETF's close and `metal_close` the metal's -- they are
+-- different instruments and the panel prints both. See flow_signal.py for
+-- why the signal reads the ETF: this project has no reproducible futures
+-- volume series (research/flow.py, part 0).
+create table if not exists breakout_state (
+    asset           text    not null,          -- 'gold' | 'silver'
+    session_date    date    not null,
+    etf_symbol      text    not null,          -- 'GLD' | 'SLV'
+    close           numeric not null,          -- the ETF's close
+    metal_close     numeric,                   -- GC=F / SI=F that session
+
+    -- Position state.
+    state           int     not null,          -- 1 in position, 0 flat
+    stop            numeric,                   -- null while flat
+    entry_price     numeric,
+    entry_date      date,
+    exit_reason     text,                      -- 'stop' | 'trend' | null
+
+    -- The three primary instruments.
+    avwap           numeric,
+    avwap_anchor    numeric,
+    poc             numeric,
+    vah             numeric,
+    val             numeric,
+    flow            numeric,                   -- Chaikin money flow, -1..1
+
+    -- The six confirmations, stored raw so the UI prints readings rather
+    -- than a re-derived verdict it could get wrong.
+    rsi14           numeric,
+    macd_hist       numeric,
+    cci20           numeric,
+    mom10           numeric,
+    stoch_k         numeric,
+    fib_pos         numeric,
+    fib_high        numeric,
+    fib_low         numeric,
+    votes           int,                       -- sum of the six, -6..+6
+    -- The six votes individually, as {"rsi14": 1, "macd_hist": -1, ...}.
+    -- Stored rather than re-derived in the browser for the reason the
+    -- component-record table states: a threshold comparison IS the decision,
+    -- and a decision rule kept in two languages drifts the first time one
+    -- side is edited. The UI prints the thresholds as LABELS beside these,
+    -- which is description rather than a second implementation.
+    votes_detail    jsonb,
+
+    updated_at      timestamptz not null default now(),
+    primary key (asset, session_date)
+);
+
+create index if not exists breakout_state_idx
+    on breakout_state (asset, session_date desc);
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security
 -- ---------------------------------------------------------------------------
 -- The frontend reads with the anon key; every write path uses service_role,
@@ -319,7 +393,8 @@ declare t text;
 begin
     foreach t in array array['predictions', 'portfolios', 'trades', 'model_state',
                              'kanal_finans_videos', 'kanal_finans_fetch_attempts',
-                             'kanal_finans_mentions', 'kanal_finans_themes']
+                             'kanal_finans_mentions', 'kanal_finans_themes',
+                             'breakout_state']
     loop
         execute format('alter table %I enable row level security', t);
         execute format('drop policy if exists %I on %I', t || '_public_read', t);
@@ -420,4 +495,60 @@ end $$;
 --   create index if not exists kf_mentions_pending_idx
 --     on kanal_finans_mentions (applied_at) where applied_at is null;
 --   update kanal_finans_mentions set applied_at = created_at where applied_at is null;
+--
+-- 2026-09-15  Breakout panel (order flow / anchored VWAP / volume profile).
+--             RUN THIS ONE before deploying backend/track_breakout.py and the
+--             new frontend card -- both read `breakout_state`, and PostgREST
+--             rejects a query against an unknown table outright, so the card
+--             would render its heading with an empty chart under it. Safe to
+--             run twice.
+--
+--             This is a NEW table, so the `create table if not exists` block
+--             above is enough on a fresh database; the copy below is here
+--             because an existing database will not re-run that block's
+--             companion RLS loop with the new name in it.
+--
+--             Nothing here trades. research/flow.py scored the rule against a
+--             bar declared before the results were looked at and it did not
+--             clear it: on gold it beat buy-and-hold on Calmar (0.566 vs
+--             0.495) and finished 33.9% behind in money; on silver it lost on
+--             both counts. So `breakout` is NOT in trading.STRATEGIES and
+--             there are no `portfolios` rows to seed.
+--
+--   create table if not exists breakout_state (
+--       asset           text    not null,
+--       session_date    date    not null,
+--       etf_symbol      text    not null,
+--       close           numeric not null,
+--       metal_close     numeric,
+--       state           int     not null,
+--       stop            numeric,
+--       entry_price     numeric,
+--       entry_date      date,
+--       exit_reason     text,
+--       avwap           numeric,
+--       avwap_anchor    numeric,
+--       poc             numeric,
+--       vah             numeric,
+--       val             numeric,
+--       flow            numeric,
+--       rsi14           numeric,
+--       macd_hist       numeric,
+--       cci20           numeric,
+--       mom10           numeric,
+--       stoch_k         numeric,
+--       fib_pos         numeric,
+--       fib_high        numeric,
+--       fib_low         numeric,
+--       votes           int,
+--       votes_detail    jsonb,
+--       updated_at      timestamptz not null default now(),
+--       primary key (asset, session_date)
+--   );
+--   create index if not exists breakout_state_idx
+--       on breakout_state (asset, session_date desc);
+--   alter table breakout_state enable row level security;
+--   drop policy if exists breakout_state_public_read on breakout_state;
+--   create policy breakout_state_public_read on breakout_state
+--       for select using (true);
 --

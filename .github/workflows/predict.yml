@@ -60,6 +60,24 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python track_etf.py
 
+      # The breakout panel's state (order flow / anchored VWAP / volume
+      # profile). Same job and same `if: always()` reasoning as the ETF books
+      # above: price and volume history only, seconds to run, and nothing
+      # downstream of it. It reads GLD/SLV rather than the futures because
+      # this project has no reproducible futures volume series -- see
+      # flow_signal.py, and research/flow.py part 0 for the measurement.
+      #
+      # It trades nothing: the rule did not clear its pre-registered bar
+      # (research/README.md section 18), so there is no `breakout` portfolio
+      # and a failure here costs a stale panel, not a missed decision.
+      - name: Update breakout panel state
+        if: always()
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python track_breakout.py
+
       # predict.py bootstrap-trains a model when none exists or the feature
       # set changed. Without this commit that model is discarded when the
       # runner shuts down, and every single run pays to retrain from scratch.

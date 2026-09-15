@@ -1087,6 +1087,74 @@ tr.benchmark-row td { background: rgba(127, 168, 216, 0.07); }
   tr.benchmark-row td { background: none; }
 }
 
+/* --- breakout panel ---------------------------------------------------- */
+/* A state, then a chart, then the levels that state is made of. The status
+   block leads because it is the only line on the card that changes what a
+   reader does: everything under it is the evidence for it.
+
+   The badge borrows the up/down semantics the rest of the page uses, but the
+   flat state is NOT painted red. "No position" is not a bearish call -- the
+   rule takes no short side at all -- and colouring it as one would turn an
+   absence of a signal into a signal, which is the same overstatement the
+   "YÜKSELİŞ + negatif fark" sentence exists to prevent elsewhere. */
+.breakout-status {
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 12px;
+  padding: 11px 12px;
+  margin: 12px 0;
+}
+.breakout-status.in { border-left-color: var(--up); }
+.breakout-status.out { border-left-color: var(--muted); }
+.breakout-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 8px;
+}
+.breakout-badge.up { color: var(--up); }
+.breakout-badge.flat { color: var(--muted); }
+.breakout-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+  gap: 8px 14px;
+}
+.breakout-status-grid > div { display: flex; flex-direction: column; gap: 1px; }
+.breakout-status-grid strong { font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+
+/* Levels are a list, not a table. Seven rows of "name, price, distance" have
+   no column a reader would sort or compare across -- they are read one at a
+   time against the price -- and a table here would inherit the narrow-column
+   block layout below and become twenty-one lines. */
+.breakout-levels { display: flex; flex-direction: column; gap: 1px; }
+.breakout-level {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.84rem;
+}
+.breakout-level:last-child { border-bottom: none; }
+.breakout-level-label { display: flex; flex-direction: column; gap: 1px; }
+.breakout-level-label em { font-style: normal; font-size: 0.72rem; }
+.breakout-level-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The card before its table exists. It still renders -- heading, explainer
+   and the sentence saying which migration is missing -- because a card that
+   removed itself would leave a reader with no way to find out why. */
+.card.breakout.awaiting { opacity: 0.85; }
+
 /* The last two things that spilled, at 320px. Both are the same mistake in
    two places: a fixed minimum that is wider than the smallest screen.
    `min(Xpx, 100%)` lets the track collapse instead of overflowing. */

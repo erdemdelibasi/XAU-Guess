@@ -28,6 +28,8 @@ Az şey — ve bunu açıkça söylemek projenin ana tasarım ilkesidir.
 | İkisini birden tutmak? | Daha çok getiri, orantısız daha çok risk |
 | Fed faiz kararları alınabilir bir şey veriyor mu? | **Hayır.** 32 testin 0'ı geçti |
 | Merkez bankası alımı izlenebilir mi? | Tonaj **hayır** (günlük anahtarsız veri yok); **izi** evet |
+| Kırılımda girip trend kırılana kadar tutmak? | **Hayır.** Altında düşüşü yarıya indiriyor ama parada %33,9 geride; gümüşte iki ölçüde de geride |
+| Order flow / hacim profili kurulabilir mi? | Vadelide **hayır** — Yahoo'nun `GC=F` hacmi oturumlar arası tutarsız (%3,6 eşleşme), `SI=F` hacmi üç mertebe düşük. ETF hacmi (`GLD`/`SLV`) sağlam |
 
 Yani: **yön tahmini al-ve-tut'u yenmiyor.** Ölçülebilir katkı yalnızca riski
 yönetmekte ve orada bile mütevazı — 19,9 yıllık örneklem dışı testte Sharpe
@@ -121,6 +123,12 @@ tutturur — ve tek yönlü davranan bir bileşen tabloda açıkça işaretlenir
 | `ensemble` | Tüm sinyaller + risk kuralları |
 | `technical` / `ml` / `macro` / `claude` | Tek sinyal, tek portföy |
 | `kanalfinans` | Tunç Şatıroğlu ne derse o. Tam giriş/çıkış, zarar-kes takipli |
+
+Listede **`breakout` YOKTUR** ve bu ölçülmüş bir karardır: kırılım kuralı
+(emir akışı + çapalı VWAP + hacim profili) ön-kayıtlı barajı geçemedi, o yüzden
+üzerine para konmadı. Sayfada yalnızca bir **panel** olarak duruyor —
+`Kırılım Takibi` — ve kartın üzerinde al-ve-tut'a kaybettiği yazıyor
+(`backend/research/README.md` 18. bölüm).
 
 Her portföy kutusunun içinde, kendi **son altı işlemi** duruyor: tarihi,
 yönü, tutarı ve dolum fiyatı, üstünde de o defterin toplam işlem sayısı ve

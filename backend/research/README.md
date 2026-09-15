@@ -48,6 +48,7 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 | `instrument.py` | Tüm skorbord `GLD`/`IAU`/`SLV` üzerinde: bu depodaki kenar, gerçekten alınabilen enstrümanda da var mı — ortak pencere ve sabit komisyonla |
 | `miners.py` | `GDX`/`^HUI` madenci öncülüğü: bilgi hangi günde yaşıyor, üretim özellik setine katıyor mu, maliyet merdiveninin neresinde ölüyor — üç kontrollü |
 | `pooled.py` | Bağlayıcı kısıt gözlem sayısıysa: iki metali havuzlayıp eğitmek IC'yi artırıyor mu — üç kollu (üretim / normalleştirilmiş / havuz) |
+| `flow.py` | Kırılım rejimi: emir akışı (CMF vekili), çapalı VWAP, hacim profili + altı osilatör onayı. Önce hacim serisinin kendisini üç testle sınar, sonra kuralı ön-kayıtlı baraja karşı puanlar — iki metal, iki enstrüman |
 
 ```bash
 cd backend/research
@@ -69,6 +70,7 @@ python vixterm.py           # ~6 dk  (vix3m vix'in yerini almali mi)
 python pooled.py            # ~25 dk (havuzlanmis cok-varlikli egitim)
 python miners.py            # ~11 dk (madenci onculugu: ufuk + A/B + maliyet)
 python instrument.py        # ~5 dk  (ayni skorbord ETF uzerinde)
+python flow.py              # ~2 dk  (kirilim rejimi: akis + AVWAP + hacim profili)
 ```
 
 `panel.py` argümansız çalıştırılınca **her iki metal için de** panel kurar
@@ -1545,3 +1547,213 @@ belirgin şekilde daha az acıyla kazandıran bir mekanizma — ve o mekanizma
 - Bu bölümde Calmar farkları için anlamlılık testi **yok**. Üç ETF'te ve iki
   metalde tutarlı olması bu tezgâhın istediği tekrarlamadır, ama 0,03'lük bir
   Calmar farkı tek başına bir karar gerekçesi değildir.
+
+---
+
+## 18. Kırılım rejimi: emir akışı, çapalı VWAP, hacim profili (`flow.py`)
+
+Talep açıktı: **bir kırılımda pozisyona gir, trend gerçekten kırılana ya da bir
+stop seviyesine çarpana kadar tut.** Kararı üç şey versin — order flow, anchored
+VWAP, volume profile — RSI/MACD/CCI/momentum/stokastik/Fibonacci da onaylasın.
+
+Bu, bu depodaki her şeyden **yapısal olarak farklı** bir makine. Diğer her
+strateji her seans sürekli bir pozisyonu yeniden nişanlıyor; bu kural bir
+pozisyon alıp haftalarca içinde oturuyor. Dolayısıyla IC ile ya da 5 günlük
+isabetle puanlanamaz: soru "yarın ne olacak" değil, **"aldığı pozisyon, kendi
+çıkışına kadar tutulduğunda metali geçiyor mu"**.
+
+### Ön-kayıtlı baraj — sonuçlara bakılmadan ÖNCE yazıldı
+
+17. bölümün `SURVIVES` tanımı, artı aynı bölümün var olma sebebi olan para şartı:
+
+> **(1)** Alınabilir enstrümanda (GLD/SLV), $10.000 rungunda, örneklem dışı
+> ikinci yarıda, **iki metalde de** Calmar'da al-ve-tut'u geçmek, **VE**
+> **(2)** hiçbir metalde son sermayede al-ve-tut'un **%25 altına düşmemek**.
+
+(2) şu yüzden var: **Calmar para değildir.** `voltarget` ölçülen her sütunda
+Calmar'da al-ve-tut'u geçiyor ve 16 yılda $10.000'lik bir hesapta $1.413 fark
+yaratıyor — gürültü. Zamanın %70'ini nakitte geçiren bir kural güzel bir Calmar
+basıp metalin on yıllık sürüklenmesini sessizce geri verebilir, ve sadece
+Calmar'ı basan bir arayüz bunu bir zafer diye ilan eder.
+
+---
+
+### Bölüm 0 — önce şunu ölç: bu projenin hacim serisi var mı?
+
+Order flow ve volume profile hacim enstrümanlarıdır. **Vadeli tarafta bu proje
+kullanılabilir bir hacim serisine sahip değil**, ve iki seri **iki farklı
+şekilde** düşüyor — bu yüzden `part0` üç test koşuyor. Tek test koşulsaydı
+ikisinden birine temiz kâğıt verirdi:
+
+**(A) Aynı oturum** — aynı sembol, iki farklı aralıkla ardarda. Dördü de geçiyor
+(korelasyon 1,000). Bu, bu kontrolün "bariz" hâlidir ve **hiçbir şey yakalamaz.**
+
+**(B) Oturumlar arası** — bugünün çekişi, diskteki panel anlık görüntüsüne karşı
+(günler önce alınmış, **aynı 250 tarih**):
+
+| sembol | aynı % | korelasyon | medyan (o gün) | medyan (bugün) |
+|---|---|---|---|---|
+| `GC=F` | **%3,6** | **−0,101** | 622 | 170.868 |
+| `SI=F` | %99,6 | 1,000 | 182 | 182 |
+
+**(C) Seviye makul mü** — istenen derinliğe göre medyan hacim:
+
+| sembol | 2 yıl | 5 yıl | 10 yıl | 16 yıl | 25 yıl | sıfır gün (25y) |
+|---|---|---|---|---|---|---|
+| `GC=F` | 181.246 | 180.944 | 146.910 | **670** | **219** | 296 |
+| `SI=F` | **124** | **66** | **54** | **51** | **40** | **627** |
+| `GLD` | 9.275.400 | 7.439.100 | 7.614.000 | 8.059.050 | 7.939.600 | **0** |
+| `SLV` | 21.713.100 | 20.091.200 | 16.482.000 | 13.764.250 | 11.327.700 | **0** |
+
+**Okuma:** `GC=F` (B)'de düşüyor — aynı tarih, günler arayla iki farklı sayı.
+Üzerine kurulan bir değer alanı her yeniden kurulumda **başka türlü** çıkar,
+hiçbir yerde hata vermeden. (C) aynı arızanın derinlik eksenindeki hâli: altının
+son yılları gerçek hacmi döner, derin geçmişi yüzleri. `SI=F` yalnızca (C)'de
+düşüyor ama **her derinlikte**: COMEX gümüşü günde ~60 bin kontrat işliyor.
+
+Bu yüzden `flow_signal.py` **hacimle ilgili her şeyi ETF serisinden okuyor**
+(altın için GLD, gümüş için SLV) ve metali kendi fiyatıyla işliyor. Deponun
+sinyal girdisiyle enstrümanının bilerek ayrıldığı **tek** yer burasıdır — ve
+16. bölümün dersi yüzünden Bölüm 4 kuralı **iki enstrümanda birden** koşuyor.
+
+> **"Order flow" burada bir vekildir ve ismin kayması yasaktır.** Gerçek emir
+> akışı tiktir: alış/satış kaldırmaları, bekleyen emir büyüklüğü, print başına
+> delta. Bu projenin bir tik kaynağı yok ve olacak bir yolu da yok. Günlük
+> mumun desteklediği şey kapanışın gün aralığındaki konumunun hacimle
+> ağırlıklandırılmasıdır — yani **Chaikin para akışı**. Gerçek bir ölçüdür
+> (günü kimin kapattığını söyler), emir defteri değildir, ve bu cümle olmadan
+> arayüzde "emir akışı" yazmak ölçülenden fazlasını iddia etmektir.
+
+---
+
+### Bölüm 2 — dokuz enstrümanın hiçbiri tek başına yön taşımıyor
+
+Her enstrüman uzun/boş duruma indirgendi, ve **o varlığın kendi taban oranına**
+karşı puanlandı (%50'ye karşı değil — bu metallerde %50'yi geçmek hiçbir şey
+kanıtlamaz). Örtüşme düzeltmesiyle, 5 ve 20 günlük ufuklarda, iki metalde:
+
+**36 hücrenin sıfırı** Bonferroni eşiğini geçti. Daha çarpıcısı: **hiçbiri
+|t| = 1'e bile ulaşmadı.** En büyük mutlak t değeri 0,80.
+
+| altın, 5 gün (taban %55,6) | isabet | fark | t |
+|---|---|---|---|
+| VAH kırılımı | %57,7 | +2,1p | 0,75 |
+| akış (CMF>0) | %56,6 | +1,1p | 0,54 |
+| AVWAP üstü | %55,7 | +0,1p | 0,09 |
+| MOM>0 | %55,1 | −0,5p | −0,24 |
+
+| gümüş, 5 gün (taban %52,3) | isabet | fark | t |
+|---|---|---|---|
+| CCI>100 | %54,7 | +2,4p | 0,75 |
+| MOM>0 | %52,9 | +0,6p | 0,29 |
+| VAH kırılımı | %52,3 | +0,1p | 0,02 |
+| AVWAP üstü | %51,8 | −0,4p | −0,24 |
+
+20 günlük ufukta altının VAH kırılımı +3,0 puan, gümüşünki **−5,2 puan** —
+işaret metaller arasında ters dönüyor, ki bu tam olarak gürültünün imzasıdır.
+
+**Ama bu tablo kuralı ölçmüyor, bileşenlerini ölçüyor** ve ayrımı yapmak şart:
+bir kırılım kuralının iddiası "her uzun gün ortalamadan iyidir" değil, "tuttuğu
+pozisyon, çıkışına kadar metali geçer"dir. Onu Bölüm 4 ölçüyor.
+
+---
+
+### Bölüm 3 — parametre seçimi, YALNIZCA ilk yarıda
+
+Üç parametre süpürüldü (giriş için gereken onay sayısı, stop genişliği, boşta
+pozisyon), **18 hücre**. Altı osilatörün eşikleri süpürülmedi ve bu bilinçli: üç
+yönlü bir ızgaranın üstüne altı yönlü bir eşik ızgarası koymak, saf gürültüde
+kazanan bulmaya yetecek kadar büyük bir arama uzayıdır.
+
+**İki metal farklı konfigürasyon seçti, ve farkın yönü öngörülebilir olandı:**
+
+| | onay | stop | boşta | eğitim Calmar |
+|---|---|---|---|---|
+| altın (2005-05 → 2016-01) | ≥2 | **2,0σ** | **0,35** | 0,239 |
+| gümüş (2006-10 → 2016-09) | ≥2 | **3,0σ** | **0,00** | 0,418 |
+
+Gümüş altının **1,86 katı** oynak, yani 2σ'lık bir stop daha vahşi bir hayvanın
+boynunda daha kısa bir tasmadır ve gürültüyle tetiklenir. Altının 2,0/0,35 çifti
+gümüşün ızgarasında **18 hücrenin 14.'sü**. `assets.py`'de ayrı ayrı duruyorlar
+(`BreakoutParams`), ve `test_flow_signal.py` ikisinin ayrı kalmasını kilitliyor.
+
+Boşta pozisyonun iki metalde ters çıkması da anlamlı: altında **sert çıkış
+kaybediyor** (0,231 vs 0,239), yani `trading.TREND_OFF_EXPOSURE = 0,35`'in
+kaydettiği asimetri burada da görünüyor; gümüşte sert çıkış kazanıyor.
+
+---
+
+### Bölüm 4 — tek konfigürasyon, ikinci yarıda, bir kez
+
+**Altın** (GLD, 2016-2026, 64 giriş, zamanın %27'sinde pozisyonda, ortalama
+tutuş 11 seans):
+
+| basamak | kırılım | al-ve-tut |
+|---|---|---|
+| COMEX 2bp | 0,576 | 0,495 |
+| **ETF 10bp** | **0,549** | 0,495 |
+| Perakende 40bp | 0,452 | 0,495 |
+| Banka 150bp | 0,154 | 0,495 |
+
+**Gümüş** (SLV, 2016-2026, 38 giriş, %27, ortalama tutuş 18 seans):
+
+| basamak | kırılım | al-ve-tut |
+|---|---|---|
+| COMEX 2bp | 0,119 | 0,232 |
+| ETF 10bp | 0,110 | 0,232 |
+| Banka 150bp | −0,009 | 0,232 |
+
+Vadeli sütun aynı şekli veriyor (altın 0,588 vs 0,552; gümüş 0,148 vs 0,249),
+yani **16. bölümün faz kayması burada yok** — kural zaten ETF serisinden
+okuduğu için `miners`'ın düştüğü tuzağa yapısal olarak düşemiyor.
+
+### Bölüm 5 — hüküm
+
+| metal | Calmar | al-tut | (1) | son $ | al-tut $ | fark | (2) |
+|---|---|---|---|---|---|---|---|
+| Altın | **0,566** | 0,495 | **EVET** | $24.556 | $37.163 | **−%33,9** | HAYIR |
+| Gümüş | 0,116 | 0,232 | HAYIR | $16.488 | $31.275 | **−%47,3** | HAYIR |
+
+**Baraj geçilemedi, ve iki farklı sebeple.** Gümüş her iki ölçüde de kaybetti.
+Altın Calmar'da kazandı — düşüşü %27,6'dan %15,5'e indiriyor, bu depodaki en
+büyük düşüş kesintisi — ama **$10.000'lik bir hesapta on yılda $12.607 daha az
+para** bıraktı. Bu, 17. bölümün sayısının ($1.413) dokuz katı; "kazanılan şey
+para değil sükûnet" cümlesi burada artık bir savunma değil, bir maliyettir.
+
+**Sonuç:** `breakout` **`trading.STRATEGIES`'e girmedi**, `portfolios`'ta satırı
+yok, `ensemble.COMPONENTS`'te yok, `ml_model.FEATURE_COLUMNS`'ta kolonu yok.
+Üretime giren tek şey **bir panel** (`track_breakout.py` → `breakout_state` →
+arayüzdeki `Kırılım Takibi` kartı) ve kartın üzerinde yukarıdaki tablo yazıyor.
+
+`miners` emsalinin tersidir: orada sinyal gerçekti ve **üzerine para koymak**
+pahalıydı; burada kural işliyor ve **doğrudan al-ve-tut'tan kötü**. İkisinde de
+ekrana çıkan şey ölçümün kendisi.
+
+### Neden panel yine de gönderildi
+
+Üç sebep, ve hiçbiri "emek harcandı" değil:
+
+1. **Durum gerçek bir tarif.** "Fiyat değer alanının %3 üstünde, AVWAP altında,
+   akış negatif" cümlesi, bu kural hiç işlem yapmasa da piyasanın okunabilir bir
+   tanımıdır. Sayfadaki hiçbir panel bunu söylemiyordu.
+2. **Seviye bir sayı değildir.** "Fiyat $392, değer alanı $405'te bitiyor" bir
+   aritmetik; aynı iki işaret tek eksende bir bakış.
+3. **Değeri olumsuz ölçülmüş bir şeyi göstermek bu projenin işi.** `buyhold`
+   ekranda gerçek bir portföy, `miners` kıyas rozetiyle duruyor; ölçülüp
+   elenmiş bir kuralı görünmez kılmak bu disiplinin tersidir.
+
+### Açık uçlar
+
+- **Fibonacci yalnızca gösteriliyor.** %61,8 uzantısı bir kâr-al seviyesi olarak
+  **test edilmedi**, çünkü kazanan bir trendi kapatan bir hedef "kırılana kadar
+  tut"un tam tersidir. Test edilecekse ayrı bir ön-kayıt gerekir.
+- **Giriş yalnızca UZUN.** VAL'in altına düşen kapanış bir kısa sinyali olarak
+  ölçülmedi; bu sistem kısa pozisyon almıyor (8. bölümdeki oranla aynı kısıt).
+- **Kuralın kendisi süpürülmedi, sadece üç parametresi.** "VAH yerine POC
+  kırılımı", "onayları ağırlıklandır", "hacim artışı şartı" gibi varyantlar
+  ölçülmedi — ve Bölüm 2 göz önüne alındığında bunların bir yerden IC çıkarması
+  için önce Bölüm 2'nin tablosunun değişmesi gerekir.
+- **Bölüm 2 negatifinin gücü yazılmadı.** Tablo "hiçbiri geçmedi" diyor; bu
+  örneklemin görebileceği en küçük farkın ne olduğu (`ablation.min_detectable_ic`
+  ailesinden bir sayı) hesaplanmadı. |t| değerlerinin hepsinin 0,8'in altında
+  olması bunu daha az acil kılıyor ama kapatmıyor.

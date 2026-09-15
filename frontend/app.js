@@ -281,6 +281,10 @@ let cache = {
   // re-runs the backtest, so re-downloading 160 KB on every five-minute cycle
   // would be the same mistake polling Supabase every two seconds would be.
   backtest: null,
+  // The breakout panel's window. `null` means "not loaded or unavailable",
+  // which renderBreakout says out loud rather than drawing an empty chart
+  // under a heading that keeps promising one.
+  breakout: null,
 };
 let priceFailures = 0;
 let priceTimer = null;
@@ -1539,6 +1543,238 @@ function renderHistory(rows, asset) {
    
    As cards the levels become chips that wrap, the summary gets the full width
    it needs, and nothing is off screen at any viewport. */
+/* ------------------------------------------------------- breakout panel */
+
+/* Display metadata for the six confirmations. Deliberately NOT the rule:
+   `threshold` is a printed LABEL and nothing here recomputes a vote. The vote
+   arrives in `votes_detail`, decided by flow_signal.confirmation_votes() --
+   the same function the backend's own state machine calls.
+
+   This is the component-record table's rule applied again. That table shows
+   raw counters and refuses to redo the log-odds pooling in JavaScript,
+   because a decision rule kept in two languages drifts the first time one
+   side is edited, and the drift produces a page that is confidently wrong
+   rather than visibly broken. A threshold comparison is a smaller rule than
+   log-odds pooling, and exactly as easy to edit on one side only. */
+// `signed` picks the formatter, and the distinction is the one fmtSigned's
+// own comment draws: three of these oscillate around zero, where the sign IS
+// the reading ("MACD −3,14" and "MACD +3,14" are opposite claims), and three
+// are levels on a fixed scale, where a leading "+" on an RSI of 43,7 would be
+// noise. It also gets the typographic minus the rest of the page uses.
+const BREAKOUT_INDICATORS = [
+  { key: "rsi14", label: "RSI (14)", threshold: "50", digits: 1 },
+  { key: "macd_hist", label: "MACD histogram", threshold: "0", digits: 2, signed: true },
+  { key: "cci20", label: "CCI (20)", threshold: "±100", digits: 0, signed: true },
+  { key: "mom10", label: "Momentum (10)", threshold: "0", digits: 2, signed: true, suffix: "%" },
+  { key: "stoch_k", label: "Stokastik %K", threshold: "50", digits: 1 },
+  { key: "fib_pos", label: "Fibonacci konumu", threshold: "0,382", digits: 3 },
+];
+
+/* The out-of-sample result, from backend/research/flow.py, second half of the
+   window (2016-2026), on the BUYABLE instrument at the $10,000 rung with the
+   $1.50 flat commission. Hardcoded with a named source, the same way GS_RATIO
+   and indicators.py's scale constants are.
+
+   Both metals are here and both lines are losses, which is the point: gold
+   beats buy-and-hold on Calmar and finishes a third behind it in money, and
+   printing only the first number would be exactly the overstatement
+   research/README.md section 17 exists to correct. */
+const BREAKOUT_VERDICT = {
+  gold: {
+    etf: "GLD", years: 10.7, calmar: 0.566, benchCalmar: 0.495,
+    final: 24556, benchFinal: 37163, entries: 64, inPosition: 0.27,
+    // assets.GOLD.breakout -- mirrored for a caption, never for a decision.
+    minConfirmations: 2, stopSigmas: 2.0,
+  },
+  silver: {
+    etf: "SLV", years: 10.0, calmar: 0.116, benchCalmar: 0.232,
+    final: 16488, benchFinal: 31275, entries: 38, inPosition: 0.27,
+    // assets.SILVER.breakout. NOT gold's: silver's training half chose a
+    // wider stop, which is what a 1.86x more volatile metal should choose.
+    minConfirmations: 2, stopSigmas: 3.0,
+  },
+};
+
+function breakoutStateHtml(last, asset) {
+  if (!last) return "";
+  const price = (v) => (v == null ? "-" : fmtUsd(v, 2));
+  if (last.state) {
+    const gain = last.entry_price ? last.close / last.entry_price - 1 : null;
+    const room = last.stop ? last.close / last.stop - 1 : null;
+    return `<div class="breakout-status in">`
+      + `<div class="breakout-badge up">POZİSYONDA</div>`
+      + `<div class="breakout-status-grid">`
+      + `<div><span class="muted small">Giriş</span><strong>${fmtDate(last.entry_date)}`
+      + ` &middot; ${price(last.entry_price)}</strong></div>`
+      + `<div><span class="muted small">O günden bu yana</span>`
+      + `<strong class="${gain >= 0 ? "up-text" : "down-text"}">${fmtSignedPct(gain)}</strong></div>`
+      + `<div><span class="muted small">Stop</span><strong>${price(last.stop)}</strong></div>`
+      + `<div><span class="muted small">Stop ne kadar uzakta</span>`
+      + `<strong>${room == null ? "-" : fmtPct(room, 1)}</strong></div>`
+      + `</div></div>`;
+  }
+  const why = { stop: "stop seviyesi kırıldı", trend: "trend kırıldı (AVWAP altı)" };
+  return `<div class="breakout-status out">`
+    + `<div class="breakout-badge flat">POZİSYON YOK</div>`
+    + `<div class="breakout-status-grid">`
+    + `<div><span class="muted small">Son çıkış sebebi</span>`
+    + `<strong>${esc(why[last.exit_reason] ?? "henüz giriş olmadı")}</strong></div>`
+    + `<div><span class="muted small">Giriş için gereken</span>`
+    + `<strong>${price(last.vah)} üzeri kapanış</strong></div>`
+    + `</div></div>`;
+}
+
+/* The levels, with the distance from today's close beside each one.
+
+   The distance is the half a reader would otherwise compute in their head,
+   and it is the half that decides anything: "VAH $404,96" is a fact about the
+   last quarter, "%3,1 yukarıda" is the reason nothing has triggered. */
+function breakoutLevelsHtml(last, asset) {
+  if (!last) return "";
+  // The two Fibonacci levels are arithmetic on `fib_low`/`fib_high`, which
+  // are both stored. Derived here rather than shipped for the reason the
+  // drawdown panel is: a pure function of data already in the payload, so a
+  // stored copy could only ever disagree with its own source. Neither level
+  // triggers anything -- flow_signal.py is explicit that a profit target
+  // that closes a winning trend is the opposite of "hold until it breaks".
+  const span = (last.fib_high != null && last.fib_low != null)
+    ? Number(last.fib_high) - Number(last.fib_low) : null;
+  const fibSupport = span == null ? null : Number(last.fib_low) + 0.382 * span;
+  const fibTarget = span == null ? null : Number(last.fib_high) + 0.618 * span;
+  const rows = [
+    { label: "Kapanış", value: last.close, note: `${esc(last.etf_symbol)} kapanışı`, bare: true },
+    { label: "Değer alanı üstü (VAH)", value: last.vah, note: "kırılım eşiği" },
+    { label: "En çok işlem gören fiyat (POC)", value: last.poc, note: "hacim profilinin tepesi" },
+    { label: "Değer alanı altı (VAL)", value: last.val, note: "ilk stop buradan" },
+    { label: "Çapalı VWAP", value: last.avwap,
+      note: last.avwap_anchor ? `çapa: ${fmtUsd(last.avwap_anchor, 2)} (yıllık dip)` : "" },
+    { label: "Fibonacci %38,2 desteği", value: fibSupport, note: "gösterilir, işlem üretmez" },
+    { label: "Fibonacci %61,8 uzantısı", value: fibTarget, note: "gösterilir, işlem üretmez" },
+  ];
+  return `<div class="breakout-levels">` + rows.filter((r) => r.value != null).map((r) => {
+    const away = r.bare ? "" : `<span class="muted small">${fmtSignedPct(r.value / last.close - 1)}</span>`;
+    return `<div class="breakout-level">`
+      + `<span class="breakout-level-label">${esc(r.label)}`
+      + (r.note ? `<em class="muted small">${esc(r.note)}</em>` : "") + `</span>`
+      + `<span class="breakout-level-value"><strong>${fmtUsd(r.value, 2)}</strong>${away}</span>`
+      + `</div>`;
+  }).join("") + `</div>`;
+}
+
+function renderBreakout(rows, asset) {
+  const card = document.getElementById("breakout-card");
+  if (!card) return;
+  const mine = (rows ?? []).filter((r) => r.asset === currentAsset);
+  const chartRoot = document.getElementById("breakout-chart");
+  const verdict = BREAKOUT_VERDICT[currentAsset];
+
+  document.getElementById("breakout-asset-name").textContent = asset.label;
+  document.getElementById("breakout-minconf").textContent =
+    String(verdict.minConfirmations);
+
+  // No rows is not an empty chart, it is a missing migration or a tracker
+  // that has never run. Saying which is the whole job -- a heading that
+  // promises a breakout state over a blank panel keeps making the claim.
+  if (!mine.length) {
+    card.classList.add("awaiting");
+    document.getElementById("breakout-updated").textContent = "-";
+    document.getElementById("breakout-state").innerHTML =
+      `<p class="muted small">Bu metal için henüz kırılım durumu yazılmamış. `
+      + `<code>track_breakout.py</code> ilk kez çalıştığında (ya da `
+      + `<code>breakout_state</code> migration'ı uygulandığında) burası dolar.</p>`;
+    chartRoot.innerHTML = "";
+    document.getElementById("breakout-readout").textContent = "-";
+    document.getElementById("breakout-levels").innerHTML = "";
+    document.querySelector("#breakout-votes-table tbody").innerHTML =
+      `<tr><td colspan="4" class="muted">Veri yok.</td></tr>`;
+    document.getElementById("breakout-verdict").textContent = "-";
+    document.getElementById("breakout-note").textContent = "-";
+    return;
+  }
+  card.classList.remove("awaiting");
+
+  // Supabase returns newest-first; the chart reads oldest-first.
+  const ordered = [...mine].sort((a, b) => String(a.session_date).localeCompare(b.session_date));
+  const last = ordered[ordered.length - 1];
+  const numeric = (r) => ({
+    close: Number(r.close), avwap: r.avwap == null ? null : Number(r.avwap),
+    vah: r.vah == null ? null : Number(r.vah), val: r.val == null ? null : Number(r.val),
+    poc: r.poc == null ? null : Number(r.poc), stop: r.stop == null ? null : Number(r.stop),
+    state: Number(r.state),
+  });
+
+  document.getElementById("breakout-updated").textContent =
+    `son seans ${fmtDate(last.session_date)}`;
+  document.getElementById("breakout-state").innerHTML = breakoutStateHtml(last, asset);
+
+  Viz.renderBreakoutChart(chartRoot, {
+    dates: ordered.map((r) => String(r.session_date)),
+    rows: ordered.map(numeric),
+    yFormat: (v) => fmtUsd(v, 0),
+  });
+
+  // FIXED caption, same rule as every other chart here: where each drawn line
+  // ENDS. No crosshair, so the numbers a reader just read stay put.
+  const ink = Viz.BREAKOUT_INK;
+  const item = (colour, label, value) =>
+    `<span class="readout-item"><i style="background:${colour}"></i>${esc(label)} `
+    + `<strong>${value == null ? "-" : fmtUsd(Number(value), 2)}</strong></span>`;
+  const held = ordered.filter((r) => Number(r.state)).length;
+  document.getElementById("breakout-readout").innerHTML =
+    `<span class="readout-date">${fmtDate(last.session_date)}</span> `
+    + item(ink.price, "fiyat", last.close)
+    + item(ink.avwap, "AVWAP", last.avwap)
+    + item(ink.area, "VAH", last.vah)
+    + (last.state ? item(ink.stop, "stop", last.stop) : "")
+    + ` <span class="muted">&mdash; gösterilen ${ordered.length} seansın `
+    + `<strong>${held}</strong> tanesinde (%${Math.round(100 * held / ordered.length)}) `
+    + `kural pozisyondaydı.</span>`;
+
+  document.getElementById("breakout-levels").innerHTML = breakoutLevelsHtml(last, asset);
+
+  // The votes come from the backend. `votes_detail` is missing only on rows
+  // written before that column existed, and a dash is the honest cell there
+  // -- recomputing it here would be the drift this table is arranged to
+  // avoid, and it would silently disagree with the `votes` total beside it.
+  const detail = last.votes_detail ?? {};
+  const voteLabel = { "1": "olumlu", "-1": "olumsuz", "0": "nötr" };
+  document.querySelector("#breakout-votes-table tbody").innerHTML =
+    BREAKOUT_INDICATORS.map((ind) => {
+      const raw = last[ind.key];
+      const vote = detail[ind.key];
+      const cls = vote > 0 ? "up-text" : vote < 0 ? "down-text" : "muted";
+      return `<tr><td>${esc(ind.label)}</td>`
+        + `<td>${raw == null ? "-"
+              : (ind.signed ? fmtSigned(Number(raw), ind.digits)
+                            : fmtNumber(Number(raw), ind.digits)) + (ind.suffix ?? "")}</td>`
+        + `<td class="muted">${esc(ind.threshold)}</td>`
+        + `<td class="${cls}">${vote == null ? "-" : esc(voteLabel[String(vote)])}</td></tr>`;
+    }).join("");
+
+  // The measurement, on the card. It is a loss and it is printed as one.
+  const shortfall = 1 - verdict.final / verdict.benchFinal;
+  const calmarWon = verdict.calmar > verdict.benchCalmar;
+  document.getElementById("breakout-verdict").innerHTML = calmarWon
+    ? `Ölçüm: bu kural ${fmtNumber(verdict.years, 1)} yıl örneklem dışı, ${esc(verdict.etf)} `
+      + `üzerinde <strong>düşüşü azaltıyor</strong> (Calmar ${fmtNumber(verdict.calmar, 3)} — `
+      + `al-ve-tut ${fmtNumber(verdict.benchCalmar, 3)}) ama <strong>parada geride kalıyor</strong>: `
+      + `$10.000'lik hesapta ${fmtUsd(verdict.final, 0)}, al-ve-tut ${fmtUsd(verdict.benchFinal, 0)} `
+      + `(%${fmtNumber(100 * shortfall, 1)} daha az). Bu yüzden buna bağlı bir portföy yok.`
+    : `Ölçüm: bu kural ${fmtNumber(verdict.years, 1)} yıl örneklem dışı, ${esc(verdict.etf)} `
+      + `üzerinde <strong>her iki ölçüde de al-ve-tut'un gerisinde</strong>: Calmar `
+      + `${fmtNumber(verdict.calmar, 3)} — ${fmtNumber(verdict.benchCalmar, 3)}, ve `
+      + `$10.000'lik hesapta ${fmtUsd(verdict.final, 0)} — ${fmtUsd(verdict.benchFinal, 0)} `
+      + `(%${fmtNumber(100 * shortfall, 1)} daha az). Bu yüzden buna bağlı bir portföy yok.`;
+
+  document.getElementById("breakout-note").innerHTML =
+    `${verdict.entries} giriş, zamanın %${Math.round(100 * verdict.inPosition)}'sinde pozisyonda. `
+    + `Baraj sonuçlara bakılmadan ilan edildi ve geçilemedi &mdash; `
+    + `<code>backend/research/flow.py</code>. Seviyeler <strong>${esc(last.etf_symbol)}`
+    + `</strong> fiyatındadır; ${esc(asset.label.toLowerCase())} vadelisinin aynı seanstaki `
+    + `kapanışı ${last.metal_close == null ? "-" : fmtUsd(Number(last.metal_close), 2)}. `
+    + `Hacim ETF'ten okunuyor çünkü vadeli hacim serisi ölçülerek kullanılamaz bulundu.`;
+}
+
 function renderKanalFinans(mentions, themes) {
   const box0 = document.getElementById("kf-mentions");
   // GENEL ("kıymetli madenler", neither metal named) applies to both tabs;
@@ -2100,7 +2336,12 @@ document.addEventListener("click", (event) => {
 let resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => renderBacktest(ASSETS[currentAsset]), 150);
+  resizeTimer = setTimeout(() => {
+    renderBacktest(ASSETS[currentAsset]);
+    // Same reason: the breakout panel's SVG is rendered at its container's
+    // pixel width, so it needs a real re-render rather than a viewBox rescale.
+    renderBreakout(cache.breakout, ASSETS[currentAsset]);
+  }, 150);
 });
 
 /* Stamps every table cell with the header text above it.
@@ -2151,6 +2392,7 @@ function renderAll() {
   renderValuationNote(asset, mark);
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
   renderKanalFinansBook(cache.portfolios, mark.price, asset, cache.costBasis);
+  renderBreakout(cache.breakout, asset);
   renderKanalFinans(cache.mentions, cache.themes);
   // Asset-scoped -- see renderEtfBooks. Rendered from renderAll anyway
   // so a tab switch repaints it with whatever the price loop last had.
@@ -2198,12 +2440,39 @@ async function loadBacktest() {
   }
 }
 
+/* The breakout window. Fetched with its OWN error handling rather than inside
+   loadData's batch, and that is not tidiness.
+
+   `api()` throws on a non-200 and loadData wraps the whole batch in one
+   try/catch, so a `breakout_state` that does not exist yet -- the migration
+   is applied by hand, by a person, later than the deploy -- would take down
+   the entire page with "Veri yüklenemedi". Every portfolio, every price and
+   every prediction, gone, because one card's table is missing.
+
+   Same fail-soft rule loadBacktest() follows, and the same one predict.py
+   applies to a dead macro series: the part that cannot load says so, and
+   nothing else notices. */
+async function loadBreakout() {
+  try {
+    // Two metals x WINDOW_SESSIONS rows. Well under PostgREST's ~1000-row
+    // cap, so this does not need apiAll -- but it is asked for explicitly
+    // rather than left to the default, because the default is what would
+    // silently truncate the chart if the window were ever widened.
+    cache.breakout = await api(
+      "breakout_state?select=*&order=session_date.desc&limit=500");
+  } catch (error) {
+    console.warn("Kırılım durumu yüklenemedi:", error.message);
+    cache.breakout = null;
+  }
+}
+
 async function loadData() {
   try {
     // In the same batch, not before it: serialising them would add a round
     // trip to every five-minute cycle for a file that is fetched once.
-    const [, gold, silver, portfolios, trades, records, mentions, themes] = await Promise.all([
+    const [, , gold, silver, portfolios, trades, records, mentions, themes] = await Promise.all([
       loadBacktest(),
+      loadBreakout(),
       // 400, not 30. The track-record table shows a window, but the live
       // equity curve is rebuilt from EVERY row -- each one is a day's mark
       // price -- so a 30-row cap would quietly truncate the chart to its last

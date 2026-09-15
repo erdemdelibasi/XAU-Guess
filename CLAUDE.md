@@ -19,6 +19,13 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
                               alınabilir ETF defterleri (assets.TRACKED).
                               Model yok, LLM yok, makro panel yok: sadece
                               fiyat geçmişi ve trading.MECHANICAL.
+  -> backend/track_breakout.py  aynı adımda, track_etf'ten sonra -- Kırılım
+                              Takibi panelinin durumu (breakout_state).
+                              HİÇBİR ŞEY İŞLEMİYOR: kural ön-kayıtlı barajı
+                              geçemedi (research/README.md 18. bölüm), o
+                              yüzden `breakout` trading.STRATEGIES'te YOK.
+                              Hacmi GLD/SLV'den okur, çünkü vadeli hacim
+                              serisi ölçülerek kullanılamaz bulundu.
   -> backend/daily_report.py  her iş günü 06:00 UTC (09:00 TRT) -- günlük
                               özet maili; hiçbir şey yazmaz, sadece okur
   -> backend/export_backtest.py  ELLE, cron YOK -- backtest'in sermaye
@@ -179,6 +186,56 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
     geçerli) ama **arayüz kartı ve günlük mail artık satın alınabilir olmadığını
     açıkça yazıyor**. `research/README.md` 14. ve **16.** bölüm.
 
+11. **Kırılımda girip trend kırılana kadar tutan kural ölçüldü ve baraja
+    takıldı — ama asıl bulgu ondan önce geldi: bu projenin VADELİ HACİM
+    SERİSİ YOK.** Order flow ve volume profile hacim enstrümanlarıdır, ve
+    `research/flow.py`'nin ilk işi hacmin kendisini sınamak oldu. İki vadeli
+    seri **iki farklı şekilde** düşüyor, bu yüzden üç test var:
+
+    - `GC=F` **oturumlar arasında kararsız**: aynı 250 tarih, diskteki panel
+      anlık görüntüsüyle bugünün çekişi arasında **%3,6 tutuyor**, korelasyon
+      **−0,10**, medyan 622'ye karşı 170.868 kontrat. Aynı arıza derinlik
+      ekseninde de var: 2 yıllık istek 181.246, 25 yıllık istek **219**.
+    - `SI=F` kararlı ama **her derinlikte gerçek dışı**: medyan 40–124
+      kontrat, 627 sıfır hacimli seans. COMEX gümüşü günde ~60 bin işliyor.
+    - `GLD`/`SLV` üç testi de geçiyor (çekişler arası birebir aynı, sıfır
+      hacimli gün yok, seviye makul).
+
+    Bunun tuzağı şu: "aynı oturumda iki kez çek, karşılaştır" testini **dört
+    sembol de geçiyor**. Tek başına koşulsaydı kullanılamaz iki seriye temiz
+    kâğıt verirdi. `part0` üçünü birden basıyor.
+
+    Bu yüzden `flow_signal.py` **hacimle ilgili her şeyi ETF serisinden
+    okuyor** ve metali kendi fiyatıyla işliyor — deponun sinyal girdisiyle
+    enstrümanının bilerek ayrıldığı **tek** yeri. 16. maddedeki faz kayması
+    burada yapısal olarak imkânsız: kural zaten ETF mumunda yaşıyor.
+
+    **Kuralın kendisi:** değer alanının üstüne kapanış + AVWAP üstü + pozitif
+    akış + en az iki osilatör onayı → gir; oynaklık ölçekli (yalnızca yukarı
+    hareket eden) stop ya da iki seans AVWAP altı → çık. Baraj sonuçlara
+    bakılmadan ilan edildi: "$10.000 rungunda, ETF üzerinde, iki metalde de
+    Calmar'da al-ve-tut'u geç **ve** parada %25'ten fazla geride kalma".
+
+    | metal | Calmar | al-tut | son $ | al-tut $ |
+    |---|---|---|---|---|
+    | altın | **0,566** | 0,495 | $24.556 | $37.163 (**−%33,9**) |
+    | gümüş | 0,116 | 0,232 | $16.488 | $31.275 (**−%47,3**) |
+
+    Altın Calmar'ı kazanıyor — düşüşü %27,6'dan %15,5'e indiriyor, bu deponun
+    ölçtüğü **en büyük düşüş kesintisi** — ve on yılda **$12.607 daha az para**
+    bırakıyor. 17. maddedeki $1.413'ün dokuz katı: orada "para değil sükûnet"
+    bir savunmaydı, burada bir maliyettir.
+
+    **Dokuz bileşenin hiçbiri tek başına yön de taşımıyor**: 5 ve 20 günlük
+    ufuklarda, iki metalde, 36 hücrenin sıfırı eşiği geçti ve **hiçbiri
+    |t|=1'e bile ulaşmadı** (en büyüğü 0,80). Altının VAH kırılımı 20 günde
+    +3,0 puan, gümüşünki −5,2 — işaret metaller arasında ters dönüyor.
+
+    **Üretime giren tek şey bir PANEL.** `breakout` `trading.STRATEGIES`'te
+    yok, `portfolios`'ta satırı yok, `ensemble.COMPONENTS`'te yok,
+    `ml_model.FEATURE_COLUMNS`'ta kolonu yok. `tests/test_flow_signal.py`
+    dördünü de kilitliyor. Kartın üzerinde yukarıdaki tablo yazılı.
+
 Madde 5'in madde 3'ü **kurtarmadığını** anlamak kritik: oynaklık hedefleme
 hiçbir şey tahmin etmiyor, gerçekleşen oynaklığa tepki veriyor ve oynaklık
 (yönün aksine) güçlü şekilde otokorelasyonlu. Bunlar ayrı iki makine.
@@ -252,6 +309,8 @@ farklı olabilecek her şey orada ve **her sayısı ölçülmüştür**
 | `price_scales.ema_cross` | 51,5 | 29,3 | aynı sebep (1,76 kat) |
 | `price_scales.sma200` | 6,5 | 3,72 | aynı sebep (1,75 kat) |
 | model dosyası | `xau_model.joblib` | `xag_model.joblib` | farklı özellik seti, değiştirilemezler |
+| `breakout.stop_sigmas` | 2,0 | 3,0 | gümüş 1,86 kat oynak; 2σ gürültüyle tetikleniyor |
+| `breakout.flat_exposure` | 0,35 | 0,00 | altında sert çıkış eğitim yarısında KAYBETTİ |
 
 **"Varlık ekle" tek satırlık bir ayar değişikliği gibi görünüp öyle
 değildir.** Altının sayılarını gümüşe kopyalamak hiçbir hata vermez; sadece
@@ -1325,6 +1384,75 @@ Kazanılan şey maksimum düşüşün %45,6'dan %39,2'ye inmesi, ve bu yılda ~8
 işlemle. Arayüz kartı, mail bölümü ve modül docstring'i üçü de bunu yazıyor;
 biri silinirse okuyucu Calmar'ı kâr sanır.
 
+### Kırılım Takibi: ölçülüp elenmiş bir kural, ekranda, kendi sonucuyla
+
+Sayfadaki diğer her şey "5 seans sonra ne olacak" sorusunu cevaplıyor. Bu kart
+başka bir soruyu cevaplıyor: **şu anda pozisyonda mıyım, ve beni oradan ne
+çıkarır.** Kural `flow_signal.py`'de, ölçümü `research/flow.py`'de, günlük
+durumu `track_breakout.py` → `breakout_state` tablosunda.
+
+**Kart YAN kolonda ve bu bir tercih değil, ölçümün yerleşime uygulanmış hâli.**
+Ana kolon sonuçlar — üzerinde para olan defterler. Bu kuralda para yok, çünkü
+ön-kayıtlı barajı geçemedi (11. madde). Tam genişlik vermek, sayfanın bu kuralı
+gerçekten desteklediği defterlerden daha çok desteklediğini söylerdi.
+
+Yine de bir **grafiği** var, çünkü bir seviye bir sayı değildir: "fiyat $392,
+değer alanı $405'te bitiyor" okuyucunun kafasında yaptığı bir aritmetik; aynı
+iki işaret tek eksende bir bakış.
+
+**Grafik kasıtlı olarak sermaye grafiklerinden farklı bir hayvandır.** Orada her
+çizgi yarışan bir defter, soru "hangisi yukarıda". Burada **tek bir özne** var —
+fiyat — ve geri kalan her şey ona karşı çizilmiş bir **seviye**. Sonuçları:
+
+- **Fiyat on kategorik slottan biri DEĞİL** (`PRICE_COLOUR`, `BENCHMARK_COLOUR`
+  ile aynı yerde tanımlı). Sebep `buyhold`'unkiyle aynı: ölçülen şeye bir
+  rakip rengi vermek, referansı kendi karşılaştırmasının içine sokmaktır.
+  `test_export_backtest.py` girintili `isim: "#hex"` satırlarını **kategorik
+  palet** diye okuyor, yani bu şekilde yazılmış bir seri-dışı renk bir testi
+  kırar — nitekim kırdı ve düzeltmesi rengi doğru yere taşımak oldu.
+- **Değer alanı iki çizgi değil bir BANT.** Tek bir nesne: piyasanın son çeyrekte
+  kabul ettiği aralık. Kenarlarını ayrı seriler gibi çizmek "fiyat VAH'ı kesti"yi
+  bir çizgi kesişmesi gibi okutur, oysa olan şey bir **bölgeden çıkmaktır**.
+- **Pozisyon her şeyin arkasında bir bant.** "Kural burada uzundu" zaman
+  ekseninin bir özelliğidir, fiyat ekseninde bir değer değil.
+- **Stop YALNIZCA pozisyon içindeyken çiziliyor.** Boştayken basılan bir stop
+  seviyesi kurulu olmayan bir seviyedir ve çizgiden ayırt edilemez.
+- **Y ekseni 6 tik istiyor, sermaye panelinin 4'ünü değil.** `niceTicks` adımı
+  bir üst 1-2-5 katına **yuvarlıyor**, yani 4 isteyen 2 alabiliyor: altının
+  $309–$520 penceresinde ham adım 52,8 → 100'e yuvarlanıyor ve tüm işi bir
+  fiyatı seviyeler arasına yerleştirmek olan grafikte **iki gridline** kalıyor.
+  6 istendiğinde 35,2 → 50 ve dört tik geliyor. İki metalin gerçek penceresinde
+  ölçüldü.
+
+**Onay oyları backend'de karar veriliyor, JS'te değil** (`votes_detail` kolonu).
+Altı eşik "geleneksel nötr nokta" olsa da bir eşik karşılaştırması **kararın
+kendisidir**, ve bu deponun tekrar tekrar bulduğu arıza bir karar kuralının iki
+dilde tutulup bir tarafta düzenlenmesidir. Bileşen sicili tablosunun log-odds
+aritmetiğini kopyalamamasıyla aynı kural. Arayüz eşikleri **etiket olarak**
+basıyor; o tarif, ikinci bir uygulama değil.
+
+**Fibonacci seviyeleri tarayıcıda türetiliyor** (`fib_low`/`fib_high`'dan), ve
+bu düşüş panelinin gerekçesiyle aynı: iki kayıtlı kolonun saf bir fonksiyonu,
+yani saklanan bir kopya ancak kendi kaynağıyla çelişebilir. **Hiçbiri işlem
+üretmiyor** — kazanan bir trendi kapatan bir kâr-al hedefi "kırılana kadar
+tut"un tam tersidir.
+
+**`loadBreakout` kendi `try/catch`'ine sahip ve bu kritik.** `api()` 200
+olmayanda fırlatıyor, `loadData` tüm partiyi tek bir `try` içinde sarıyor —
+yani migration'ı henüz uygulanmamış bir `breakout_state`, "Veri yüklenemedi"
+ile **tüm sayfayı** karartırdı: her portföy, her fiyat, her tahmin, bir kartın
+tablosu yok diye. `loadBacktest`'in kuralının aynısı.
+
+**Tablo yoksa kart kendini gizlemiyor, sebebini yazıyor.** Kaybolmuş bir kart,
+okuyucuya neden kaybolduğunu öğrenecek hiçbir yol bırakmaz.
+
+**Günlük mailde BİLEREK yok, ve bu bir eksik değil bir sınır.** `daily_report.py`
+para olan şeyleri raporluyor (defterler, tahmin, ETF kitapları) artı bir insanın
+görüşünü. Bu kural hiçbir şey işlemiyor, dolayısıyla maile koyacağı bir sonuç
+yok — koyulursa, her sabah al-ve-tut'a yenildiği ölçülmüş bir kuralın durumunu
+kazanan defterlerin yanına eşit puntoyla basmış olurduk, ki kartın yan kolonda
+durma gerekçesinin tam tersi. Eklenecekse önce bu paragrafın cevaplanması gerek.
+
 ### Portföy değerlemesi SPOT değil VADELİ fiyatla yapılır
 
 Sayfa iki ayrı fiyat serisi çeker ve yanlış işe yanlış seriyi vermek sessiz
@@ -1487,14 +1615,15 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   gelmesi 180 çözülmüş satır sürer. Canlı sinyal *üreten* kodun testi hâlâ
   yok; o `backtest.py` + canlı izlemeyle doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
-  oku.** Orada ölçülüp elenmiş **on yedi** hipotez duruyor — oranla ilgili
+  oku.** Orada ölçülüp elenmiş **on sekiz** hipotez duruyor — oranla ilgili
   bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve
   merkez bankası alımıyla ilgili olan 11. bölümde, yeni bir veri kaynağı
   eklemekle ilgili olan 12. bölümde, "daha çok veriyle eğitelim" ile ilgili
   olan 13. bölümde, altın madencileriyle ilgili olan 14. bölümde,
   komisyon/hesap büyüklüğüyle ilgili olan 15. bölümde,
   "gerçekte hangi enstrümanı alıyorum" ile ilgili olan 16. ve 17.
-  bölümde büyük ihtimalle zaten var.
+  bölümde, kırılım/order flow/VWAP/hacim profili ya da bir osilatör onay
+  kümesiyle ilgili olan 18. bölümde büyük ihtimalle zaten var.
 - **Yeni bir seri denemek isteyince `fetch_data.MACRO_SYMBOLS`'e EKLEME.**
   O sözlük canlı yolu da besliyor (`predict.py` her koşuda her girdiyi
   çekiyor), yani kapıdan geçmemiş bir seri oraya konunca günlük bir istek ve
