@@ -1,9 +1,15 @@
 """Locks the boundaries the breakout rule was shipped inside.
 
 research/flow.py measured this rule against a bar declared before the results
-were seen and it did NOT clear it. What shipped is therefore a panel and not a
-portfolio, and that distinction is the thing most likely to be lost by a
-plausible, well-meant edit -- "the chart is already there, wire it to a book".
+were seen and it did NOT clear it. What shipped is a panel, a printed
+measurement, and -- since 2026-09-16, deliberately and with that measurement
+beside it -- a $1,000 paper book whose job is to show the failure costing
+money in public.
+
+The boundaries below are the ones that survive that decision: it is still not
+a forecast component, still not sized by the exposure engine, and still not a
+model feature. Those are the things most likely to be lost by a plausible,
+well-meant edit -- "it has a book now, so put it with the other books".
 
 None of the tests below would raise on their own. They guard places where the
 system would quietly claim something that was never measured, or would draw a
@@ -19,6 +25,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import assets as assets_module  # noqa: E402
+import breakout_trading  # noqa: E402
 import ensemble  # noqa: E402
 import flow_signal  # noqa: E402
 import ml_model  # noqa: E402
@@ -49,20 +56,123 @@ def synthetic(n: int = 400, seed: int = 7, trend: float = 0.0004) -> pd.DataFram
 # Boundary 1: it is a panel, never a portfolio and never a forecast component
 # ---------------------------------------------------------------------------
 
-def test_breakout_is_not_a_paper_portfolio():
-    """The pre-registered bar was not cleared, so no book may run on it.
+def test_breakout_is_not_sized_by_the_exposure_engine():
+    """It HAS a book since 2026-09-16, and it still must not be in STRATEGIES.
 
-    On the buyable instrument at the $10,000 rung, out of sample, on BOTH
-    data sources it was measured against: gold won on Calmar and finished a
-    third to two-fifths behind in money (phase 1 -33.9%, phase 2 -41.8%);
-    silver lost on both counts both times. Adding "breakout" to STRATEGIES
-    would create two $1,000 books that
-    trade every entry and exit, and nothing in the system would object --
-    schema.sql seeds portfolios from this list, and the dashboard renders
-    whatever it finds.
+    The two are different claims and only the second is about measurement.
+    `trading.STRATEGIES` is the set of rules driven by
+    compute_target_exposure(): a confidence number and a volatility budget,
+    re-aimed every trading day. This rule has neither -- it is all-in or
+    all-out on a discrete state from a stateful walk, so a target exposure
+    would contradict it outright ("hold until the trend breaks" is not
+    compatible with trimming 3% every morning).
+
+    Being in STRATEGIES would also hand it a rebalance threshold it does not
+    obey, a panel in the grid of measured rules, and an exposure row reading
+    "hedef %0" for a book that will never move toward that target. It is the
+    same third kind as `kanalfinans`, which is out of this list for the same
+    structural reason.
     """
     assert "breakout" not in trading.STRATEGIES
     assert "breakout" not in trading.MECHANICAL
+    # The kind it actually belongs to: a discrete engine of its own.
+    assert breakout_trading.STRATEGY == "breakout"
+
+
+def test_the_breakout_book_is_all_in_or_all_out():
+    """No partial sizing, in either direction.
+
+    A rule whose entire claim is "hold the whole move" cannot express itself
+    through a fraction, and a book that scaled in would be measuring a
+    different rule from the one research/flow.py scored.
+    """
+    buy = breakout_trading.decide(1, 0.0, 1000.0, 100.0, 0.0005, "", 98.0)
+    assert buy["action"] == "BUY"
+    assert buy["usd_amount"] == 1000.0            # the whole book
+    sell = breakout_trading.decide(0, 2.5, 0.0, 100.0, 0.0005, "stop", None)
+    assert sell["action"] == "SELL"
+    assert sell["unit_amount"] == 2.5             # the whole holding
+    # Already aligned in both directions -> nothing happens. This is what
+    # makes the book self-correcting across a missed cron run: it compares
+    # holdings against state rather than replaying a queue of events.
+    assert breakout_trading.decide(1, 2.5, 0.0, 100.0, 0.0005)["action"] == "HOLD"
+    assert breakout_trading.decide(0, 0.0, 1000.0, 100.0, 0.0005)["action"] == "HOLD"
+
+
+class FakeTable:
+    """Records what would be written, and answers selects from a dict."""
+
+    def __init__(self, log, rows):
+        self.log, self.rows = log, rows
+        self._payload = None
+
+    def select(self, *_a, **_k):
+        return self
+
+    def eq(self, *_a, **_k):
+        return self
+
+    def update(self, payload):
+        self._payload, self.log["update"] = payload, payload
+        return self
+
+    def insert(self, payload):
+        self._payload, self.log["insert"] = payload, payload
+        return self
+
+    def execute(self):
+        return type("R", (), {"data": self.rows if self._payload is None else []})()
+
+
+class FakeDb:
+    def __init__(self, book_row):
+        self.calls = {}
+        self.book_row = book_row
+
+    def table(self, name):
+        self.calls.setdefault(name, {})
+        rows = [self.book_row] if name == "portfolios" and self.book_row else []
+        return FakeTable(self.calls[name], rows)
+
+
+def test_the_breakout_book_keeps_no_second_copy_of_the_stop():
+    """The live stop lives on breakout_state, recomputed every run.
+
+    Writing it onto the portfolio row as well would create a copy that can
+    only ever disagree with its own source -- and it would disagree SILENTLY,
+    because nothing reads the portfolio copy to act on it. Same reason the
+    Fibonacci levels are derived in the browser rather than stored.
+
+    `target_exposure` is the same case from the other direction: this book
+    has none, and a number written there would be rendered as a target the
+    book will never move toward.
+    """
+    db = FakeDb({"cash_usd": 1000.0, "ounces": 0.0, "position": "CASH"})
+    row = {"state": 1, "close": 4000.0, "exit_reason": "", "vah": 3950.0,
+           "stop": 3800.0}
+    action = breakout_trading.apply_state(db, assets_module.get("gold"), row)
+
+    assert action == "BUY"
+    written = db.calls["portfolios"]["update"]
+    assert "stop_loss_price" not in written
+    assert "target_exposure" not in written
+    assert written["position"] == "LONG"
+    # And the fill is booked at the close the decision was made on, not at
+    # some other quote: deciding on one stitching of the contract and filling
+    # at another books that seam as P&L.
+    assert db.calls["trades"]["insert"]["price"] == 4000.0
+
+
+def test_the_breakout_book_degrades_to_nothing_when_unseeded():
+    """Between a deploy and the hand-applied migration there is no book row.
+
+    That must leave the PANEL -- the thing this card is actually for --
+    writing normally rather than raising through track_breakout.run_asset.
+    """
+    db = FakeDb(None)
+    row = {"state": 1, "close": 4000.0, "exit_reason": "", "vah": 3950.0}
+    assert breakout_trading.apply_state(db, assets_module.get("gold"), row) == "no-book"
+    assert "trades" not in db.calls
 
 
 def test_breakout_is_not_an_ensemble_component():

@@ -625,6 +625,22 @@
           </table>
         </div>
 
+        <!-- The rule's own $1,000 paper book. Deliberately BELOW the state and
+             the levels and ABOVE the verdict: the reader should see what the
+             rule says, then what it did with money, then the measurement that
+             says not to copy it. Same panel markup as the other eleven books
+             (app.js bookPanelHtml), so it cannot drift from them. -->
+        <h3 class="sub">Bu kuralın kağıt defteri</h3>
+        <p class="muted small">
+          $1.000 ile açıldı (2026-09-16). Kırılımda <strong>tamamen girer</strong>,
+          stop ya da trend kırılınca <strong>tamamen çıkar</strong> &mdash; ara
+          boyutlandırma yok, çünkü kuralın iddiası &ldquo;kırılana kadar tut&rdquo;.
+          Dolumlar sinyalin kendi serisinden (<span id="breakout-book-symbol">-</span>)
+          fiyatlanıyor. <strong>Bu defterin kazanması beklenmiyor</strong>; aşağıdaki
+          ölçüm sebebini yazıyor.
+        </p>
+        <div id="breakout-book"></div>
+
         <!-- The measured result, on the card, in the same type as everything
              else. It is a loss and it says so. -->
         <p class="verdict" id="breakout-verdict">-</p>
@@ -686,8 +702,11 @@
             <p><strong>Neye yaramaz:</strong> ölçüm sonucu yukarıda, kartın kendi
             üzerindedir. Kısaca: <strong>bu kural al-ve-tut'u geçmiyor.</strong> Altında
             düşüşü ciddi şekilde azaltıyor ama parada geride kalıyor; gümüşte her iki
-            ölçüde de geride. Bu yüzden bu kurala bağlı <em>hiçbir kâğıt portföy yok</em> ve
-            sayfadaki hiçbir pozisyon buna göre ayarlanmıyor.</p>
+            ölçüde de geride. Bu kuralın <em>bir kağıt defteri var</em> (yukarıda, $1.000
+            ile, 2026-09-16'da açıldı) ama bu defter bir tavsiye değil, bir
+            <strong>gösteri</strong>: ölçülmüş bir kaybın tabloda değil canlı olarak,
+            al-ve-tut'un yanında görünmesi için. Sayfadaki başka hiçbir pozisyon buna
+            göre ayarlanmıyor ve tahmin motorunun hiçbir parçası bu kuralı okumuyor.</p>
           </div>
         </details>
       </section>

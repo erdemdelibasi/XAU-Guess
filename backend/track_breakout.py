@@ -10,8 +10,8 @@ because `breakout` is not a prediction component. It does not vote in
 ensemble.combine(), it does not appear in trading.STRATEGIES, and it sizes
 nothing.
 
-IT DELIBERATELY TRADES NOTHING
-------------------------------
+IT TRADES A $1,000 PAPER BOOK, AND THE BOOK IS EXPECTED TO LOSE
+---------------------------------------------------------------
 research/flow.py scored this rule against a bar declared before any result
 was looked at: beat buy-and-hold on Calmar on the BUYABLE instrument at the
 $10,000 rung in BOTH metals, and finish no more than 25% behind it in money.
@@ -31,14 +31,18 @@ on the buyable leg:
       silver  Calmar 0.154 vs 0.236  FAIL  |  $17,996 vs $32,715  -45.0%  FAIL
 
 Two vendors, two instruments, the same answer -- which is worth more than
-either run alone: the failure is the rule's, not a data artefact. So the bar
-was not cleared and no paper portfolio was created. The panel
-ships anyway, with that table on it, because the rule's state is a real and
-legible description of the market -- and because a project whose value is
-honest negative results should be able to show a measured loss on screen.
-`miners` set the precedent the other way round (a real signal too expensive
-to trade); this is the same discipline applied to a rule that is simply not
-better than holding.
+either run alone: the failure is the rule's, not a data artefact.
+
+The book was opened anyway (2026-09-16), on purpose, with that table printed
+on the card beside it. What it adds to the table is a thing a table cannot
+show: the rule's cost arriving one fill at a time, in public, against the
+same buy-and-hold benchmark every other book is measured against. A project
+whose value is honest negative results should be able to watch one lose.
+
+It is still NOT in trading.STRATEGIES: it is all-in/all-out on a discrete
+state rather than a scaled target exposure, the same third kind as
+`kanalfinans`. See breakout_trading.py for that distinction and
+tests/test_flow_signal.py for the boundaries it locks.
 
 THE WINDOW IS REWRITTEN, NOT APPENDED TO
 ----------------------------------------
@@ -60,6 +64,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 import assets as assets_module
+import breakout_trading
 import fetch_data
 import flow_signal
 import tv_history
@@ -189,6 +194,17 @@ def report(asset, rows: list[dict]) -> None:
           f"(%{100 * in_pos / len(rows):.0f})")
 
 
+def report_book(db, asset) -> None:
+    """The $1,000 paper book that runs this rule, after it has been updated."""
+    state = breakout_trading.get_state(db, asset.key)
+    if state is None:
+        print("DEFTER: yok -- schema.sql'in 2026-09-16 migration'i uygulanmamis.")
+        return
+    cash, units = float(state["cash_usd"]), float(state["ounces"])
+    print(f"DEFTER: {state['position']} -- nakit ${cash:,.2f}, "
+          f"{units:.4f} ons/birim")
+
+
 def run_asset(db, asset) -> int:
     rows = build_rows(asset)
     if not rows:
@@ -210,6 +226,17 @@ def run_asset(db, asset) -> int:
         print("  insert'i reddeder ve sayfadaki kart bos kalir.")
         return 0
     report(asset, rows)
+
+    # The book runs on the state that was just written, at the close that
+    # state was decided on. AFTER the upsert on purpose: a trade whose panel
+    # row failed to save would be a fill with nothing on screen explaining
+    # it, which is the one ordering this card must not produce.
+    try:
+        action = breakout_trading.apply_state(db, asset, rows[-1])
+        print(f"DEFTER KARARI: {action}")
+    except Exception as exc:  # noqa: BLE001 -- the panel is the primary job
+        print(f"WARNING: {asset.key} kirilim defteri guncellenemedi ({exc})")
+    report_book(db, asset)
     return 1
 
 

@@ -63,6 +63,12 @@ const STRATEGIES = [
     "(öncü korelasyon +0,150 → +0,040). Satın alınabilir bir strateji DEĞİL." },
   { key: "kanalfinans", label: "Kanal Finans TŞ", follower: true,
     desc: "Tunç Şatıroğlu ne derse onu yapar. Tam giriş/çıkış, zarar-kes takipli." },
+  // Like `follower`: all-in/all-out on a discrete state, not a target
+  // exposure, so it is drawn in its OWN card (Kırılım Takibi) beside the
+  // measurement that says it loses -- not in the grid of measured rules.
+  { key: "breakout", label: "Kırılım kuralı", breakoutBook: true,
+    desc: "Değer alanı kırılınca tam girer, stop ya da trend kırılınca tam çıkar. "
+        + "Ölçümde al-ve-tut'u geçemedi; defter bunu canlı göstermek için var." },
 ];
 
 // Order is the legend order AND the order chart.js's palette was validated
@@ -77,7 +83,7 @@ const BACKTEST_SERIES = ["voltarget", "trend", "defensive", "ensemble",
 const BACKTEST_SHORT = {
   buyhold: "Al-ve-tut", voltarget: "Oynaklık", trend: "Trend", defensive: "Savunma",
   ensemble: "Harman", technical: "Teknik", ml: "ML", macro: "Makro", miners: "Madenci",
-  claude: "Claude", kanalfinans: "Kanal F.",
+  claude: "Claude", kanalfinans: "Kanal F.", breakout: "Kırılım",
 };
 
 const STARTING_CASH = 1000;
@@ -1074,7 +1080,44 @@ const fmtOunces = (v) => {
 // gap between "pozisyon" and "hedef" is otherwise a puzzle the reader has to
 // solve, and the most common answer ("nothing, it is close enough") is the
 // one a bare pair of percentages communicates worst.
+/* The newest published breakout row for the selected metal, or null.
+
+   Shared by the book panel's "next action" line and the card itself, so the
+   two cannot say different things about the same level -- which they would
+   the first time one of them was edited. */
+function breakoutLatest() {
+  const mine = (cache.breakout ?? []).filter((r) => r.asset === currentAsset);
+  if (!mine.length) return null;
+  return mine.reduce((newest, r) =>
+    String(r.session_date) > String(newest.session_date) ? r : newest);
+}
+
 function nextActionFor(state, price, exposure, value) {
+  if (state.strategy === "breakout") {
+    // No target exposure at all, so the drift rule below would invent a
+    // rule this book does not follow -- same reason `kanalfinans` branches
+    // out here. What it DOES have is a pair of named levels, and those are
+    // the answer to "what is it waiting for".
+    const row = breakoutLatest();
+    const asset = ASSETS[currentAsset];
+    const usd = (v) => fmtUsd(v, asset.digits);
+    if (Number(state.ounces) > 0) {
+      const stop = row?.stop ? ` Stop ${usd(row.stop)} altına inerse` : " Stop kırılırsa";
+      const avwap = row?.avwap ? ` ya da iki seans ${usd(row.avwap)} altında kapanırsa` : "";
+      return { kind: "hold",
+               text: `Pozisyonda &mdash; trend kırılana kadar tutar.${stop}${avwap} tamamen satar.` };
+    }
+    if (!row?.vah) {
+      return { kind: "hold", text: "Nakitte &mdash; kırılım bekliyor." };
+    }
+    const away = price > 0 ? row.vah / price - 1 : null;
+    const gap = away === null ? "" : ` (${fmtSignedPct(away)})`;
+    return { kind: "hold",
+             text: `Nakitte &mdash; ${usd(row.vah)} üzeri kapanış${gap} bekliyor; `
+                 + `ayrıca AVWAP üstü, pozitif akış ve en az `
+                 + `${BREAKOUT_VERDICT[currentAsset].minConfirmations} onay şart.` };
+  }
+
   if (state.strategy === "kanalfinans") {
     // The follower has no target exposure at all: it is all-in or all-out on
     // a person's stated call (kanal_finans_trading.decide_on_mention), so
@@ -1127,9 +1170,24 @@ function nextActionFor(state, price, exposure, value) {
 // neighbours in STRATEGIES: with `claude` sitting between macro and miners,
 // the tan and the red became adjacent and that pair failed the palette's
 // normal-vision floor. See chart.js.
-const LIVE_SERIES = [...BACKTEST_SERIES, "claude", "kanalfinans"];
+const LIVE_SERIES = [...BACKTEST_SERIES, "claude", "kanalfinans", "breakout"];
 
 let liveSelection = new Set(["voltarget", "ensemble"]);
+
+/* When each book OPENED, for books that did not start with the others.
+ *
+ * Without this the replay below starts every curve at $1,000 on the first
+ * day of the window, so a book opened last week draws a flat $1,000 line
+ * back through a month it did not exist for -- and a flat line is not a
+ * neutral mark here, it is the claim "this book was open and in cash". It
+ * would also enter the "N of N are ahead of buy-and-hold" arithmetic on days
+ * it could not have traded.
+ *
+ * Everything not listed opened with the project, which is where the window
+ * itself starts, so an absent key means "no clipping needed" rather than
+ * "unknown". Dates are the book's first day, ISO, compared as strings
+ * against the point's own `date` -- both are YYYY-MM-DD. */
+const BOOK_OPENED = { breakout: "2026-09-16" };
 
 /* Replays `trades` into a daily equity curve per strategy.
 
@@ -1169,6 +1227,7 @@ function liveEquitySeries(assetKey, markPrice) {
   const series = LIVE_SERIES.concat("buyhold").map((key) => {
     let cash = STARTING_CASH, ounces = 0, i = 0;
     const mine = trades.filter((t) => t.strategy === key);
+    const opened = BOOK_OPENED[key] ?? null;
     const equity = points.map((pt) => {
       while (i < mine.length && mine[i].at <= pt.cutoff) {
         const t = mine[i++];
@@ -1177,6 +1236,10 @@ function liveEquitySeries(assetKey, markPrice) {
         if (t.side === "BUY") { cash -= gross; ounces += qty; }
         else { cash += gross - (Number(t.fee_usd) || 0); ounces -= qty; }
       }
+      // null, not $1,000: timeSeriesPanel lifts the pen on a null, so the
+      // line simply begins where the book does. "şimdi" is always after any
+      // opening date, so the live point is never clipped.
+      if (opened && pt.date !== "şimdi" && pt.date < opened) return null;
       return cash + ounces * pt.price;
     });
     return { key, label: backtestLabel(key), short: BACKTEST_SHORT[key] ?? key, equity };
@@ -1218,8 +1281,19 @@ function renderLiveChart(asset, price) {
   note.innerHTML = `<span class="readout-date">şimdi</span> ` + series.map((s) =>
       `<span class="readout-item"><i style="background:${Viz.colourFor(s.key)}"></i>`
       + `${esc(s.label)} <strong>${fmtUsd(s.equity[last], 2)}</strong></span>`).join(" ")
-    + ` <span class="muted">&mdash; her defter <strong>$1.000</strong> ile ve aynı gün`
-    + ` başladı; kesikli gri çizgi al-ve-tut.</span>`;
+    // Derived, not typed: this line said "her defter aynı gün başladı" for as
+    // long as that was true, and a book opened later would have made it
+    // quietly false -- the sentence is the only thing on the card that could
+    // have told the reader why one line starts in the middle of the plot.
+    + ` <span class="muted">&mdash; her defter <strong>$1.000</strong> ile başladı;`
+    + ` kesikli gri çizgi al-ve-tut.` + (() => {
+        const late = series.filter((s) => BOOK_OPENED[s.key])
+          .map((s) => `${esc(s.label)} (${fmtDate(BOOK_OPENED[s.key])})`);
+        return late.length
+          ? ` ${late.join(", ")} sonradan açıldı, o yüzden çizgisi daha geç başlıyor.`
+          : "";
+      })()
+    + `</span>`;
 
   Viz.renderBacktestCharts(root, { dates: built.dates, series, panels: ["equity"] });
 }
@@ -1273,13 +1347,27 @@ function bookPanelHtml(strategy, ctx) {
   const vsBenchmark =
     benchmarkValue && !strategy.benchmark ? value / benchmarkValue - 1 : null;
 
-  // The follower portfolio watches a level rather than a target exposure,
-  // so it shows that instead.
-  const extraRow = strategy.follower
-    ? `<div class="row"><span>zarar-kes</span><span>${
-        state.stop_loss_price ? fmtUsd(state.stop_loss_price, asset.digits) : "yok"
-      }</span></div>`
-    : `<div class="row"><span>hedef</span><span>${fmtPct(state.target_exposure, 0)}</span></div>`;
+  // Two of the eleven books watch a LEVEL rather than a target exposure, so
+  // they show that instead. Printing "hedef %0" for an all-in/all-out book
+  // states a target it does not have and that it will never move toward.
+  let extraRow;
+  if (strategy.follower) {
+    extraRow = `<div class="row"><span>zarar-kes</span><span>${
+      state.stop_loss_price ? fmtUsd(state.stop_loss_price, asset.digits) : "yok"
+    }</span></div>`;
+  } else if (strategy.breakoutBook) {
+    // Read off breakout_state, not off portfolios: the live stop is
+    // recomputed from price history every run and this book deliberately
+    // keeps no second copy of it.
+    const row = breakoutLatest();
+    extraRow = Number(state.ounces) > 0
+      ? `<div class="row"><span>stop</span><span>${
+          row?.stop ? fmtUsd(row.stop, asset.digits) : "-"}</span></div>`
+      : `<div class="row"><span>giriş eşiği</span><span>${
+          row?.vah ? fmtUsd(row.vah, asset.digits) : "-"}</span></div>`;
+  } else {
+    extraRow = `<div class="row"><span>hedef</span><span>${fmtPct(state.target_exposure, 0)}</span></div>`;
+  }
 
   // "%17 pozisyon" is a ratio; these two are the holding itself, and they
   // are what the question "did it actually buy any gold?" is asking. A
@@ -1294,7 +1382,7 @@ function bookPanelHtml(strategy, ctx) {
   const sincePurchase = basis.avgPrice ? price / basis.avgPrice - 1 : null;
 
   return `
-    <div class="strategy-panel${strategy.benchmark ? " benchmark" : ""}${strategy.follower ? " follower" : ""}">
+    <div class="strategy-panel${strategy.benchmark ? " benchmark" : ""}${strategy.follower ? " follower" : ""}${strategy.breakoutBook ? " breakout-book" : ""}">
       <div class="name">${strategy.label}${strategy.benchmark ? '<span class="badge">kıyas</span>' : ""}</div>
       <p class="desc">${strategy.desc}</p>
       <div class="value">${fmtUsd(value, 0)}</div>
@@ -1361,7 +1449,8 @@ function renderStrategies(portfolios, price, asset, costBasis) {
   // comparison it CAN make -- against the same benchmark, on the same days --
   // is the honest one.
   const measured = STRATEGIES.filter((s) => s.mechanical);
-  const signalled = STRATEGIES.filter((s) => !s.mechanical && !s.follower);
+  const signalled = STRATEGIES.filter(
+    (s) => !s.mechanical && !s.follower && !s.breakoutBook);
   const ahead = signalled.filter((s) => {
     const state = byKey.get(s.key);
     if (!state || benchmarkValue === null) return false;
@@ -1446,6 +1535,52 @@ function renderKanalFinansBook(portfolios, price, asset, costBasis) {
   const ctx = bookContext(portfolios, price, asset, costBasis);
   host.innerHTML = `<div class="strategy-grid follower-grid">`
     + bookPanelHtml(follower, ctx) + `</div>`;
+}
+
+/* The breakout rule's own $1,000 book, inside the Kırılım Takibi card.
+ *
+ * Same function as the other eleven panels (`bookPanelHtml`) and the same
+ * benchmark (`bookContext` computes buy-and-hold once), for the reason the
+ * follower's panel is drawn that way: two cards drawing the same box from two
+ * copies of the markup drift at the first row added to either.
+ *
+ * It sits HERE rather than in the grid of measured rules because it is the
+ * same third kind as the follower -- all-in/all-out on a discrete state
+ * (`breakout_trading.decide`), never sized by `compute_target_exposure`, and
+ * `REBALANCE_THRESHOLD` does not apply to it. Standing among the rules it
+ * would read as a twelfth rule; standing here it reads as what it is, a book
+ * on the rule this card measures. Its curve stays on `Defterlerin seyri`,
+ * where every book is compared on the same days against the same benchmark.
+ */
+function renderBreakoutBook(portfolios, price, asset, costBasis) {
+  const host = document.getElementById("breakout-book");
+  if (!host) return;
+  const strategy = STRATEGIES.find((s) => s.breakoutBook);
+  const ctx = bookContext(portfolios, price, asset, costBasis);
+  // No book row yet means the 2026-09-16 migration has not been applied. Say
+  // so rather than drawing an empty box -- the panel would otherwise print
+  // "-" with no way for a reader to learn why.
+  if (!ctx.byKey.get(strategy.key)) {
+    host.innerHTML = `<p class="muted small">Bu kuralın kağıt defteri henüz `
+      + `açılmamış. <code>supabase/schema.sql</code>'in <strong>2026-09-16</strong> `
+      + `migration'ı uygulandığında burada $1.000'lik defter belirir.</p>`;
+    return;
+  }
+  // Until this book has traded once, its "al-ve-tut'a göre" row is not about
+  // this book at all: it sits at exactly $1,000 while the benchmark has been
+  // running since early September, so the number is a report on buy-and-hold's
+  // own fortnight. Same discipline as renderStrategies printing the books' age
+  // beside "N of N are ahead", and as MIN_ROWS_FOR_VERDICT in renderHistory.
+  const fills = (cache.trades ?? []).filter(
+    (t) => t.asset === currentAsset && t.strategy === strategy.key).length;
+  const caveat = fills === 0
+    ? `<p class="muted small">Bu defter <strong>henüz hiç işlem yapmadı</strong> &mdash; `
+      + `kural boştaydı. Panelin &ldquo;al-ve-tut'a göre&rdquo; satırı bu yüzden bu `
+      + `defteri değil, al-ve-tut'un açılıştan bu yana ne yaptığını ölçüyor; `
+      + `karşılaştırma ilk dolumdan sonra anlam kazanır.</p>`
+    : "";
+  host.innerHTML = `<div class="strategy-grid follower-grid">`
+    + bookPanelHtml(strategy, ctx) + `</div>` + caveat;
 }
 
 // How long the paper books have been running, from the first fill on record.
@@ -1599,9 +1734,23 @@ const BREAKOUT_VERDICT = {
   },
 };
 
+/* How the verdict sentence ENDS, and it changed on 2026-09-16.
+ *
+ * It used to read "Bu yüzden buna bağlı bir portföy yok" -- true until the
+ * book was opened, and the kind of sentence that stays on screen sounding
+ * reasonable long after it stops being true. The measurement did not change;
+ * the decision did, and the card has to say which. */
+const BREAKOUT_BOOK_NOTE =
+  "Defter yine de açıldı &mdash; bu kaybı bir tabloda değil, canlı ve "
+  + "al-ve-tut'un yanında görmek için. Kopyalanacak bir kural değil.";
+
 function breakoutStateHtml(last, asset) {
   if (!last) return "";
-  const price = (v) => (v == null ? "-" : fmtUsd(v, 2));
+  // asset.digits, not a hardcoded 2. Silver quotes to three places everywhere
+  // else on this page, and the book panel below this card already used
+  // asset.digits -- so the same $69.83 level was printed two different ways
+  // inside one card. The parameter was always here and always ignored.
+  const price = (v) => (v == null ? "-" : fmtUsd(v, asset.digits));
   if (last.state) {
     const gain = last.entry_price ? last.close / last.entry_price - 1 : null;
     const room = last.stop ? last.close / last.stop - 1 : null;
@@ -1651,7 +1800,7 @@ function breakoutLevelsHtml(last, asset) {
     { label: "En çok işlem gören fiyat (POC)", value: last.poc, note: "hacim profilinin tepesi" },
     { label: "Değer alanı altı (VAL)", value: last.val, note: "ilk stop buradan" },
     { label: "Çapalı VWAP", value: last.avwap,
-      note: last.avwap_anchor ? `çapa: ${fmtUsd(last.avwap_anchor, 2)} (yıllık dip)` : "" },
+      note: last.avwap_anchor ? `çapa: ${fmtUsd(last.avwap_anchor, asset.digits)} (yıllık dip)` : "" },
     { label: "Fibonacci %38,2 desteği", value: fibSupport, note: "gösterilir, işlem üretmez" },
     { label: "Fibonacci %61,8 uzantısı", value: fibTarget, note: "gösterilir, işlem üretmez" },
   ];
@@ -1660,7 +1809,7 @@ function breakoutLevelsHtml(last, asset) {
     return `<div class="breakout-level">`
       + `<span class="breakout-level-label">${esc(r.label)}`
       + (r.note ? `<em class="muted small">${esc(r.note)}</em>` : "") + `</span>`
-      + `<span class="breakout-level-value"><strong>${fmtUsd(r.value, 2)}</strong>${away}</span>`
+      + `<span class="breakout-level-value"><strong>${fmtUsd(r.value, asset.digits)}</strong>${away}</span>`
       + `</div>`;
   }).join("") + `</div>`;
 }
@@ -1736,7 +1885,7 @@ function renderBreakout(rows, asset) {
   const ink = Viz.BREAKOUT_INK;
   const item = (colour, label, value) =>
     `<span class="readout-item"><i style="background:${colour}"></i>${esc(label)} `
-    + `<strong>${value == null ? "-" : fmtUsd(Number(value), 2)}</strong></span>`;
+    + `<strong>${value == null ? "-" : fmtUsd(Number(value), asset.digits)}</strong></span>`;
   const held = ordered.filter((r) => Number(r.state)).length;
   document.getElementById("breakout-readout").innerHTML =
     `<span class="readout-date">${fmtDate(last.session_date)}</span> `
@@ -1749,6 +1898,11 @@ function renderBreakout(rows, asset) {
     + `kural pozisyondaydı.</span>`;
 
   document.getElementById("breakout-levels").innerHTML = breakoutLevelsHtml(last, asset);
+
+  // The book's fill series, named in the book's own intro. Read off the row
+  // rather than typed, so it cannot disagree with the levels above it.
+  const symbolEl = document.getElementById("breakout-book-symbol");
+  if (symbolEl) symbolEl.textContent = last.source_symbol ?? "-";
 
   // The votes come from the backend. `votes_detail` is missing only on rows
   // written before that column existed, and a dash is the honest cell there
@@ -1778,13 +1932,13 @@ function renderBreakout(rows, asset) {
       + `(Calmar ${fmtNumber(verdict.calmar, 3)} — `
       + `al-ve-tut ${fmtNumber(verdict.benchCalmar, 3)}) ama <strong>parada geride kalıyor</strong>: `
       + `$10.000'lik hesapta ${fmtUsd(verdict.final, 0)}, al-ve-tut ${fmtUsd(verdict.benchFinal, 0)} `
-      + `(%${fmtNumber(100 * shortfall, 1)} daha az). Bu yüzden buna bağlı bir portföy yok.`
+      + `(%${fmtNumber(100 * shortfall, 1)} daha az). ${BREAKOUT_BOOK_NOTE}`
     : `Ölçüm: bu kural ${fmtNumber(verdict.years, 1)} yıl örneklem dışı, ${esc(verdict.etf)} `
       + `üzerinde (alınabilir bacak, sinyal 1 seans gecikmeli) `
       + `<strong>her iki ölçüde de al-ve-tut'un gerisinde</strong>: Calmar `
       + `${fmtNumber(verdict.calmar, 3)} — ${fmtNumber(verdict.benchCalmar, 3)}, ve `
       + `$10.000'lik hesapta ${fmtUsd(verdict.final, 0)} — ${fmtUsd(verdict.benchFinal, 0)} `
-      + `(%${fmtNumber(100 * shortfall, 1)} daha az). Bu yüzden buna bağlı bir portföy yok.`;
+      + `(%${fmtNumber(100 * shortfall, 1)} daha az). ${BREAKOUT_BOOK_NOTE}`;
 
   // No "the levels are in GLD dollars, convert them yourself" sentence any
   // more, and that absence is the point of the phase-2 source change: the
@@ -2418,6 +2572,7 @@ function renderAll() {
   renderHistory(cache.predictions[currentAsset] ?? [], asset);
   renderKanalFinansBook(cache.portfolios, mark.price, asset, cache.costBasis);
   renderBreakout(cache.breakout, asset);
+  renderBreakoutBook(cache.portfolios, mark.price, asset, cache.costBasis);
   renderKanalFinans(cache.mentions, cache.themes);
   // Asset-scoped -- see renderEtfBooks. Rendered from renderAll anyway
   // so a tab switch repaints it with whatever the price loop last had.
@@ -2649,6 +2804,10 @@ async function refreshPrices() {
     // another card now, and leaving it out would freeze one panel on the page
     // at whatever loadData last saw while its neighbours moved.
     renderKanalFinansBook(cache.portfolios, mark.price, asset, cache.costBasis);
+    // Same again for the breakout book: ounces x price, and its "waiting for
+    // $X (+%Y)" line is computed against the live price, so it is stale by
+    // exactly as much as the tick it misses.
+    renderBreakoutBook(cache.portfolios, mark.price, asset, cache.costBasis);
     // The ETF books are ounces x price too, and their price arrives on this
     // same tick. Left out, the card would sit at whatever loadData last saw
     // (five minutes) while everything beside it moved every two seconds.

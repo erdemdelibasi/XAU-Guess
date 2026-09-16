@@ -28,7 +28,7 @@ Az şey — ve bunu açıkça söylemek projenin ana tasarım ilkesidir.
 | İkisini birden tutmak? | Daha çok getiri, orantısız daha çok risk |
 | Fed faiz kararları alınabilir bir şey veriyor mu? | **Hayır.** 32 testin 0'ı geçti |
 | Merkez bankası alımı izlenebilir mi? | Tonaj **hayır** (günlük anahtarsız veri yok); **izi** evet |
-| Kırılımda girip trend kırılana kadar tutmak? | **Hayır.** İki ayrı veri kaynağında ölçüldü, ikisinde de aynı: altında düşüşü yarıya indiriyor ama parada %42 geride; gümüşte iki ölçüde de geride |
+| Kırılımda girip trend kırılana kadar tutmak? | **Hayır.** İki ayrı veri kaynağında ölçüldü, ikisinde de aynı: altında düşüşü yarıya indiriyor ama parada %42 geride; gümüşte iki ölçüde de geride. Yine de $1.000'lık bir defteri var — kaybı canlı göstermek için |
 | Spot altının (ons) hacim profili kurulabilir mi? | **Hayır, hiçbir kaynakta.** XAU/USD tezgâh üstüdür, konsolide tape yoktur — `TVC:GOLD` her barda 0 döndürüyor |
 | Peki COMEX vadelisinde? | **Evet, ama Yahoo'dan değil.** `GC=F` hacmi oturumlar arası tutarsız (%3,6 eşleşme), `SI=F` üç mertebe düşük; TradingView'in `COMEX:GC1!/SI1!` serileri sağlam ve zaten `$/ons` |
 
@@ -125,11 +125,16 @@ tutturur — ve tek yönlü davranan bir bileşen tabloda açıkça işaretlenir
 | `technical` / `ml` / `macro` / `claude` | Tek sinyal, tek portföy |
 | `kanalfinans` | Tunç Şatıroğlu ne derse o. Tam giriş/çıkış, zarar-kes takipli |
 
-Listede **`breakout` YOKTUR** ve bu ölçülmüş bir karardır: kırılım kuralı
-(emir akışı + çapalı VWAP + hacim profili) ön-kayıtlı barajı geçemedi, o yüzden
-üzerine para konmadı. Sayfada yalnızca bir **panel** olarak duruyor —
-`Kırılım Takibi` — ve kartın üzerinde al-ve-tut'a kaybettiği yazıyor
-(`backend/research/README.md` 18. bölüm).
+Listede **`breakout` yoktur** ve bunun sebebi ölçüm değil yapıdır: kırılım
+kuralı tam giriş / tam çıkış yapar, hedef pozisyonla boyutlanmaz. Kendi
+defteri **vardır** (metal başına $1.000, 2026-09-16'da açıldı) ve
+`Kırılım Takibi` kartının içinde, kendi ölçümünün yanında durur.
+
+**O defterin kazanması beklenmiyor.** Kural ön-kayıtlı barajı iki ayrı veri
+kaynağında geçemedi — altında Calmar'ı geçiyor ama parada %41,8 geride,
+gümüşte her iki ölçüde de geride (`backend/research/README.md` 18. bölüm).
+Defter kopyalanmak için değil, **ölçülmüş bir kaybın tabloda değil canlı
+olarak, al-ve-tut'un yanında görünmesi** için var.
 
 Her portföy kutusunun içinde, kendi **son altı işlemi** duruyor: tarihi,
 yönü, tutarı ve dolum fiyatı, üstünde de o defterin toplam işlem sayısı ve

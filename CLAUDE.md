@@ -20,10 +20,14 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
                               Model yok, LLM yok, makro panel yok: sadece
                               fiyat geçmişi ve trading.MECHANICAL.
   -> backend/track_breakout.py  aynı adımda, track_etf'ten sonra -- Kırılım
-                              Takibi panelinin durumu (breakout_state).
-                              HİÇBİR ŞEY İŞLEMİYOR: kural ön-kayıtlı barajı
-                              geçemedi (research/README.md 18. bölüm), o
-                              yüzden `breakout` trading.STRATEGIES'te YOK.
+                              Takibi panelinin durumu (breakout_state) VE o
+                              kuralın kendi $1000'lık defteri
+                              (breakout_trading.py, metal başına bir tane,
+                              2026-09-16'da açıldı). Kural ön-kayıtlı barajı
+                              GEÇEMEDİ (research/README.md 18. bölüm); defter
+                              bunu canlı göstermek için var, kopyalanmak için
+                              değil. `breakout` yine de trading.STRATEGIES'te
+                              YOK -- tam giriş/çıkış, hedef pozisyon değil.
                               Hacmi TradingView'den COMEX:GC1!/SI1! olarak
                               okur (tv_history.py), çünkü Yahoo o kontratların
                               hacmini sunamıyor -- ve o kontrat $/ons kote.
@@ -293,10 +297,26 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
       exception fırlatmaz, boş çerçeve döner; hiçbir tahmin yolu onu import
       etmez. Bozulursa bedeli bayat bir panel, kaçan bir karar değil.
 
-    **Üretime giren tek şey bir PANEL.** `breakout` `trading.STRATEGIES`'te
-    yok, `portfolios`'ta satırı yok, `ensemble.COMPONENTS`'te yok,
-    `ml_model.FEATURE_COLUMNS`'ta kolonu yok. `tests/test_flow_signal.py`
-    dördünü de kilitliyor. Kartın üzerinde yukarıdaki tablo yazılı.
+    **Üretime giren şey bir PANEL, ve 2026-09-16'dan beri bir DEFTER.**
+    `breakout` hâlâ `trading.STRATEGIES`'te yok, `ensemble.COMPONENTS`'te yok,
+    `ml_model.FEATURE_COLUMNS`'ta kolonu yok. Ama `portfolios`'ta **satırı
+    var**: metal başına $1000, tam giriş / tam çıkış (`breakout_trading.py`).
+
+    **Bu bir fikir değişikliği değil, ölçümün değişmemesine rağmen verilen bir
+    karar** — ve ikisini ayırmak önemli. Baraj geçilmedi ve geçilmiş gibi
+    davranılmıyor: kartın üzerinde yukarıdaki tablo, defterin yanında
+    "kopyalanacak bir kural değil" cümlesi, mailde kendi uyarı satırı duruyor.
+    Defterin eklediği şey tablonun ekleyemediği şey: **kaybın tek tek
+    dolumlarla, al-ve-tut'un yanında, aynı günlerde birikmesi.** Değeri
+    olumsuz sonuçları dürüst ölçmek olan bir depo, bir kaybı izlenebilir
+    kılabilmelidir.
+
+    `trading.STRATEGIES`'ten uzak durmasının sebebi ölçüm değil **yapı**:
+    orası `compute_target_exposure()` ile boyutlanan kuralların kümesi, bu
+    kural ise ayrık bir durumdan tam giriş/çıkış yapıyor — `kanalfinans`'la
+    aynı üçüncü tür. Bir hedef pozisyon vermek kuralın kendisiyle çelişirdi
+    ("kırılana kadar tut" ile "her sabah %3 kırp" aynı anda olamaz).
+    `tests/test_flow_signal.py` bu sınırları kilitliyor.
 
 Madde 5'in madde 3'ü **kurtarmadığını** anlamak kritik: oynaklık hedefleme
 hiçbir şey tahmin etmiyor, gerçekleşen oynaklığa tepki veriyor ve oynaklık
@@ -312,9 +332,9 @@ diğerlerinin yanında, kıyas rozetiyle duruyor.
 
 ## Önemli kısıtlar
 
-- **Gerçek para/emir yok.** Metal başına on bir portföy (onu `trading.py`'nin
-  motoruyla, biri Kanal Finans takipçisi) — toplam yirmi iki, artı GLD ve SLV
-  için dörder ETF defteri. Otuzu da sanal.
+- **Gerçek para/emir yok.** Metal başına **on iki** portföy (onu `trading.py`'nin
+  motoruyla, biri Kanal Finans takipçisi, biri kırılım kuralı) — toplam yirmi
+  dört, artı GLD ve SLV için dörder ETF defteri. **Otuz ikisi de sanal.**
 - **Hiçbir piyasa verisi anahtarı gerekmiyor.** Yahoo Finance chart API
   (GC=F, SI=F + 14 makro seri), Binance'in kamuya açık
   `data-api.binance.vision` uç noktası (altının hafta sonu fiyatı için
@@ -1024,9 +1044,22 @@ ek bir istek getirmiyor.
   ama eğri **her satırı** kullanıyor — her biri bir günün mark fiyatı. 30'luk
   bir tavan, bir ay sonra grafiği sessizce son altı haftaya kırpardı.
 
-**Palet 8'den 10 slota çıktı ve yeniden doğrulandı.** `claude` backtest
-edilemiyor, `kanalfinans` bir arşive bağlı — ikisi de yalnızca canlı grafikte
-var. `LIVE_SERIES`, `BACKTEST_SERIES`'i **yayarak** genişletiyor, yeniden
+**Palet 8'den 10'a, sonra 11 slota çıktı ve her seferinde yeniden
+doğrulandı.** `claude` backtest edilemiyor, `kanalfinans` bir arşive bağlı,
+`breakout` ayrık bir motor koşuyor — üçü de yalnızca canlı grafikte var.
+11. slot (2026-09-16, orkide `#a54ac2`) gamut taramasıyla seçildi, gözle
+değil: `frontend/tools/palette.js` CIEDE2000 + Viénot dikromasi simülasyonu
+koşuyor ve aday, mevcut paletin **kendi en kötü durumunu hiçbir ölçüde
+bozmamak** zorundaydı — ve bozmadı: onun en kötü dörtlüsü (34,9 / 2,1 / 12,6 /
+3,78:1) on birlikteyle **birebir aynı**. Aday taraması
+`frontend/tools/palette-search.js`'te; ölçüler `chart.js`'te slotun yanında da
+yazılı.
+**Bu ölçüler 1-10. slotları puanlayan araçla AYNI ÖLÇEKTE DEĞİL** — birbirleriyle
+karşılaştırılabilirler, eski kayıtlı sayılarla değil. Parlaklık/kroma bandı
+kısıtı taşıyıcı: ayrımı en yüksek adaylar 11:1 kontrastlı soluk pastellerdi ve
+onlar mesafeyi kazanıp okuyucunun gözünü sahipleniyordu.
+
+`LIVE_SERIES`, `BACKTEST_SERIES`'i **yayarak** genişletiyor, yeniden
 sıralayarak değil: renk varlığı takip eder, yani "mavi = oynaklık hedefi" iki
 grafikte de geçerli olmalı. Ve sıra kritik: `claude`'u `STRATEGIES`'teki
 komşusunun yanına koyunca tan ile kırmızı bitişik oldu ve çift normal-görüş
@@ -1343,7 +1376,8 @@ duyan satırlarda susturur.
 
 ### Alınabilir enstrüman: ayrı defterler, ayrı kayıt, ayrı iddia
 
-`predict.py`'nin ürettiği yirmi iki portföyün hepsi **COMEX vadeli** fiyatıyla
+`predict.py`'nin ürettiği yirmi iki portföyün hepsi (artı `track_breakout.py`'nin
+ikisi) **COMEX vadeli** fiyatıyla
 değerleniyor ve perakende bir hesap vadeli kontrat tutamaz. 16. ve 17. bölümler
 bunun kozmetik bir fark olmadığını ölçtü. `backend/track_etf.py` bu yüzden var:
 aynı kuralları **GLD ve SLV** üzerinde, işlem başına **$1,50 sabit komisyonla**
@@ -1519,6 +1553,32 @@ tablosu yok diye. `loadBacktest`'in kuralının aynısı.
 **Tablo yoksa kart kendini gizlemiyor, sebebini yazıyor.** Kaybolmuş bir kart,
 okuyucuya neden kaybolduğunu öğrenecek hiçbir yol bırakmaz.
 
+**Kartın içinde bir DEFTER var (2026-09-16), ve yeri tesadüf değil.** Sıra
+şudur: kuralın şu anki durumu → seviyeler → **defter** → ölçüm. Okuyucu önce
+kuralın ne dediğini, sonra parayla ne yaptığını, en sonda da bunu kopyalamaması
+gerektiğini söyleyen ölçümü görüyor. Ölçümü defterin üstüne koymak sıralamayı
+bozardı: bir kural hakkındaki hüküm, o kuralın ne yaptığı görülmeden okunursa
+soyut kalır.
+
+Panel **aynı fonksiyondan** çıkıyor (`bookPanelHtml`, ortak `bookContext`) —
+Kanal Finans kartıyla birebir aynı gerekçe. Üç incelik:
+
+- **`hedef %0` basmıyor.** Bu defterin hedef pozisyonu yok; onun yerine
+  pozisyondayken **stop**, boştayken **giriş eşiği** yazıyor, ikisi de
+  `breakout_state`'ten okunuyor. Sıfır bir hedef, defterin hiçbir zaman
+  yaklaşmayacağı bir hedefi iddia eder.
+- **İlk dolumdan önce "al-ve-tut'a göre" satırı bu defteri ölçmüyor** ve panel
+  bunu yazıyor: defter tam $1.000'da dururken kıyas Eylül başından beri
+  koşuyor, yani sayı al-ve-tut'un kendi iki haftasının raporu.
+  `renderStrategies`'in defter yaşını basmasıyla aynı disiplin.
+- **Canlı grafikte çizgisi defterin AÇILDIĞI günde başlıyor** (`BOOK_OPENED`).
+  Eksik nokta `null` dönüyor ve `timeSeriesPanel` kalemi kaldırıyor. Yoksa
+  pencerenin başından itibaren düz bir $1.000 çizgisi çizilirdi — ve düz çizgi
+  burada nötr bir işaret değil, "bu defter açıktı ve nakitteydi" iddiasıdır.
+  Grafiğin altındaki cümle de sonradan açılan defterleri **türeterek** yazıyor;
+  "her defter aynı gün başladı" diye sabit yazan sürüm, ikinci bir defter
+  eklendiğinde sessizce yanlış olacaktı.
+
 **Kart sekmeye bağlı, o yüzden düzyazısı da öyle olmak zorunda.** 2026-09-16'da
 düzeltildi: açıklama bloğu ve dipnot yalnızca **altını** anlatıyordu ("spot
 altının hacmi yok", "günde ~200 bin kontrat", gümüşe hiç değinmeyen bir Yahoo
@@ -1534,12 +1594,15 @@ basmak, okuyucuya o sayının seçili metale ait olduğunu söyler.
 > mutlaka yanlış. Cümle parçası bütün hâlde saklanıyor — kartın yüzde
 > cümlelerinin ek almaktan tamamen kaçınmasıyla aynı sebep.
 
-**Günlük mailde BİLEREK yok, ve bu bir eksik değil bir sınır.** `daily_report.py`
-para olan şeyleri raporluyor (defterler, tahmin, ETF kitapları) artı bir insanın
-görüşünü. Bu kural hiçbir şey işlemiyor, dolayısıyla maile koyacağı bir sonuç
-yok — koyulursa, her sabah al-ve-tut'a yenildiği ölçülmüş bir kuralın durumunu
-kazanan defterlerin yanına eşit puntoyla basmış olurduk, ki kartın yan kolonda
-durma gerekçesinin tam tersi. Eklenecekse önce bu paragrafın cevaplanması gerek.
+**Günlük maile 2026-09-16'da girdi, ve nasıl girdiği önemli.** Dışarıda
+kalma gerekçesi "bu kural hiçbir şey işlemiyor, dolayısıyla maile koyacağı bir
+sonuç yok" idi; defter açılınca o gerekçe düştü — `daily_report.py` para olan
+şeyleri raporluyor ve artık burada para var. Ama **kendi bölümü değil, portföy
+tablosunda bir SATIR**, ve altında `miners`'ınki gibi kendi uyarı satırı
+(`BREAKOUT_BOOK`). Ayrı bir bölüm, ölçülerek elenmiş bir kuralı ölçülerek
+seçilmiş defterlerle eşit puntoya çıkarırdı — kartın yan kolonda durma
+gerekçesinin tam tersi. Uyarı satırı **öne geçtiği haftalarda da** basılıyor,
+çünkü tam o hafta en çok gerekiyor.
 
 ### Portföy değerlemesi SPOT değil VADELİ fiyatla yapılır
 

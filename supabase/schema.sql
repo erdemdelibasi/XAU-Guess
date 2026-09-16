@@ -144,7 +144,13 @@ select a.asset, s.strategy
 from (values ('gold'), ('silver')) as a(asset)
 cross join (values
     ('buyhold'), ('voltarget'), ('trend'), ('defensive'), ('ensemble'),
-    ('technical'), ('ml'), ('macro'), ('claude'), ('kanalfinans'), ('miners')
+    ('technical'), ('ml'), ('macro'), ('claude'), ('kanalfinans'), ('miners'),
+    -- `breakout` is NOT in trading.STRATEGIES and must not be added there:
+    -- it is all-in/all-out on a discrete state, like `kanalfinans`, not a
+    -- scaled target exposure. It is seeded here because it is a real book
+    -- with real (fake) money -- see backend/breakout_trading.py for why a
+    -- rule that failed its pre-registered bar gets one anyway.
+    ('breakout')
 ) as s(strategy)
 on conflict (asset, strategy) do nothing;
 
@@ -313,21 +319,30 @@ create index if not exists kf_themes_idx on kanal_finans_themes (theme, publishe
 -- breakout_state  -- the breakout panel's history, one row per session
 -- ---------------------------------------------------------------------------
 -- Written by track_breakout.py, read by the frontend's "Kırılım Takibi" card
--- and the chart under it. NOT a prediction and NOT a portfolio: no row here
--- sizes a position, and `breakout` is deliberately absent from
--- trading.STRATEGIES (research/flow.py measured the rule against a
--- pre-registered bar and it did not clear it -- see section 18 of
--- research/README.md).
+-- and the chart under it. NOT a prediction: nothing here votes in an ensemble
+-- and no row sizes a position. Since 2026-09-16 it DOES drive a $1,000 paper
+-- book per metal (backend/breakout_trading.py), but that book is all-in /
+-- all-out on `state` below rather than on a target exposure, so `breakout` is
+-- still deliberately absent from trading.STRATEGIES -- the same third kind as
+-- `kanalfinans`. research/flow.py measured the rule against a pre-registered
+-- bar and it did not clear it (section 18 of research/README.md); the book
+-- exists to show that failure costing money in public, not to be copied.
+--
+-- The book keeps NO copy of the rule's stop: `portfolios.stop_loss_price`
+-- stays null for this strategy and the live stop is the `stop` column here,
+-- recomputed from price history every run. A stored second copy could only
+-- ever disagree with its own source.
 --
 -- WHY THE WHOLE WINDOW IS REWRITTEN EVERY RUN, not appended to
 -- ------------------------------------------------------------
--- Every column below is a deterministic function of the ETF's own price and
--- volume history, so recomputing a past session yields the same numbers --
+-- Every column below is a deterministic function of the COMEX contract's own
+-- price and volume history, so recomputing a past session yields the same
+-- numbers --
 -- an append-only log would carry exactly the same values with the added
 -- property that the chart starts empty and fills in over six months. The
 -- upsert makes the panel complete on its first run.
 --
--- The one case where a rewrite changes a past row is a Yahoo revision, and
+-- The one case where a rewrite changes a past row is a vendor revision, and
 -- that is the correct outcome: the levels a person sees should be the levels
 -- the current price history implies, not the ones a stale fetch implied.
 --
@@ -616,3 +631,27 @@ end $$;
 --   create policy breakout_state_public_read on breakout_state
 --       for select using (true);
 --
+
+-- ---------------------------------------------------------------------------
+-- MIGRATION 2026-09-16 -- the `breakout` paper books
+-- ---------------------------------------------------------------------------
+-- Opens one $1,000 book per metal on the breakout rule. The rule FAILED its
+-- pre-registered bar on both data sources it was measured against (see the
+-- 2026-09-15b note above and research/README.md section 18), and the book was
+-- opened deliberately anyway: the card carries the measurement, and what a
+-- live book adds is the cost arriving one fill at a time against the same
+-- buy-and-hold benchmark every other book is measured against.
+--
+-- Safe to re-run: `on conflict do nothing` leaves an existing book untouched,
+-- so this cannot reset a book that has already traded.
+--
+--   insert into portfolios (asset, strategy)
+--   select a.asset, 'breakout'
+--   from (values ('gold'), ('silver')) as a(asset)
+--   on conflict (asset, strategy) do nothing;
+--
+-- To RESET these two books later (and only these two -- this deletes fills):
+--   delete from trades where strategy = 'breakout';
+--   update portfolios set cash_usd = 1000, ounces = 0, position = 'CASH',
+--          target_exposure = 0, updated_at = now()
+--    where strategy = 'breakout';

@@ -73,6 +73,25 @@ const SERIES_COLOURS = {
   // (dE 13.7 against a 15 minimum). Moving it two places fixed it at 19.3.
   claude:      "#1f9aa8",   // slot 9   teal
   kanalfinans: "#a86a2a",   // slot 10  tan
+  // Slot 11, added 2026-09-16 with the `breakout` paper book. Chosen by
+  // re-running the validator over a gamut sweep, not by eye, and appended
+  // rather than slotted in for the reason slot 9 was: appending creates
+  // exactly ONE new adjacency (tan/orchid) instead of repainting the whole
+  // legend. Measured under CIEDE2000 with Vienot dichromacy simulation --
+  // a different metric from the tool that scored slots 1-10, so these
+  // figures are comparable to each other, NOT to the ones recorded for the
+  // original ten. Against the existing palette's own worst case under this
+  // same validator (in brackets), every figure is better:
+  //   adjacent, normal vision      48.6  [34.9 macro/miners]
+  //   adjacent, protan/deutan      56.8  [14.8 defensive/ensemble]
+  //   adjacent, tritan              4.5  [ 2.1 ensemble/technical]
+  //   closest of ANY pair          18.3  [12.6 ensemble/kanalfinans]
+  //   contrast on #15120d          3.88  [3.78 ml]
+  // It also stays inside the palette's luminance/chroma band (L 48, C 73
+  // against the ten's L 47.3-61.0, C 31.4-73.1). That constraint is load
+  // bearing: the best-separated candidates overall were pale pastels at
+  // 11:1 contrast, which win on distance and then own the reader's eye.
+  breakout:    "#a54ac2",   // slot 11  orchid
 };
 const BENCHMARK_COLOUR = "#b9ae99";   // muted ink, not a categorical slot
 // The price itself, on the breakout panel. Declared HERE beside the

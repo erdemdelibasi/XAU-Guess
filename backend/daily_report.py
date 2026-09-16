@@ -94,13 +94,26 @@ STRATEGY_LABELS = {
     "defensive": "Savunma", "ensemble": "Harman", "technical": "Sadece teknik",
     "ml": "Sadece ML", "macro": "Sadece makro", "claude": "Sadece Claude",
     "miners": "Madenciler", "kanalfinans": "Kanal Finans TŞ",
+    "breakout": "Kırılım kuralı",
 }
 # trading.STRATEGIES plus the follower, which is a real $1000 book keyed into
 # the same table but driven by a different engine (kanal_finans_trading.py).
 # It is comparable on exactly one axis -- what $1000 became -- and has no
 # directional calls to score, which the table says rather than leaving blank.
 FOLLOWER = "kanalfinans"
-REPORT_STRATEGIES = (*trading.STRATEGIES, FOLLOWER)
+# The breakout rule's own $1000 book (backend/breakout_trading.py). Like the
+# follower it is keyed into the same table and driven by a different engine,
+# so it is comparable on exactly one axis: what $1000 became.
+#
+# It was deliberately ABSENT from this mail while it traded nothing -- there
+# was no result to report. That reason expired on 2026-09-16 when the book
+# opened. It is a ROW rather than a section of its own, and it carries a
+# caveat line like `miners` does, because the rule FAILED its pre-registered
+# bar: a full section would print a measured-losing rule at the same weight
+# as the books that were measured to work, which is the opposite of why its
+# card sits in the page's narrow column.
+BREAKOUT_BOOK = "breakout"
+REPORT_STRATEGIES = (*trading.STRATEGIES, FOLLOWER, BREAKOUT_BOOK)
 BENCHMARK = "buyhold"
 
 # Kanal Finans stance/action wording is deliberately Turkish and different
@@ -615,6 +628,14 @@ def render_text(report: dict) -> str:
         if "miners" in beat:
             lines.append("    (Madenciler: kazanç VADELİ kontrata özgü, "
                          "GLD/IAU/SLV'de kayboluyor — satın alınabilir değil)")
+        # Printed whether or not it is ahead this week, unlike the miners
+        # caveat: this one is not a caveat about a win, it is the rule's
+        # measured result, and a week in which it happens to lead is exactly
+        # when a reader most needs it.
+        if section["books"].get(BREAKOUT_BOOK):
+            lines.append("    (Kırılım kuralı: ön-kayıtlı barajı iki ayrı veri "
+                         "kaynağında geçemedi — altında %41,8, gümüşte %45,0 "
+                         "parada geride. Defter kaybı canlı göstermek için var)")
 
         kf = section["kanal_finans"]
         if kf:
@@ -721,8 +742,17 @@ def _books_table_html(section: dict) -> str:
     # is not a failure, it is the result this project measured and expects.
     verdict = (", ".join(STRATEGY_LABELS[s] for s in beat) if beat
                else '<span style="color:%s;">HİÇBİRİ</span>' % BENCH)
-    note = (f'<tr><td colspan="6" style="padding:6px 9px 10px;font-size:11px;color:{MUTED};">'
-            f'Al-ve-tut\'u geçen: {verdict}</td></tr>')
+    # The breakout book's caveat, printed whether or not it is ahead this
+    # week -- unlike a caveat about a win, this is the rule's own measured
+    # result, and a week in which it happens to lead is exactly when a reader
+    # most needs it. Same job as the miners line in the text report.
+    caveat = ("" if not section["books"].get(BREAKOUT_BOOK) else
+              f'<br><span style="color:{MUTED};">Kırılım kuralı: ön-kayıtlı barajı '
+              f'iki ayrı veri kaynağında geçemedi (altında %41,8, gümüşte %45,0 '
+              f'parada geride). Defter kaybı canlı göstermek için var.</span>')
+    note = (f'<tr><td colspan="6" style="padding:6px 9px 10px;font-size:11px;color:{MUTED};'
+            f'line-height:1.45;">'
+            f'Al-ve-tut\'u geçen: {verdict}{caveat}</td></tr>')
 
     return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
             f'style="background:{CARD};border-radius:10px;overflow:hidden;margin:0 0 14px;'

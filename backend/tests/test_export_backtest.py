@@ -107,12 +107,14 @@ def test_every_drawable_strategy_is_listed_in_the_legend_order():
     never a chip, so it can never be turned on -- and the adjacency the
     colorblind check scored would no longer be the adjacency on screen.
 
-    LIVE_SERIES is the superset: the measured chart cannot show `claude` (no
-    backtest is possible) or `kanalfinans` (no archive), so both exist only on
-    the live books' chart.
+    LIVE_SERIES is the superset. Three books exist only on the live chart:
+    `claude` cannot be backtested at all (replaying 6,000 days through a paid
+    LLM is both expensive and meaningless -- it knows those dates),
+    `kanalfinans` depends on a video archive nobody kept, and `breakout` runs
+    a discrete engine of its own rather than an exposure the backtest sweeps.
     """
     colours = set(re.findall(r"^\s{2,4}(\w+):\s*\"#", read(CHART_JS), re.M))
-    live = set(_series_list("BACKTEST_SERIES")) | {"claude", "kanalfinans"}
+    live = set(_series_list("BACKTEST_SERIES")) | {"claude", "kanalfinans", "breakout"}
     assert colours == live, f"colours {colours ^ live} are in one list and not the other"
 
 
@@ -131,7 +133,7 @@ def test_live_legend_extends_the_measured_one_rather_than_reordering_it():
     assert live_src, "LIVE_SERIES not found"
     assert "...BACKTEST_SERIES" in live_src.group(1),         "LIVE_SERIES must spread BACKTEST_SERIES, not restate it"
     appended = re.findall(r'"(\w+)"', live_src.group(1))
-    assert appended == ["claude", "kanalfinans"], appended
+    assert appended == ["claude", "kanalfinans", "breakout"], appended
     assert measured[:1] == ["voltarget"]
 
 
@@ -141,8 +143,9 @@ def test_short_labels_exist_for_every_drawn_series():
     shorts = re.search(r"const BACKTEST_SHORT = \{(.*?)\};", read(APP_JS), re.S)
     assert shorts
     named = set(re.findall(r"(\w+):", shorts.group(1)))
-    # LIVE_SERIES, not BACKTEST_SERIES: the live books' chart draws two more.
-    drawn = set(_series_list("BACKTEST_SERIES")) | {"claude", "kanalfinans", "buyhold"}
+    # LIVE_SERIES, not BACKTEST_SERIES: the live books' chart draws three more.
+    drawn = set(_series_list("BACKTEST_SERIES")) | {"claude", "kanalfinans",
+                                                    "breakout", "buyhold"}
     assert drawn <= named, f"no short label for {drawn - named}"
 
 
