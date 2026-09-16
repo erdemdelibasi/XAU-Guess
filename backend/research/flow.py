@@ -49,12 +49,41 @@ METHOD
   * Results are printed on the cost ladder AND at the flat per-trade
     commission a real ETF broker charges, because those are different shapes
     of cost (README section 15).
-  * Both instruments. The signal is computed on the ETF (the only place this
-    project has a reproducible volume series -- Part 0) and the resulting
-    book is run on BOTH the ETF and the futures, because section 16 measured
-    a futures-only edge evaporating on the buyable instrument.
+  * Both instruments. The signal is computed on the COMEX contract (the only
+    place this project has a reproducible volume series -- Part 0) and the
+    resulting book is run on BOTH that contract and the buyable ETF, because
+    section 16 measured a futures-only edge evaporating on the ETF.
 
-Run:  cd backend/research && python flow.py            (~2 min, both metals)
+PHASE 2 -- SOURCE CHANGE, AND A SECOND PRE-REGISTRATION
+--------------------------------------------------------
+Phase 1 ran on GLD/SLV and FAILED the bar above (gold won on Calmar and
+finished 33.9% behind in money; silver lost on both). Part 0 then measured
+that TradingView serves what Yahoo could not: real COMEX volume, depth-
+invariant, 6,000 daily bars back to 2002 -- on a contract already quoted PER
+TROY OUNCE, which is the unit the panel is read in.
+
+That is a new data source, so it is a NEW experiment and it gets its own
+pre-registration rather than inheriting Phase 1's verdict:
+
+    The bar is UNCHANGED -- (1) and (2) above, on the buyable instrument at
+    the $10,000 rung, in both metals.
+
+    What changes is the construction: the signal is built on COMEX:GC1! /
+    COMEX:SI1! and the buyable leg applies it to GLD / SLV with ONE FULL
+    SESSION OF LAG. The futures bar closes at 17:00 New York and the ETF at
+    16:00, so an unlagged ETF leg would spend an hour of information its
+    trader did not have -- the same session-boundary artefact section 16
+    found under `miners`, and invisible at day resolution. The lag can only
+    make the ETF leg look worse than reality, never better.
+
+    The parameter sweep is scored on that SAME construction, on the training
+    half only, so selection and judgement measure one thing rather than two.
+
+    A futures-on-futures column is printed alongside for comparability with
+    the rest of the scoreboard. It is NOT the verdict: no retail account
+    holds a COMEX contract.
+
+Run:  cd backend/research && python flow.py            (~3 min, both metals)
 """
 from __future__ import annotations
 
@@ -76,6 +105,7 @@ import fetch_data  # noqa: E402
 import flow_signal  # noqa: E402
 import trading  # noqa: E402
 import panel as panel_module  # noqa: E402
+import tv_history  # noqa: E402
 
 ETF = {"gold": "GLD", "silver": "SLV"}
 TRADING_DAYS = 252
@@ -83,6 +113,12 @@ FLAT_FEE_USD = 1.50
 FLAT_SPREAD_BPS = 1.0
 VERDICT_ACCOUNT = 10_000
 ACCOUNT_SIZES = (5_000, 10_000, 25_000, 100_000)
+# Daily bars requested from TradingView. 6000 reaches 2002-11 on both
+# contracts, i.e. the same depth as the 25-year Yahoo panel the rest of this
+# bench runs on. The feed serves 12,000 (back to 1979) without a login, but
+# COMEX volume before the electronic era is a different animal and this study
+# has no reason to reach for it.
+TV_BARS = 6000
 
 # Pre-registered bar, restated as code so the verdict cannot drift from the
 # docstring.
@@ -97,106 +133,146 @@ BONFERRONI_T = 3.29  # |t| for p < 0.05/36, two-sided, large sample
 # Part 0 -- does this project have a volume series at all?
 # ---------------------------------------------------------------------------
 
+def _stability(frame_a, frame_b, tail: int = 250) -> tuple[int, float, float]:
+    """(common days, fraction identical, correlation) on the overlapping tail."""
+    a = frame_a.assign(d=frame_a["time"].dt.date)
+    b = frame_b.assign(d=frame_b["time"].dt.date)
+    m = a[["d", "volume"]].merge(b[["d", "volume"]], on="d",
+                                 suffixes=("_a", "_b")).tail(tail)
+    if m.empty:
+        return 0, float("nan"), float("nan")
+    return (len(m), float((m["volume_a"] == m["volume_b"]).mean()),
+            float(m["volume_a"].corr(m["volume_b"])))
+
+
+def _vendor_pairs():
+    """(label, shallow, deep) for test A, across both vendors."""
+    out = []
+    for symbol in ("GC=F", "SI=F"):
+        out.append((f"Yahoo {symbol}",
+                    fetch_data.drop_forming_bar(fetch_data.get_daily(symbol, years=2)),
+                    fetch_data.drop_forming_bar(fetch_data.get_daily(symbol, years=16))))
+    for ticker in tv_history.SYMBOLS.values():
+        out.append((f"TV {ticker}",
+                    tv_history.daily(ticker, bars=500),
+                    tv_history.daily(ticker, bars=6000)))
+    return out
+
+
 def part0() -> None:
     """The gate. Everything downstream is volume, so this runs first.
 
-    THREE tests, because the two futures series fail in two DIFFERENT ways
-    and a single test would have cleared one of them.
+    PHASE 1 asked "does this project have a volume series" of Yahoo alone,
+    found it did not on the futures, and built the panel on GLD/SLV instead.
+    That worked, and it cost the thing the panel is actually about: a reader
+    watching OUNCE gold got levels quoted in GLD dollars.
 
-      A) Same session, two range parameters. Catches nothing here -- all four
-         symbols agree with themselves within one minute. Printed anyway,
-         because it is the test the obvious version of this check would have
-         run, and it PASSES for a series that is unusable.
+    PHASE 2 asks the same question of a second vendor, because the finding was
+    never "futures have no volume" -- COMEX prints ~200,000 gold contracts a
+    day -- it was "this vendor cannot serve it". Same three tests, now across
+    both vendors:
 
-      B) Across sessions: today's fetch against the panel snapshot cached on
-         disk days ago. This is where GC=F fails, and it is the only test
-         that sees it -- the SAME dates that read ~600 contracts when the
-         panel was built read ~170,000 today, with nothing in between but
-         time. Whatever Yahoo stitches its continuous contract from, it
-         restitches, retroactively.
+      A) Same session, two requested depths. Yahoo PASSES this for all four
+         symbols, and it is the test that catches nothing. Kept for exactly
+         that reason.
+      B) Same DATE, different day or different depth -- does the number hold
+         still. This is where Yahoo's GC=F fails.
+      C) Is the LEVEL plausible against what COMEX actually trades. This is
+         where Yahoo's SI=F fails.
 
-      C) Plausibility of the level, by requested depth. COMEX gold trades
-         ~200k contracts a day and COMEX silver ~60k. Gold's recent years now
-         report that; its deep history reports hundreds. Silver reports tens
-         at every depth -- that is not a noisy measurement of 60k, it is a
-         different quantity.
+    Plus a fourth question only a second vendor can answer: do two independent
+    sources agree? Agreement is not proof, but a disagreement of three orders
+    of magnitude settles which one is wrong.
     """
     print("\n" + "=" * 100)
     print("  BOLUM 0 -- HACIM SERISI GUVENILIR MI? (her seyin on sarti)")
     print("=" * 100)
 
-    print("\n  A) AYNI OTURUM -- ayni sembol, iki farkli aralikla, ardarda.")
-    print("     Bu testi dort sembolun dordu de geciyor; tek basina kosulsaydi")
-    print("     kullanilamaz iki seriye de temiz kagit verirdi.\n")
-    print(f"      {'sembol':<8}{'ortak gun':>11}{'ayni mi':>10}{'korelasyon':>13}")
-    print("      " + "-" * 42)
-    for symbol in ("GC=F", "SI=F", "GLD", "SLV"):
-        # The forming bar is dropped on BOTH sides. Without it the last row
-        # differs between two fetches a second apart -- a live session, not an
-        # instability -- and this test would print a false failure.
-        a = fetch_data.drop_forming_bar(fetch_data.get_daily(symbol, years=2))
-        b = fetch_data.drop_forming_bar(fetch_data.get_daily(symbol, years=16))
-        if a.empty or b.empty:
-            print(f"      {symbol:<8}{'veri yok':>11}")
+    print("\n  ONCE SPOT: 'ons altin' en dogrudan XAU/USD demek, o yuzden once o")
+    print("  olculdu. Spot metal tezgah-ustu bir piyasa ve konsolide bir tape'i YOK:\n")
+    for ticker in ("TVC:GOLD", "TVC:SILVER", "FX_IDC:XAUUSD", "OANDA:XAUUSD", "OANDA:XAGUSD"):
+        frame = tv_history.daily(ticker, bars=500)
+        if frame.empty:
+            print(f"      {ticker:<16} SERI YOK -- saglanmiyor")
             continue
-        a, b = a.assign(d=a["time"].dt.date), b.assign(d=b["time"].dt.date)
-        m = a[["d", "volume"]].merge(b[["d", "volume"]], on="d",
-                                     suffixes=("_a", "_b")).tail(250)
-        same = float((m["volume_a"] == m["volume_b"]).mean())
-        print(f"      {symbol:<8}{len(m):>11}{('EVET' if same == 1.0 else 'HAYIR'):>10}"
-              f"{m['volume_a'].corr(m['volume_b']):>13.3f}")
+        print(f"      {ticker:<16} {len(frame):>4} bar, medyan hacim "
+              f"{frame['volume'].median():>12,.0f}")
+    print("\n      Okuma: TVC ve FX_IDC her barda SIFIR. OANDA bir sayi doner ve o")
+    print("      sayi yanlis olandir -- tek bir perakende araci kurumun kendi")
+    print("      tikleri, piyasanin degil. Bir hacim profili 'PIYASA nerede islem")
+    print("      gordu' iddiasidir; spot icin o iddiayi tasiyabilecek seri yok.")
 
-    print("\n  B) OTURUMLAR ARASI -- bugunun cekisi, diskteki panel anlik")
-    print("     goruntusune karsi (gunler once alinmis, ayni tarihler).\n")
-    print(f"      {'sembol':<8}{'ortak gun':>11}{'ayni %':>10}{'korelasyon':>13}"
+    print("\n  A) AYNI OTURUM -- ayni sembol, iki farkli derinlikle ardarda.\n")
+    print(f"      {'kaynak/sembol':<24}{'ortak gun':>11}{'ayni %':>9}{'korelasyon':>13}")
+    print("      " + "-" * 57)
+    for label, shallow, deep in _vendor_pairs():
+        n, same, corr = _stability(shallow, deep)
+        print(f"      {label:<24}{n:>11}{100 * same:>8.1f}%{corr:>13.3f}")
+    print("\n      Dordu de geciyor. Tek basina kosulsaydi kullanilamaz iki seriye")
+    print("      de temiz kagit verirdi.")
+
+    print("\n  B) AYNI TARIH, BASKA ZAMAN -- diskteki panel anlik goruntusu (gunler")
+    print("     once alinmis) vs bugunun cekisi. Yahoo'nun GC=F'i burada dusuyor.\n")
+    print(f"      {'sembol':<10}{'ortak gun':>11}{'ayni %':>9}{'korelasyon':>13}"
           f"{'medyan o gun':>15}{'medyan bugun':>15}")
-    print("      " + "-" * 72)
+    print("      " + "-" * 73)
     for key, symbol in (("gold", "GC=F"), ("silver", "SI=F")):
-        path = panel_module.panel_path(key)
-        if not path.exists():
-            print(f"      {symbol:<8}  panel onbellegi yok -- panel.py ile kurun")
+        if not panel_module.panel_path(key).exists():
+            print(f"      {symbol:<10}  panel onbellegi yok -- panel.py ile kurun")
             continue
         snap = panel_module.load(key)
-        snap = snap.assign(d=snap["time"].dt.date)
         now = fetch_data.get_daily(symbol, years=2)
-        now = now.assign(d=now["time"].dt.date)
-        m = snap[["d", "volume"]].merge(now[["d", "volume"]], on="d",
-                                        suffixes=("_snap", "_now")).tail(250)
-        if m.empty:
-            continue
-        print(f"      {symbol:<8}{len(m):>11}"
-              f"{100 * (m['volume_snap'] == m['volume_now']).mean():>9.1f}%"
-              f"{m['volume_snap'].corr(m['volume_now']):>13.3f}"
-              f"{m['volume_snap'].median():>15,.0f}{m['volume_now'].median():>15,.0f}")
+        n, same, corr = _stability(snap, now)
+        j = (snap.assign(d=snap["time"].dt.date)[["d", "volume"]]
+             .merge(now.assign(d=now["time"].dt.date)[["d", "volume"]],
+                    on="d", suffixes=("_o", "_n")).tail(250))
+        print(f"      {symbol:<10}{n:>11}{100 * same:>8.1f}%{corr:>13.3f}"
+              f"{j['volume_o'].median():>15,.0f}{j['volume_n'].median():>15,.0f}")
 
     print("\n  C) SEVIYE MAKUL MU -- COMEX altini gunde ~200 bin, gumusu ~60 bin")
     print("     kontrat isliyor. Istenen derinlige gore medyan hacim:\n")
     depths = (2, 5, 10, 16, 25)
-    print(f"      {'sembol':<8}" + "".join(f"{str(y) + ' yil':>14}" for y in depths)
-          + f"{'sifir gun(25y)':>16}")
-    print("      " + "-" * (8 + 14 * len(depths) + 16))
+    print(f"      {'Yahoo':<12}" + "".join(f"{str(y) + ' yil':>14}" for y in depths))
+    print("      " + "-" * (12 + 14 * len(depths)))
     for symbol in ("GC=F", "SI=F", "GLD", "SLV"):
-        cells, zeros = [], 0
-        for years in depths:
-            d = fetch_data.get_daily(symbol, years=years)
-            cells.append(float(d["volume"].median()) if not d.empty else float("nan"))
-            if years == depths[-1] and not d.empty:
-                zeros = int((d["volume"] == 0).sum())
-        print(f"      {symbol:<8}" + "".join(f"{c:>14,.0f}" for c in cells)
-              + f"{zeros:>16}")
+        cells = [fetch_data.get_daily(symbol, years=y)["volume"].median() for y in depths]
+        print(f"      {symbol:<12}" + "".join(f"{c:>14,.0f}" for c in cells))
+    tv_depths = (500, 2000, 6000)
+    print(f"\n      {'TradingView':<12}" + "".join(f"{str(b) + ' bar':>14}" for b in tv_depths))
+    print("      " + "-" * (12 + 14 * len(tv_depths)))
+    for ticker in tv_history.SYMBOLS.values():
+        cells = [tv_history.daily(ticker, bars=b)["volume"].median() for b in tv_depths]
+        print(f"      {ticker:<12}" + "".join(f"{c:>14,.0f}" for c in cells))
 
-    print("\n  Okuma: GC=F (B)'de dusuyor -- ayni tarih, gunler arayla iki farkli")
-    print("  sayi (%3.6'si tutuyor, korelasyon -0.10). Uzerine kurulan bir deger")
-    print("  alani her yeniden kurulumda BASKA turlu cikar, hicbir yerde hata")
-    print("  vermeden. (C) ayni arizanin derinlik eksenindeki hali: altinin son")
-    print("  yillari gercek hacmi doner, derin gecmisi yuzleri.")
-    print("  SI=F yalnizca (C)'de dusuyor, ve her derinlikte -- seviyenin kendisi")
-    print("  COMEX gumusunun uc mertebe altinda. Yani iki vadeli seri IKI FARKLI")
-    print("  sekilde kullanilamaz; tek bir test ikisinden birine temiz kagit")
-    print("  verirdi ve (A) tam olarak onu yapiyor.")
-    print("  ETF hacmi ucunu de geciyor. Bu yuzden flow_signal.py hacimle ilgili")
-    print("  HER seyi ETF serisinden okuyor, metali ise kendi fiyatiyla isliyor")
-    print("  -- ve Bolum 4 kurali IKI enstrumanda da kosuyor.")
+    print("\n  D) IKI KAYNAK BIRBIRINI TUTUYOR MU -- ayni 250 gun, TradingView vs")
+    print("     TAZE bir Yahoo cekisi.\n")
+    print(f"      {'metal':<10}{'hacim kor':>12}{'medyan TV':>14}{'medyan YF':>14}"
+          f"{'kapanis kor':>14}{'kapanis fark':>14}")
+    print("      " + "-" * 78)
+    for key, yahoo_symbol in (("gold", "GC=F"), ("silver", "SI=F")):
+        tv = tv_history.daily_for(key, bars=2000)
+        yf = fetch_data.drop_forming_bar(fetch_data.get_daily(yahoo_symbol, years=3))
+        if tv.empty or yf.empty:
+            continue
+        j = (tv.assign(d=tv["time"].dt.date)[["d", "volume", "close"]]
+             .merge(yf.assign(d=yf["time"].dt.date)[["d", "volume", "close"]],
+                    on="d", suffixes=("_tv", "_yf")).tail(250))
+        gap = (j["close_tv"] / j["close_yf"] - 1.0).abs().median()
+        print(f"      {key:<10}{j['volume_tv'].corr(j['volume_yf']):>12.3f}"
+              f"{j['volume_tv'].median():>14,.0f}{j['volume_yf'].median():>14,.0f}"
+              f"{j['close_tv'].corr(j['close_yf']):>14.4f}{100 * gap:>13.3f}%")
+
+    print("\n  HUKUM: Yahoo'nun vadeli hacmi kullanilamaz -- GC=F (B)'de, SI=F (C)'de")
+    print("  dusuyor. TradingView'inki ucunu de geciyor, ve altinda BAGIMSIZ Yahoo")
+    print("  cekisiyle SEVIYEDE ortusuyor; gumuste ortusmuyor, ki asil mesele o.")
+    print("  Ustelik COMEX kontrati ZATEN $/ons kote ediliyor, yani panel hem gercek")
+    print("  hacme hem okuyucunun istedigi birime ayni anda kavusuyor. Sinyal bu")
+    print("  yuzden Faz 2'de COMEX:GC1!/SI1! uzerinde kuruluyor.")
+    print("\n  Bir uyari, (D)'nin kapanis sutunundan: iki saticinin surekli kontrat")
+    print("  dikisi ayni degil (medyan mutlak fark yukarida). Bu, portfoylerin")
+    print("  degerlendigi seriyle panelin serisi arasinda ZATEN var olan ve")
+    print("  CLAUDE.md'de kayitli olan farkin aynisi -- arayuz GC1!'e markliyor,")
+    print("  backend GC=F ile dolduruyor.")
 
 
 # ---------------------------------------------------------------------------
@@ -204,24 +280,30 @@ def part0() -> None:
 # ---------------------------------------------------------------------------
 
 def flow_frame(asset) -> pd.DataFrame:
-    """ETF OHLCV with every flow column, plus the futures close beside it.
+    """The COMEX contract with every flow column, plus the ETF close beside it.
 
-    The futures close is joined on the ETF's calendar, backward only. It is
-    NOT used by any signal column -- it exists so Part 4 can run the same
-    position path on the metal's own price and see whether the answer
-    survives the instrument change.
+    PHASE 2 SOURCE CHANGE. Phase 1 built this on GLD/SLV because Yahoo could
+    not serve futures volume. Part 0 measured that TradingView can, so the
+    signal now lives on the instrument the reader is actually watching:
+    COMEX:GC1! and COMEX:SI1! are quoted per troy ounce and are already what
+    frontend/app.js marks the portfolios to.
+
+    The ETF close is joined on the futures calendar, backward only, for the
+    buyable-instrument leg. No signal column reads it.
     """
-    ticker = ETF[asset.key]
-    etf = fetch_data.drop_forming_bar(fetch_data.get_daily(ticker, years=25))
-    if etf.empty:
-        return pd.DataFrame()
-    frame = flow_signal.add_flow_columns(etf)
+    frame = flow_signal.add_flow_columns(
+        fetch_data.drop_forming_bar(tv_history.daily_for(asset.key, bars=TV_BARS)))
+    if frame.empty:
+        return frame
 
-    futures = fetch_data.drop_forming_bar(fetch_data.get_daily(asset.symbol, years=25))
-    fut = futures.set_index(pd.DatetimeIndex(futures["time"]).normalize())["close"]
-    fut = fut[~fut.index.duplicated(keep="last")]
-    index = pd.DatetimeIndex(frame["time"]).normalize()
-    frame["futures_close"] = fut.reindex(index, method="ffill").to_numpy()
+    etf = fetch_data.drop_forming_bar(fetch_data.get_daily(ETF[asset.key], years=25))
+    if etf.empty:
+        frame["etf_close"] = float("nan")
+        return frame
+    series = etf.set_index(pd.DatetimeIndex(etf["time"]).normalize())["close"]
+    series = series[~series.index.duplicated(keep="last")]
+    frame["etf_close"] = series.reindex(
+        pd.DatetimeIndex(frame["time"]).normalize(), method="ffill").to_numpy()
     return frame
 
 
@@ -322,7 +404,10 @@ def sweep(frame: pd.DataFrame, years: float) -> tuple[tuple, pd.DataFrame]:
     surface is, which is the difference between a chosen parameter and a
     lucky one.
     """
-    prices = frame["close"].to_numpy(dtype=float)
+    # Scored on the SAME construction the verdict is read on -- the buyable
+    # ETF leg with a one-session lag -- so selection and judgement are not
+    # measuring two different things. Training half only, always.
+    prices = frame["etf_close"].to_numpy(dtype=float)
     scaled_fee = FLAT_FEE_USD * trading.STARTING_CASH / VERDICT_ACCOUNT
     spread = FLAT_SPREAD_BPS / 10_000.0
 
@@ -332,7 +417,7 @@ def sweep(frame: pd.DataFrame, years: float) -> tuple[tuple, pd.DataFrame]:
             path = flow_signal.breakout_path(frame, min_confirmations=min_conf,
                                              stop_sigmas=sigmas)
             for flat in (0.0, 0.35):
-                targets = flow_signal.exposure_path(path, flat).to_numpy(dtype=float)
+                targets = lagged(flow_signal.exposure_path(path, flat).to_numpy(dtype=float))
                 res = run_book(prices, targets, spread, scaled_fee, years)
                 rows.append({"min_conf": min_conf, "sigmas": sigmas, "flat": flat,
                              "calmar": np.nan if res["bust"] else res["calmar"],
@@ -419,6 +504,26 @@ def flat_fee_report(label: str, frame: pd.DataFrame, targets: np.ndarray,
     return out
 
 
+def lagged(targets: np.ndarray) -> np.ndarray:
+    """Yesterday's target, for the buyable-instrument leg.
+
+    THIS SHIFT IS THE WHOLE REASON THE ETF LEG IS HONEST. The signal now
+    lives on COMEX:GC1!, whose daily bar closes at 17:00 New York; GLD closes
+    at 16:00. Applying today's futures signal to today's ETF close would use
+    an hour of information the ETF trader did not have -- a smaller version of
+    exactly the session-boundary artefact research/README.md section 16 found
+    under `miners`, and one a day-resolution study cannot see.
+
+    A full session of lag is conservative in the safe direction: it can only
+    make the ETF leg look worse than a real trader could have done, never
+    better.
+    """
+    out = np.empty_like(targets)
+    out[0] = 0.0
+    out[1:] = targets[:-1]
+    return out
+
+
 def part4(asset, test: pd.DataFrame, chosen: tuple, years: float) -> dict:
     print("\n" + "-" * 100)
     print(f"  BOLUM 4 -- secilen tek konfigurasyon, IKINCI YARIDA ({asset.label})")
@@ -429,16 +534,21 @@ def part4(asset, test: pd.DataFrame, chosen: tuple, years: float) -> dict:
                                      stop_sigmas=chosen[1])
     targets = flow_signal.exposure_path(path, chosen[2]).to_numpy(dtype=float)
     entries = int((path["state"].diff() == 1).sum())
-    stops = int((path["exit_reason"] == "stop").diff().eq(True).sum())
     print(f"\n      {entries} giris, pozisyonda gecen sure %{100 * path['state'].mean():.0f}, "
           f"ortalama tutus {path['state'].sum() / max(entries, 1):.0f} seans")
 
-    ladder_report(f"ETF ({ETF[asset.key]}) -- ALINABILIR", test, targets, "close", asset, years)
-    ladder_report(f"vadeli ({asset.symbol}) -- alinamaz", test, targets,
-                  "futures_close", asset, years)
-    etf_flat = flat_fee_report(f"ETF ({ETF[asset.key]}) -- ALINABILIR",
+    # Primary column: signal and price on the SAME instrument, same bar, no
+    # alignment question to answer.
+    ladder_report(f"vadeli ({tv_history.SYMBOLS[asset.key]}) -- $/ons, sinyalin kendi serisi",
+                  test, targets, "close", asset, years)
+    # Buyable column: one full session of lag -- see lagged().
+    ladder_report(f"ETF ({ETF[asset.key]}) -- ALINABILIR, sinyal 1 seans gecikmeli",
+                  test, lagged(targets), "etf_close", asset, years)
+    etf_flat = flat_fee_report(f"ETF ({ETF[asset.key]}) -- ALINABILIR, 1 seans gecikmeli",
+                               test, lagged(targets), "etf_close", years)
+    fut_flat = flat_fee_report(f"vadeli ({tv_history.SYMBOLS[asset.key]}) -- kiyas icin",
                                test, targets, "close", years)
-    return {"flat": etf_flat, "entries": entries,
+    return {"flat": etf_flat, "futures_flat": fut_flat, "entries": entries,
             "in_position": float(path["state"].mean())}
 
 
@@ -449,7 +559,7 @@ def part4(asset, test: pd.DataFrame, chosen: tuple, years: float) -> dict:
 def run_for_asset(asset) -> dict:
     print("\n" + "#" * 100)
     print(f"### {asset.label.upper()}  --  kirilim rejimi "
-          f"(sinyal {ETF[asset.key]} hacminden, kitap iki enstrumanda)")
+          f"(sinyal {tv_history.SYMBOLS[asset.key]}, $/ons, gercek COMEX hacmi)")
     print("#" * 100)
 
     frame = flow_frame(asset)
@@ -460,7 +570,8 @@ def run_for_asset(asset) -> dict:
     # different rule (no value area, no anchored VWAP). Dropping them here
     # rather than letting breakout_path skip them keeps the two halves the
     # same rule on the same footing.
-    frame = frame.dropna(subset=["vah", "avwap", "flow", "sigma", "fib_pos"]).reset_index(drop=True)
+    frame = frame.dropna(subset=["vah", "avwap", "flow", "sigma", "fib_pos",
+                                "etf_close"]).reset_index(drop=True)
     span_years = (frame["time"].iloc[-1] - frame["time"].iloc[0]).days / 365.25
     print(f"\n  {len(frame)} seans, {frame['time'].iloc[0].date()} -> "
           f"{frame['time'].iloc[-1].date()} ({span_years:.1f} yil)")

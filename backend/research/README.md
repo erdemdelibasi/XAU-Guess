@@ -48,7 +48,7 @@ puanlanan bir sayı hiçbir şey ifade etmez.**
 | `instrument.py` | Tüm skorbord `GLD`/`IAU`/`SLV` üzerinde: bu depodaki kenar, gerçekten alınabilen enstrümanda da var mı — ortak pencere ve sabit komisyonla |
 | `miners.py` | `GDX`/`^HUI` madenci öncülüğü: bilgi hangi günde yaşıyor, üretim özellik setine katıyor mu, maliyet merdiveninin neresinde ölüyor — üç kontrollü |
 | `pooled.py` | Bağlayıcı kısıt gözlem sayısıysa: iki metali havuzlayıp eğitmek IC'yi artırıyor mu — üç kollu (üretim / normalleştirilmiş / havuz) |
-| `flow.py` | Kırılım rejimi: emir akışı (CMF vekili), çapalı VWAP, hacim profili + altı osilatör onayı. Önce hacim serisinin kendisini üç testle sınar, sonra kuralı ön-kayıtlı baraja karşı puanlar — iki metal, iki enstrüman |
+| `flow.py` | Kırılım rejimi: emir akışı (CMF vekili), çapalı VWAP, hacim profili + altı osilatör onayı. Önce hacim serisinin kendisini üç testle **iki satıcıda** sınar (Yahoo vs TradingView), sonra kuralı ön-kayıtlı baraja karşı puanlar — iki metal, iki enstrüman |
 
 ```bash
 cd backend/research
@@ -1562,6 +1562,14 @@ pozisyon alıp haftalarca içinde oturuyor. Dolayısıyla IC ile ya da 5 günlü
 isabetle puanlanamaz: soru "yarın ne olacak" değil, **"aldığı pozisyon, kendi
 çıkışına kadar tutulduğunda metali geçiyor mu"**.
 
+> **Bu bölüm İKİ FAZ taşıyor ve ikisi de burada duruyor.** Aşağıdaki Bölüm
+> 0–5 **Faz 1**'dir: sinyal `GLD`/`SLV` üzerinde kuruldu, çünkü Yahoo vadeli
+> hacmi sunamıyordu. **Faz 2** (en sonda) aynı soruyu ikinci bir satıcıya
+> sordu, sinyali `COMEX:GC1!`/`SI1!`'e taşıdı — ve hüküm değişmedi. Faz 1
+> silinmedi, çünkü iki farklı kaynakta aynı sonucun çıkması, herhangi bir
+> koşunun tek başına söylediğinden fazlasını söylüyor. **Üretimde çalışan
+> Faz 2'dir.**
+
 ### Ön-kayıtlı baraj — sonuçlara bakılmadan ÖNCE yazıldı
 
 17. bölümün `SURVIVES` tanımı, artı aynı bölümün var olma sebebi olan para şartı:
@@ -1578,7 +1586,7 @@ Calmar'ı basan bir arayüz bunu bir zafer diye ilan eder.
 
 ---
 
-### Bölüm 0 — önce şunu ölç: bu projenin hacim serisi var mı?
+### Bölüm 0 — önce şunu ölç: bu projenin hacim serisi var mı? (Faz 1)
 
 Order flow ve volume profile hacim enstrümanlarıdır. **Vadeli tarafta bu proje
 kullanılabilir bir hacim serisine sahip değil**, ve iki seri **iki farklı
@@ -1611,8 +1619,9 @@ hiçbir yerde hata vermeden. (C) aynı arızanın derinlik eksenindeki hâli: al
 son yılları gerçek hacmi döner, derin geçmişi yüzleri. `SI=F` yalnızca (C)'de
 düşüyor ama **her derinlikte**: COMEX gümüşü günde ~60 bin kontrat işliyor.
 
-Bu yüzden `flow_signal.py` **hacimle ilgili her şeyi ETF serisinden okuyor**
-(altın için GLD, gümüş için SLV) ve metali kendi fiyatıyla işliyor. Deponun
+Bu yüzden Faz 1'de `flow_signal.py` **hacimle ilgili her şeyi ETF serisinden
+okudu** (altın için GLD, gümüş için SLV) ve metali kendi fiyatıyla işledi.
+(Faz 2 bunu değiştirdi — aşağıya bakın.) Deponun
 sinyal girdisiyle enstrümanının bilerek ayrıldığı **tek** yer burasıdır — ve
 16. bölümün dersi yüzünden Bölüm 4 kuralı **iki enstrümanda birden** koşuyor.
 
@@ -1626,7 +1635,7 @@ sinyal girdisiyle enstrümanının bilerek ayrıldığı **tek** yer burasıdır
 
 ---
 
-### Bölüm 2 — dokuz enstrümanın hiçbiri tek başına yön taşımıyor
+### Bölüm 2 — dokuz enstrümanın hiçbiri tek başına yön taşımıyor (Faz 1)
 
 Her enstrüman uzun/boş duruma indirgendi, ve **o varlığın kendi taban oranına**
 karşı puanlandı (%50'ye karşı değil — bu metallerde %50'yi geçmek hiçbir şey
@@ -1658,7 +1667,7 @@ pozisyon, çıkışına kadar metali geçer"dir. Onu Bölüm 4 ölçüyor.
 
 ---
 
-### Bölüm 3 — parametre seçimi, YALNIZCA ilk yarıda
+### Bölüm 3 — parametre seçimi, YALNIZCA ilk yarıda (Faz 1)
 
 Üç parametre süpürüldü (giriş için gereken onay sayısı, stop genişliği, boşta
 pozisyon), **18 hücre**. Altı osilatörün eşikleri süpürülmedi ve bu bilinçli: üç
@@ -1683,7 +1692,7 @@ kaydettiği asimetri burada da görünüyor; gümüşte sert çıkış kazanıyo
 
 ---
 
-### Bölüm 4 — tek konfigürasyon, ikinci yarıda, bir kez
+### Bölüm 4 — tek konfigürasyon, ikinci yarıda, bir kez (Faz 1)
 
 **Altın** (GLD, 2016-2026, 64 giriş, zamanın %27'sinde pozisyonda, ortalama
 tutuş 11 seans):
@@ -1707,7 +1716,7 @@ Vadeli sütun aynı şekli veriyor (altın 0,588 vs 0,552; gümüş 0,148 vs 0,2
 yani **16. bölümün faz kayması burada yok** — kural zaten ETF serisinden
 okuduğu için `miners`'ın düştüğü tuzağa yapısal olarak düşemiyor.
 
-### Bölüm 5 — hüküm
+### Bölüm 5 — hüküm (Faz 1)
 
 | metal | Calmar | al-tut | (1) | son $ | al-tut $ | fark | (2) |
 |---|---|---|---|---|---|---|---|
@@ -1723,7 +1732,8 @@ para değil sükûnet" cümlesi burada artık bir savunma değil, bir maliyettir
 **Sonuç:** `breakout` **`trading.STRATEGIES`'e girmedi**, `portfolios`'ta satırı
 yok, `ensemble.COMPONENTS`'te yok, `ml_model.FEATURE_COLUMNS`'ta kolonu yok.
 Üretime giren tek şey **bir panel** (`track_breakout.py` → `breakout_state` →
-arayüzdeki `Kırılım Takibi` kartı) ve kartın üzerinde yukarıdaki tablo yazıyor.
+arayüzdeki `Kırılım Takibi` kartı) ve kartın üzerinde ölçüm tablosu yazıyor.
+(Kartın bugün bastığı sayılar **Faz 2**'ninkilerdir — aşağıya bakın.)
 
 `miners` emsalinin tersidir: orada sinyal gerçekti ve **üzerine para koymak**
 pahalıydı; burada kural işliyor ve **doğrudan al-ve-tut'tan kötü**. İkisinde de
@@ -1741,6 +1751,108 @@ ekrana çıkan şey ölçümün kendisi.
 3. **Değeri olumsuz ölçülmüş bir şeyi göstermek bu projenin işi.** `buyhold`
    ekranda gerçek bir portföy, `miners` kıyas rozetiyle duruyor; ölçülüp
    elenmiş bir kuralı görünmez kılmak bu disiplinin tersidir.
+
+
+---
+
+### Faz 2 — kaynak değişti, hüküm değişmedi (2026-09-16)
+
+Faz 1'in panelinin ödediği bedel şuydu: **ons altın izleyen biri seviyeleri GLD
+dolarında okuyordu** ($404,96). Sebep Bölüm 0'ın bulgusuydu — Yahoo vadeli hacmi
+sunamıyor. Ama o bulgu "vadelinin hacmi yok" demek değildi; COMEX altında günde
+~200 bin kontrat işliyor. Doğru soru "**bu satıcı** sunamıyor" idi, ve ikinci bir
+satıcıya sorulmamıştı.
+
+#### Bölüm 0, ikinci satıcı: TradingView
+
+Aynı üç test, artık iki kaynakta. Ve önce spot, çünkü "ons altın" en doğrudan
+XAU/USD demek:
+
+| seri | 500 barda medyan hacim |
+|---|---|
+| `TVC:GOLD` | **0** |
+| `TVC:SILVER` | **0** |
+| `FX_IDC:XAUUSD` | **0** |
+| `OANDA:XAUUSD` | 574.434 |
+| `OANDA:XAGUSD` | 179.253 |
+
+**Spot altının hacmi yok, ve bu bir satıcı sorunu değil.** XAU/USD tezgâh üstü
+bir piyasadır; konsolide bir tape yoktur. OANDA bir sayı döner ve o sayı yanlış
+olandır — tek bir perakende aracı kurumun kendi müşterilerinin tikleri. İkinci
+bir aracı kurum başka bir sayı verirdi, ve hiçbiri "piyasa nerede işlem gördü"
+olmazdı. Bir hacim profili tam olarak o iddiadır.
+
+Vadeliye gelince:
+
+| test | Yahoo `GC=F` | Yahoo `SI=F` | TV `COMEX:GC1!` | TV `COMEX:SI1!` |
+|---|---|---|---|---|
+| A) aynı oturum | geçer | geçer | geçer | geçer |
+| B) aynı tarih, başka gün | **%3,6, r=−0,10** | geçer | geçer | geçer |
+| C) seviye makul mü | 25 yılda **219** | **40–124** | 153.214–201.064 | 45.674–64.000 |
+
+Ve yalnızca ikinci bir kaynağın cevaplayabileceği dördüncü soru:
+
+| metal | hacim kor. | medyan TV | medyan Yahoo (taze) | kapanış kor. |
+|---|---|---|---|---|
+| altın | 0,619 | **176.514** | **176.343** | 0,9895 |
+| gümüş | 0,001 | **57.776** | **168** | 0,9819 |
+
+Altında iki bağımsız satıcı **seviyede** örtüşüyor — yani ikisi de aynı niceliği
+ölçüyor. Gümüşte örtüşmüyor ve asıl mesele o: üç mertebelik bir uyumsuzluk
+hangisinin yanlış olduğunu söyler. Günlük korelasyonun 0,619'da kalması ayrı bir
+şey ve kayıt altına alınmalı: iki satıcının **sürekli kontrat dikişi** aynı değil
+(kapanışlarda medyan mutlak fark %0,88). Bu, deponun zaten bildiği ve
+CLAUDE.md'de kayıtlı olan farkın aynısı — arayüz `GC1!`'e marklıyor, backend
+`GC=F` ile dolduruyor.
+
+**Üstelik COMEX kontratı zaten `$/ons` kote ediliyor.** Yani kaynak değişimi iki
+şeyi birden çözüyor: gerçek hacim, ve okuyucunun istediği birim.
+
+#### İkinci ön-kayıt
+
+Yeni veri kaynağı yeni bir deneydir; Faz 1'in hükmü devralınmaz. Baraj **aynı
+bırakıldı**, değişen kurgu:
+
+> Sinyal `COMEX:GC1!`/`SI1!` üzerinde kurulur. Alınabilir bacak sinyali
+> `GLD`/`SLV`'ye **tam bir seans gecikmeyle** uygular: vadelinin mumu New York
+> 17:00'da, ETF'inki 16:00'da kapanıyor, yani gecikmesiz bir ETF bacağı
+> traderın sahip olmadığı bir saatlik bilgiyi harcardı — 16. bölümün `miners`
+> altında bulduğu seans sınırı etkisinin aynısı, ve gün çözünürlüğünde
+> görünmezi. Gecikme yalnızca **aleyhte** yanılabilir.
+>
+> Parametre süpürmesi **aynı kurgu üzerinde**, yalnızca eğitim yarısında
+> puanlanır; seçim ile hüküm iki ayrı şeyi ölçmesin.
+>
+> Kıyas için bir vadeli-üstünde-vadeli sütunu basılır. **Hüküm o değildir**:
+> hiçbir perakende hesap COMEX kontratı tutamaz.
+
+#### Sonuç: aynı cevap, biraz daha kötü
+
+| metal | Calmar | al-tut | (1) | son $ | al-tut $ | fark | (2) |
+|---|---|---|---|---|---|---|---|
+| Altın | **0,520** | 0,463 | **EVET** | $20.548 | $35.284 | **−%41,8** | HAYIR |
+| Gümüş | 0,154 | 0,236 | HAYIR | $17.996 | $32.715 | **−%45,0** | HAYIR |
+
+Faz 1'de altının para açığı %33,9'du, şimdi %41,8. **İki satıcı, iki enstrüman,
+aynı cevap** — ve bu, iki koşunun her birinden ayrı ayrı daha değerli: başarısızlık
+kuralın, bir veri artefaktının değil.
+
+Üç yan bulgu:
+
+- **İki metal artık AYNI parametreleri seçti** (onay≥2, 2,0σ, sert çıkış).
+  Faz 1'de gümüş 3,0σ ve gold 0,35 taban seçmişti. Gerçek COMEX hacmi ETF'inkinin
+  yerine geçince iki ızgara aynı hücreye oturdu. **Ayrı ayrı ölçülmüş aynı sayılar
+  sorun değildir; kopyalanmış aynı sayılar sorundur**, ve ikisi dışarıdan ayırt
+  edilemez — ölçüm bu yüzden her birinin yanındaki yorumda duruyor.
+  `test_flow_signal.py`'nin "ikisi farklı olmalı" testi bu yüzden **düştü ve
+  yeniden yazıldı**: bir ölçümün sonucunu çiviyle tutturan bir bekçi, ölçüm
+  yeniden koşulduğunda — yani tam susması gereken anda — kırılır.
+- **Gecikmeli ETF bacağı, vadeli bacağından İYİ** (altında Calmar 0,531 vs
+  0,429, 2bp'de). Beklenmedik ve açıklanmadı; makul hipotez sinyalin oluştuğu
+  mumun kendisinde işlem yapmamanın bir maliyeti olmadığı, ama bu bir hipotez.
+- **Bölüm 2'de `akış` işaret değiştirdi**: GLD'de +1,1 puan, COMEX'te −1,3 puan
+  (altın, 5 gün). Enstrüman değişince işaretin dönmesi, o hücrenin gürültü
+  olduğunun ayrı bir kanıtı.
 
 ### Açık uçlar
 

@@ -331,16 +331,20 @@ create index if not exists kf_themes_idx on kanal_finans_themes (theme, publishe
 -- that is the correct outcome: the levels a person sees should be the levels
 -- the current price history implies, not the ones a stale fetch implied.
 --
--- `close` is the ETF's close and `metal_close` the metal's -- they are
--- different instruments and the panel prints both. See flow_signal.py for
--- why the signal reads the ETF: this project has no reproducible futures
--- volume series (research/flow.py, part 0).
+-- `close` is the COMEX contract's close, PER TROY OUNCE. There is no second
+-- price column: phase 1 built this panel on GLD/SLV (because Yahoo cannot
+-- serve futures volume) and had to carry the metal's price beside the ETF's
+-- so the reader could translate. Phase 2 moved the signal onto
+-- COMEX:GC1!/SI1! via TradingView, which serves real volume AND quotes in
+-- ounces, so the two columns collapsed into one. See tv_history.py.
 create table if not exists breakout_state (
     asset           text    not null,          -- 'gold' | 'silver'
     session_date    date    not null,
-    etf_symbol      text    not null,          -- 'GLD' | 'SLV'
-    close           numeric not null,          -- the ETF's close
-    metal_close     numeric,                   -- GC=F / SI=F that session
+    -- The series the signal was built on, e.g. 'COMEX:GC1!'. NOT named
+    -- `etf_symbol` any more: a column name that outlives the thing it names
+    -- is how the next reader learns a wrong fact with no error anywhere.
+    source_symbol   text    not null,
+    close           numeric not null,          -- $ per troy ounce
 
     -- Position state.
     state           int     not null,          -- 1 in position, 0 flat
@@ -521,6 +525,66 @@ end $$;
 --       etf_symbol      text    not null,
 --       close           numeric not null,
 --       metal_close     numeric,
+--       state           int     not null,
+--       stop            numeric,
+--       entry_price     numeric,
+--       entry_date      date,
+--       exit_reason     text,
+--       avwap           numeric,
+--       avwap_anchor    numeric,
+--       poc             numeric,
+--       vah             numeric,
+--       val             numeric,
+--       flow            numeric,
+--       rsi14           numeric,
+--       macd_hist       numeric,
+--       cci20           numeric,
+--       mom10           numeric,
+--       stoch_k         numeric,
+--       fib_pos         numeric,
+--       fib_high        numeric,
+--       fib_low         numeric,
+--       votes           int,
+--       votes_detail    jsonb,
+--       updated_at      timestamptz not null default now(),
+--       primary key (asset, session_date)
+--   );
+--   create index if not exists breakout_state_idx
+--       on breakout_state (asset, session_date desc);
+--   alter table breakout_state enable row level security;
+--   drop policy if exists breakout_state_public_read on breakout_state;
+--   create policy breakout_state_public_read on breakout_state
+--       for select using (true);
+--
+-- 2026-09-15b Breakout panel moved from GLD/SLV to the COMEX contract.
+--             RUN THIS ONE if you already ran the 2026-09-15 migration above.
+--             It DROPS and recreates the table, which is safe here and would
+--             not be for any other table in this file: every row is a pure
+--             function of price history that track_breakout.py rewrites on
+--             every run, so nothing is lost that the next run does not
+--             reproduce. Safe to run twice.
+--
+--             Why: research/flow.py part 0 measured that TradingView serves
+--             real COMEX volume where Yahoo cannot (gold 176,514 against a
+--             fresh Yahoo fetch's 176,343; silver 57,776 against 168), and
+--             the COMEX contract is quoted PER TROY OUNCE -- so the card's
+--             levels stop being GLD dollars the reader has to convert.
+--
+--             Two columns change shape: `etf_symbol` becomes `source_symbol`
+--             (it holds 'COMEX:GC1!' now, so the old name was a lie), and
+--             `metal_close` is gone (the signal's own series IS the metal's
+--             price now, so there is nothing left to translate between).
+--
+--             Re-measured on the new source, the rule STILL fails its bar --
+--             gold Calmar 0.520 vs 0.463 but 41.8% less money, silver behind
+--             on both. So there is still no `breakout` portfolio.
+--
+--   drop table if exists breakout_state;
+--   create table if not exists breakout_state (
+--       asset           text    not null,
+--       session_date    date    not null,
+--       source_symbol   text    not null,
+--       close           numeric not null,
 --       state           int     not null,
 --       stop            numeric,
 --       entry_price     numeric,

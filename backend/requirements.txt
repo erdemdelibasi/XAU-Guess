@@ -2,6 +2,10 @@ requests>=2.31.0
 pandas>=2.1.0
 numpy>=1.26.0
 ta>=0.11.0
+# tv_history.py only. TradingView's chart feed is a framed WebSocket, and it
+# is the only source measured to carry real COMEX volume (research/flow.py
+# part 0). Nothing in the prediction path imports it.
+websockets>=12.0
 scikit-learn>=1.4.0
 joblib>=1.3.0
 supabase>=2.4.0

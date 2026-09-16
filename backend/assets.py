@@ -67,8 +67,9 @@ class Asset:
     flat_fee_usd: float = 0.0
     # Configuration for the breakout panel (flow_signal.py). None means this
     # asset has no such panel -- the tracked ETFs do not get one, because the
-    # panel already reads THEIR series to decide the metal's state and a
-    # second copy keyed to the ETF would be the same rule shown twice.
+    # panel is about the METAL: it now reads the COMEX contract, which is
+    # quoted per troy ounce, so a GLD-keyed copy would answer a question
+    # nobody asked and put the same shelf on screen twice in two units.
     #
     # Chosen on the FIRST HALF of the window by research/flow.py and scored
     # once on the second. Re-run that script before touching either number.
@@ -103,14 +104,12 @@ GOLD = Asset(
     # p90 over 6022 sessions: macd_hist/close 0.00581, ema9/ema21-1 0.01940,
     # close/sma200-1 0.15368. Saturation 10.6% / 4.7% / 4.7%.
     price_scales=PriceScales(macd=172.0, ema_cross=51.5, sma200=6.5),
-    # research/flow.py, training half 2005-05 -> 2016-01 (10.7 years): the
-    # 2.0-sigma stop won the grid at both confirmation counts, and the 0.35
-    # floor beat a hard exit -- the same asymmetry trading.TREND_OFF_EXPOSURE
-    # already encodes. Out of sample on 2016-2026 this configuration scored
-    # Calmar 0.566 against buy-and-hold's 0.495 and finished 33.9% BEHIND it
-    # in money, which is why nothing trades on it.
-    breakout=BreakoutParams(etf_symbol="GLD", min_confirmations=2,
-                            stop_sigmas=2.0, flat_exposure=0.35),
+    # research/flow.py PHASE 2, training half 2004-11 -> 2015-10 (10.9 years)
+    # on COMEX:GC1!. Out of sample on 2015-2026 this configuration scored
+    # Calmar 0.520 against buy-and-hold's 0.463 on the buyable leg and
+    # finished 41.8% BEHIND it in money, which is why nothing trades on it.
+    breakout=BreakoutParams(symbol="COMEX:GC1!", min_confirmations=2,
+                            stop_sigmas=2.0, flat_exposure=0.0),
 )
 
 SILVER = Asset(
@@ -146,18 +145,22 @@ SILVER = Asset(
     # sessions with a median |score| of 0.715, i.e. it had stopped grading
     # and started voting. Nothing raised; the scoreboard just quietly moved.
     price_scales=PriceScales(macd=93.4, ema_cross=29.3, sma200=3.72),
-    # research/flow.py, training half 2006-10 -> 2016-09 (9.9 years). NOT
-    # gold's: silver's grid picked a 3.0-sigma stop and a HARD exit, and
-    # gold's 2.0/0.35 pair ranked 14th of 18 cells here. The direction of the
-    # difference is the one this file's header would predict -- silver
-    # realises 1.86x gold's volatility, so a 2-sigma stop is a tighter leash
-    # on a wilder animal and gets hit on noise.
+    # research/flow.py PHASE 2, measured on SILVER's own training half
+    # (2004-11 -> 2015-10, COMEX:SI1!) and NOT copied -- the values happening
+    # to match gold's is a RESULT, not a shortcut. Phase 1, on SLV, picked a
+    # 3.0-sigma stop here against gold's 2.0; with real COMEX volume in place
+    # of the ETF's, both grids land on the same cell.
     #
-    # Out of sample on 2016-2026 it lost on BOTH counts (Calmar 0.116 against
-    # buy-and-hold's 0.232, and 47.3% less money), which the panel says on
+    # That is worth one sentence because it is the opposite of this file's
+    # usual warning: the danger is normally copying gold's number onto silver,
+    # and the defence is measuring. Here measuring produced the same number,
+    # which is fine. Re-run flow.py before assuming it stays that way.
+    #
+    # Out of sample on 2015-2026 it lost on BOTH counts (Calmar 0.154 against
+    # buy-and-hold's 0.236, and 45.0% less money), which the panel says on
     # screen rather than leaving to the reader.
-    breakout=BreakoutParams(etf_symbol="SLV", min_confirmations=2,
-                            stop_sigmas=3.0, flat_exposure=0.0),
+    breakout=BreakoutParams(symbol="COMEX:SI1!", min_confirmations=2,
+                            stop_sigmas=2.0, flat_exposure=0.0),
 )
 
 ASSETS = {GOLD.key: GOLD, SILVER.key: SILVER}

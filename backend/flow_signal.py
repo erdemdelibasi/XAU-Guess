@@ -15,37 +15,44 @@ continuous allocator, and the difference is on purpose: a rule that trims 3%
 of its holding every morning is not "holding through the trend", whatever its
 label says.
 
-THE VOLUME PROBLEM, MEASURED FIRST
+THE VOLUME PROBLEM, MEASURED TWICE
 ----------------------------------
 Order flow and volume profile are volume instruments, and the first thing
-measured here was whether this project HAS a volume series. It does not have
-one on the futures, and the two series fail in two DIFFERENT ways -- which is
-why research/flow.py's part 0 runs three tests rather than the one obvious
-test, and prints the one that clears both of them:
+measured here was whether this project HAS a volume series.
 
-    GC=F -- not stable across sessions. The same 250 dates, the cached panel
-    snapshot against a fetch days later: **3.6% of the values match**,
-    correlation **-0.10**, medians 622 against 170,868 contracts. The same
-    fault shows on the depth axis: a 2-year request returns ~181,000, a
-    25-year request returns 219 for the same series.
+PHASE 1 asked Yahoo, and the answer was no -- in two different ways, which is
+why research/flow.py part 0 runs three tests rather than the obvious one:
 
-    SI=F -- stable, and implausible at every depth. Median 124 contracts at
-    2 years, 40 at 25, with 627 zero-volume sessions. COMEX silver trades
-    ~60,000 contracts a day; this is not a noisy measurement of that.
+    GC=F  not stable across sessions. The same 250 dates, a cached snapshot
+          against a fetch days later: 3.6% of values match, r = -0.10,
+          medians 622 against 170,868 contracts.
+    SI=F  stable and implausible at every depth. Median 40-124 contracts
+          against COMEX silver's ~60,000, with 627 zero-volume sessions.
 
-A value area built on either would be rebuilt differently on different days,
-or built on a quantity that is not participation at all, with nothing raising.
+The "fetch it twice in one session" test passes for all four symbols, so on
+its own it would have cleared both. The panel was therefore built on GLD/SLV,
+whose volume is real -- and that cost the thing the panel is about: a reader
+watching OUNCE gold got levels quoted in GLD dollars.
 
-The ETFs pass all three. GLD and SLV return identical volume across fetches,
-plausible levels at every depth (~8M and ~14M shares) and zero zero-volume
-sessions in 16 years, because they are single listed instruments rather than
-a stitched front-month.
+PHASE 2 asked a second vendor, because the finding was never "futures have no
+volume" -- COMEX prints ~200,000 gold contracts a day -- it was "that vendor
+cannot serve it". TradingView can (tv_history.py):
 
-So **every volume-derived quantity in this module reads the ETF series**
-(GLD for gold, SLV for silver) while the metal itself is what gets traded.
-This is the one place in the repo where a signal's inputs and its instrument
-differ on purpose, and research/flow.py measures the rule on BOTH books
-because of it.
+    COMEX:GC1!  median 176,514, depth-invariant, and agreeing with an
+    COMEX:SI1!  INDEPENDENT fresh Yahoo fetch on gold's level (176,343).
+                Silver does not agree, which is the point: 57,776 vs 168.
+
+And the COMEX contract is quoted PER TROY OUNCE, so the signal's series and
+the reader's unit finally coincide. That is where this module now lives.
+
+SPOT HAS NO VOLUME ANYWHERE, AND THAT IS NOT A VENDOR PROBLEM
+--------------------------------------------------------------
+"Ounce gold" most directly means spot XAU/USD, so that was measured before
+anything moved. `TVC:GOLD`, `TVC:SILVER` and `FX_IDC:XAUUSD` return volume
+**0 on every bar**: spot metal is an OTC market with no consolidated tape.
+A retail broker's feed does return a number, and it is the wrong number --
+that broker's own customers, not the market. A volume profile is a claim
+about where the MARKET traded, and no series can support that claim for spot.
 
 "ORDER FLOW" IS A PROXY HERE AND THE NAME MUST NOT DRIFT
 --------------------------------------------------------
@@ -82,17 +89,24 @@ class BreakoutParams:
 
     Lives on assets.Asset for the reason that module's docstring gives: a
     constant that can differ per asset must be looked up, never hardcoded.
-    The two metals genuinely chose different values on the training half
-    (gold 2.0 sigmas with a 0.35 floor, silver 3.0 with none), and running
-    gold's on silver would put a rule on screen that was never the rule
-    scored -- the backtest/live divergence this repo exists to prevent.
+    Each metal's values are measured on ITS OWN training half. In phase 1
+    (on the ETFs) the two disagreed -- gold 2.0 sigmas with a 0.35 floor,
+    silver 3.0 with none. In phase 2, with real COMEX volume, both grids
+    landed on the same cell. Identical values that were measured separately
+    are fine; identical values that were COPIED are the failure this repo
+    keeps finding, and the two are indistinguishable from the outside, which
+    is why the measurement lives in the comment beside each one.
 
     `flat_exposure` is recorded even though no portfolio ships: it was part
     of the configuration that produced the out-of-sample number the panel
     quotes, and dropping it would leave that number describing a rule nobody
     can reconstruct.
     """
-    etf_symbol: str
+    # TradingView ticker of the series the signal is built on -- the COMEX
+    # contract, quoted per troy ounce. Named `symbol` rather than
+    # `etf_symbol` because it stopped being an ETF: a field whose name
+    # outlives the thing it names is how a reader learns the wrong fact.
+    symbol: str
     min_confirmations: int
     stop_sigmas: float
     flat_exposure: float

@@ -63,9 +63,11 @@ jobs:
       # The breakout panel's state (order flow / anchored VWAP / volume
       # profile). Same job and same `if: always()` reasoning as the ETF books
       # above: price and volume history only, seconds to run, and nothing
-      # downstream of it. It reads GLD/SLV rather than the futures because
-      # this project has no reproducible futures volume series -- see
-      # flow_signal.py, and research/flow.py part 0 for the measurement.
+      # downstream of it. It reads COMEX:GC1!/SI1! from TradingView rather
+      # than from Yahoo, because Yahoo cannot serve those contracts' volume
+      # and the whole panel is volume -- research/flow.py part 0. That is an
+      # undocumented WebSocket, so tv_history.daily() returns an empty frame
+      # instead of raising and this step degrades to "stale panel".
       #
       # It trades nothing: the rule did not clear its pre-registered bar
       # (research/README.md section 18), so there is no `breakout` portfolio

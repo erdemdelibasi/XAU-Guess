@@ -28,8 +28,9 @@ Az şey — ve bunu açıkça söylemek projenin ana tasarım ilkesidir.
 | İkisini birden tutmak? | Daha çok getiri, orantısız daha çok risk |
 | Fed faiz kararları alınabilir bir şey veriyor mu? | **Hayır.** 32 testin 0'ı geçti |
 | Merkez bankası alımı izlenebilir mi? | Tonaj **hayır** (günlük anahtarsız veri yok); **izi** evet |
-| Kırılımda girip trend kırılana kadar tutmak? | **Hayır.** Altında düşüşü yarıya indiriyor ama parada %33,9 geride; gümüşte iki ölçüde de geride |
-| Order flow / hacim profili kurulabilir mi? | Vadelide **hayır** — Yahoo'nun `GC=F` hacmi oturumlar arası tutarsız (%3,6 eşleşme), `SI=F` hacmi üç mertebe düşük. ETF hacmi (`GLD`/`SLV`) sağlam |
+| Kırılımda girip trend kırılana kadar tutmak? | **Hayır.** İki ayrı veri kaynağında ölçüldü, ikisinde de aynı: altında düşüşü yarıya indiriyor ama parada %42 geride; gümüşte iki ölçüde de geride |
+| Spot altının (ons) hacim profili kurulabilir mi? | **Hayır, hiçbir kaynakta.** XAU/USD tezgâh üstüdür, konsolide tape yoktur — `TVC:GOLD` her barda 0 döndürüyor |
+| Peki COMEX vadelisinde? | **Evet, ama Yahoo'dan değil.** `GC=F` hacmi oturumlar arası tutarsız (%3,6 eşleşme), `SI=F` üç mertebe düşük; TradingView'in `COMEX:GC1!/SI1!` serileri sağlam ve zaten `$/ons` |
 
 Yani: **yön tahmini al-ve-tut'u yenmiyor.** Ölçülebilir katkı yalnızca riski
 yönetmekte ve orada bile mütevazı — 19,9 yıllık örneklem dışı testte Sharpe

@@ -1581,17 +1581,15 @@ const BREAKOUT_INDICATORS = [
    research/README.md section 17 exists to correct. */
 const BREAKOUT_VERDICT = {
   gold: {
-    etf: "GLD", years: 10.7, calmar: 0.566, benchCalmar: 0.495,
-    final: 24556, benchFinal: 37163, entries: 64, inPosition: 0.27,
+    etf: "GLD", years: 10.9, calmar: 0.520, benchCalmar: 0.463,
+    final: 20548, benchFinal: 35284, entries: 62, inPosition: 0.29,
     // assets.GOLD.breakout -- mirrored for a caption, never for a decision.
     minConfirmations: 2, stopSigmas: 2.0,
   },
   silver: {
-    etf: "SLV", years: 10.0, calmar: 0.116, benchCalmar: 0.232,
-    final: 16488, benchFinal: 31275, entries: 38, inPosition: 0.27,
-    // assets.SILVER.breakout. NOT gold's: silver's training half chose a
-    // wider stop, which is what a 1.86x more volatile metal should choose.
-    minConfirmations: 2, stopSigmas: 3.0,
+    etf: "SLV", years: 10.9, calmar: 0.154, benchCalmar: 0.236,
+    final: 17996, benchFinal: 32715, entries: 56, inPosition: 0.23,
+    minConfirmations: 2, stopSigmas: 2.0,
   },
 };
 
@@ -1642,7 +1640,7 @@ function breakoutLevelsHtml(last, asset) {
   const fibSupport = span == null ? null : Number(last.fib_low) + 0.382 * span;
   const fibTarget = span == null ? null : Number(last.fib_high) + 0.618 * span;
   const rows = [
-    { label: "Kapanış", value: last.close, note: `${esc(last.etf_symbol)} kapanışı`, bare: true },
+    { label: "Kapanış", value: last.close, note: `${esc(last.source_symbol)} — $/ons`, bare: true },
     { label: "Değer alanı üstü (VAH)", value: last.vah, note: "kırılım eşiği" },
     { label: "En çok işlem gören fiyat (POC)", value: last.poc, note: "hacim profilinin tepesi" },
     { label: "Değer alanı altı (VAL)", value: last.val, note: "ilk stop buradan" },
@@ -1672,16 +1670,30 @@ function renderBreakout(rows, asset) {
   document.getElementById("breakout-minconf").textContent =
     String(verdict.minConfirmations);
 
-  // No rows is not an empty chart, it is a missing migration or a tracker
-  // that has never run. Saying which is the whole job -- a heading that
-  // promises a breakout state over a blank panel keeps making the claim.
-  if (!mine.length) {
+  // Rows from BEFORE the 2026-09-15b migration are not "slightly old", they
+  // describe a different instrument in a different unit: `close` was a GLD
+  // share price and `source_symbol` did not exist. Rendering them would print
+  // "Seviyeler undefined üzerindedir" over $394 levels on a card whose whole
+  // point is that the levels are $/ounce -- wrong, and plausible enough to be
+  // believed. A schema check is the same guard loadBacktest() applies to
+  // backtest.json, for the same reason.
+  const stale = mine.length > 0 && mine.every((r) => r.source_symbol == null);
+
+  // No usable rows is not an empty chart, it is a missing migration or a
+  // tracker that has never run. Saying which is the whole job -- a heading
+  // that promises a breakout state over a blank panel keeps making the claim.
+  if (!mine.length || stale) {
     card.classList.add("awaiting");
     document.getElementById("breakout-updated").textContent = "-";
-    document.getElementById("breakout-state").innerHTML =
-      `<p class="muted small">Bu metal için henüz kırılım durumu yazılmamış. `
-      + `<code>track_breakout.py</code> ilk kez çalıştığında (ya da `
-      + `<code>breakout_state</code> migration'ı uygulandığında) burası dolar.</p>`;
+    document.getElementById("breakout-state").innerHTML = stale
+      ? `<p class="muted small">Kayıtlı satırlar <strong>eski şemadan</strong> `
+        + `(seviyeler GLD/SLV payı cinsinden). <code>supabase/schema.sql</code>'in `
+        + `<strong>2026-09-15b</strong> migration'ı henüz uygulanmamış &mdash; `
+        + `uygulanınca <code>track_breakout.py</code> pencereyi $/ons olarak `
+        + `yeniden yazar.</p>`
+      : `<p class="muted small">Bu metal için henüz kırılım durumu yazılmamış. `
+        + `<code>track_breakout.py</code> ilk kez çalıştığında (ya da `
+        + `<code>breakout_state</code> migration'ı uygulandığında) burası dolar.</p>`;
     chartRoot.innerHTML = "";
     document.getElementById("breakout-readout").textContent = "-";
     document.getElementById("breakout-levels").innerHTML = "";
@@ -1756,23 +1768,30 @@ function renderBreakout(rows, asset) {
   const calmarWon = verdict.calmar > verdict.benchCalmar;
   document.getElementById("breakout-verdict").innerHTML = calmarWon
     ? `Ölçüm: bu kural ${fmtNumber(verdict.years, 1)} yıl örneklem dışı, ${esc(verdict.etf)} `
-      + `üzerinde <strong>düşüşü azaltıyor</strong> (Calmar ${fmtNumber(verdict.calmar, 3)} — `
+      + `üzerinde (alınabilir bacak, sinyal 1 seans gecikmeli) <strong>düşüşü azaltıyor</strong> `
+      + `(Calmar ${fmtNumber(verdict.calmar, 3)} — `
       + `al-ve-tut ${fmtNumber(verdict.benchCalmar, 3)}) ama <strong>parada geride kalıyor</strong>: `
       + `$10.000'lik hesapta ${fmtUsd(verdict.final, 0)}, al-ve-tut ${fmtUsd(verdict.benchFinal, 0)} `
       + `(%${fmtNumber(100 * shortfall, 1)} daha az). Bu yüzden buna bağlı bir portföy yok.`
     : `Ölçüm: bu kural ${fmtNumber(verdict.years, 1)} yıl örneklem dışı, ${esc(verdict.etf)} `
-      + `üzerinde <strong>her iki ölçüde de al-ve-tut'un gerisinde</strong>: Calmar `
+      + `üzerinde (alınabilir bacak, sinyal 1 seans gecikmeli) `
+      + `<strong>her iki ölçüde de al-ve-tut'un gerisinde</strong>: Calmar `
       + `${fmtNumber(verdict.calmar, 3)} — ${fmtNumber(verdict.benchCalmar, 3)}, ve `
       + `$10.000'lik hesapta ${fmtUsd(verdict.final, 0)} — ${fmtUsd(verdict.benchFinal, 0)} `
       + `(%${fmtNumber(100 * shortfall, 1)} daha az). Bu yüzden buna bağlı bir portföy yok.`;
 
+  // No "the levels are in GLD dollars, convert them yourself" sentence any
+  // more, and that absence is the point of the phase-2 source change: the
+  // COMEX contract is quoted per troy ounce, so the card speaks the unit the
+  // reader watches. What replaces it is the caveat that is actually left --
+  // where the volume comes from, and that spot has none at all.
   document.getElementById("breakout-note").innerHTML =
-    `${verdict.entries} giriş, zamanın %${Math.round(100 * verdict.inPosition)}'sinde pozisyonda. `
+    `${verdict.entries} giriş; pozisyonda geçen süre %${Math.round(100 * verdict.inPosition)}. `
     + `Baraj sonuçlara bakılmadan ilan edildi ve geçilemedi &mdash; `
-    + `<code>backend/research/flow.py</code>. Seviyeler <strong>${esc(last.etf_symbol)}`
-    + `</strong> fiyatındadır; ${esc(asset.label.toLowerCase())} vadelisinin aynı seanstaki `
-    + `kapanışı ${last.metal_close == null ? "-" : fmtUsd(Number(last.metal_close), 2)}. `
-    + `Hacim ETF'ten okunuyor çünkü vadeli hacim serisi ölçülerek kullanılamaz bulundu.`;
+    + `<code>backend/research/flow.py</code>. Seviyeler <strong>${esc(last.source_symbol)}`
+    + `</strong> üzerindedir, yani <strong>$/ons</strong>. Spot altının (XAU/USD) `
+    + `hacmi <strong>hiçbir kaynakta yok</strong> &mdash; tezgâh üstü piyasa, konsolide `
+    + `tape yok &mdash; o yüzden hacim profili COMEX kontratından okunuyor.`;
 }
 
 function renderKanalFinans(mentions, themes) {

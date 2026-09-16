@@ -656,13 +656,25 @@
                   <strong>Yalnızca yukarı hareket eder</strong> &mdash; fiyatı aşağı takip
                   eden bir seviye stop değil, dipte satış makinesidir.</dd>
             </dl>
-            <p><strong>Hacim neden ETF'ten okunuyor:</strong> Yahoo'nun vadeli hacmi bu
-            proje için kullanılamaz durumda &mdash; <strong>ölçüldü</strong>. GC=F'in aynı
-            250 seansı, günler arayla iki çekişte <strong>%3,6 oranında</strong> tutuyor
-            (korelasyon &minus;0,10; medyan 622'ye karşı 170.868 kontrat). SI=F ise kararlı
-            ama her derinlikte gerçek dışı: medyan 40&ndash;124 kontrat, oysa COMEX gümüşü
-            günde ~60 bin işliyor. GLD ve SLV üç testi de geçiyor. Yani fiyatı metalin,
-            hacmi fonun &mdash; ve bu ayrım kartta açıkça yazılı.</p>
+            <p><strong>Hacim neden spot altından değil, COMEX'ten okunuyor:</strong>
+            çünkü <strong>spot altının hacmi yok</strong>. XAU/USD tezgâh üstü bir
+            piyasadır; konsolide bir işlem kaydı (tape) yoktur. Ölçüldü:
+            <code>TVC:GOLD</code>, <code>TVC:SILVER</code> ve <code>FX_IDC:XAUUSD</code>
+            <strong>her barda sıfır</strong> döndürüyor. OANDA gibi bir aracı kurum bir
+            sayı verir ama o sayı <em>o kurumun kendi müşterilerinin</em> tikleridir,
+            piyasanın değil &mdash; ikinci bir aracı kurum başka bir sayı verirdi. Bir
+            hacim profili &ldquo;piyasa nerede işlem gördü&rdquo; iddiasıdır ve spot için o
+            iddiayı taşıyabilecek seri mevcut değildir.</p>
+            <p><strong>Neden Yahoo değil TradingView:</strong> COMEX'in hacmi gerçektir
+            (altında günde ~200 bin kontrat) ama Yahoo onu sunamıyor &mdash;
+            <strong>ölçüldü</strong>. <code>GC=F</code>'in aynı 250 seansı, günler arayla
+            iki çekişte yalnızca <strong>%3,6</strong> oranında tutuyor (korelasyon
+            &minus;0,10; medyan 622'ye karşı 170.868); <code>SI=F</code> ise kararlı ama
+            her derinlikte gerçek dışı (medyan 40&ndash;124 kontrat). TradingView'in
+            <code>COMEX:GC1!</code> ve <code>COMEX:SI1!</code> serileri üç testi de geçiyor
+            ve altında <em>bağımsız</em> bir Yahoo çekişiyle seviyede örtüşüyor (176.514'e
+            karşı 176.343). Üstelik COMEX kontratı zaten <strong>$/ons</strong> kote
+            ediliyor &mdash; yani bu karttaki her seviye, izlediğin birimdedir.</p>
             <p><strong>Neye yaramaz:</strong> ölçüm sonucu yukarıda, kartın kendi
             üzerindedir. Kısaca: <strong>bu kural al-ve-tut'u geçmiyor.</strong> Altında
             düşüşü ciddi şekilde azaltıyor ama parada geride kalıyor; gümüşte her iki

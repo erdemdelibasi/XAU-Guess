@@ -28,9 +28,10 @@ import trading  # noqa: E402
 def synthetic(n: int = 400, seed: int = 7, trend: float = 0.0004) -> pd.DataFrame:
     """A daily OHLCV frame with real ranges and real volume.
 
-    Deliberately NOT flat bars: the ETF series this rule reads has genuine
-    intraday ranges, and a fixture made of settlement prints would exercise
-    only the degenerate branch of every high/low computation here.
+    Deliberately NOT flat bars: the COMEX series this rule reads has genuine
+    intraday ranges on every liquid session, and a fixture made of settlement
+    prints would exercise only the degenerate branch of every high/low
+    computation here.
     """
     rng = np.random.default_rng(seed)
     close = 100 * np.exp(np.cumsum(rng.normal(trend, 0.011, n)))
@@ -51,9 +52,11 @@ def synthetic(n: int = 400, seed: int = 7, trend: float = 0.0004) -> pd.DataFram
 def test_breakout_is_not_a_paper_portfolio():
     """The pre-registered bar was not cleared, so no book may run on it.
 
-    On the buyable instrument at the $10,000 rung, out of sample: gold won on
-    Calmar (0.566 vs 0.495) and finished 33.9% behind in money; silver lost on
-    both. Adding "breakout" to STRATEGIES would create two $1,000 books that
+    On the buyable instrument at the $10,000 rung, out of sample, on BOTH
+    data sources it was measured against: gold won on Calmar and finished a
+    third to two-fifths behind in money (phase 1 -33.9%, phase 2 -41.8%);
+    silver lost on both counts both times. Adding "breakout" to STRATEGIES
+    would create two $1,000 books that
     trade every entry and exit, and nothing in the system would object --
     schema.sql seeds portfolios from this list, and the dashboard renders
     whatever it finds.
@@ -92,29 +95,39 @@ def test_flow_columns_stay_out_of_the_model_feature_set():
 # Boundary 2: the two metals do not share a configuration
 # ---------------------------------------------------------------------------
 
-def test_breakout_params_are_per_asset_not_global():
-    """Silver's training half chose a wider stop and gold's floor beat silver's.
+def test_breakout_params_are_looked_up_per_asset():
+    """Each metal carries its OWN config, and they are not the same series.
 
-    Copying gold's numbers onto silver raises nothing: the panel would simply
-    draw a rule that was never scored, under a caption quoting the score of a
-    different one. Same failure as
-    test_trading.test_target_volatility_is_per_asset_not_global.
+    The first version of this test asserted that the two configs DIFFER,
+    because in phase 1 (signal on GLD/SLV) they did -- silver picked a
+    3.0-sigma stop against gold's 2.0. Phase 2, on real COMEX volume,
+    measured both grids onto the same cell, and the test failed.
+
+    That failure was the test's, not the code's, and the lesson is worth
+    keeping: a guard that pins a MEASUREMENT's outcome breaks the next time
+    the measurement is re-run, which is exactly when it should stay quiet.
+    What actually has to hold is structural -- the config is looked up per
+    asset rather than being a module constant, and the two metals read two
+    different series. Identical values that were measured separately are
+    fine; identical values that were copied are the failure, and no test can
+    tell those apart. The measurement lives in the comment beside each one.
     """
     gold = assets_module.get("gold").breakout
     silver = assets_module.get("silver").breakout
     assert gold is not None and silver is not None
-    assert gold.stop_sigmas != silver.stop_sigmas
-    assert gold.flat_exposure != silver.flat_exposure
-    assert gold.etf_symbol == "GLD" and silver.etf_symbol == "SLV"
+    assert gold.symbol != silver.symbol
+    assert gold.symbol.startswith("COMEX:") and silver.symbol.startswith("COMEX:")
+    # Not a module-level constant masquerading as per-asset config.
+    assert not hasattr(flow_signal, "BREAKOUT_PARAMS")
 
 
 def test_tracked_etfs_have_no_breakout_config():
-    """GLD/SLV are the SIGNAL's series, not a second asset with its own panel.
+    """The panel is about the METAL, and now says so in the metal's own unit.
 
-    The metal's panel already reads the ETF. Giving the ETF book its own
-    breakout config would put the identical rule on the page twice under two
-    names, and a reader comparing them would find them agreeing perfectly and
-    conclude something had been confirmed.
+    Phase 2 moved the signal onto the COMEX contract, which is quoted per
+    troy ounce. A GLD-keyed copy of this panel would put the same shelf on
+    screen twice in two units, and a reader comparing them would find them
+    agreeing and conclude something had been confirmed.
     """
     for asset in assets_module.TRACKED.values():
         assert asset.breakout is None

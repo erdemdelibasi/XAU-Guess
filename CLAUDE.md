@@ -231,6 +231,54 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
     |t|=1'e bile ulaşmadı** (en büyüğü 0,80). Altının VAH kırılımı 20 günde
     +3,0 puan, gümüşünki −5,2 — işaret metaller arasında ters dönüyor.
 
+    **Faz 2 (2026-09-16): kaynak değişti, hüküm değişmedi, ve panel artık
+    ONS konuşuyor.** Faz 1'in bedeli şuydu — ons altın izleyen biri seviyeleri
+    GLD dolarında okuyordu. Sebep yukarıdaki bulguydu, ama o bulgu "vadelinin
+    hacmi yok" demek değildi: doğru soru "**bu satıcı** sunamıyor" idi ve
+    ikinci bir satıcıya sorulmamıştı. `backend/tv_history.py` TradingView'in
+    grafik beslemesinden günlük OHLCV çekiyor (girişsiz, 12.000 bara kadar):
+
+    | | `TVC:GOLD` (spot) | `COMEX:GC1!` | `COMEX:SI1!` |
+    |---|---|---|---|
+    | medyan hacim | **her barda 0** | 176.514 | 57.776 |
+    | derinlik değişmezliği | — | %100 | %100 |
+    | taze Yahoo ile seviye | — | 176.343 ✓ | **168** ✗ |
+    | birim | $/ons | **$/ons** | **$/ons** |
+
+    **Spot altının hacmi hiçbir kaynakta yok ve bu bir satıcı sorunu değil**:
+    XAU/USD tezgâh üstüdür, konsolide tape yoktur. OANDA bir sayı döner ve o
+    sayı tek bir aracı kurumun kendi müşterilerinin tikleridir — ikinci bir
+    aracı kurum başkasını verirdi. Bir hacim profili "piyasa nerede işlem
+    gördü" iddiasıdır; spot için o iddiayı taşıyabilecek seri mevcut değil.
+
+    COMEX kontratı hem gerçek hacme hem `$/ons` birimine sahip, o yüzden
+    sinyal oraya taşındı. Yeni kaynak = yeni deney, o yüzden **ikinci bir
+    ön-kayıt** yazıldı: baraj aynı, ama alınabilir bacak sinyali `GLD`/`SLV`'ye
+    **tam bir seans gecikmeyle** uyguluyor (vadeli mumu NY 17:00'da, ETF 16:00'da
+    kapanıyor — gecikmesiz bir bacak 16. maddedeki seans sınırı etkisini
+    tekrarlardı), ve süpürme aynı kurgu üzerinde puanlanıyor.
+
+    | metal | Calmar | al-tut | son $ | al-tut $ |
+    |---|---|---|---|---|
+    | altın | **0,520** | 0,463 | $20.548 | $35.284 (**−%41,8**) |
+    | gümüş | 0,154 | 0,236 | $17.996 | $32.715 (**−%45,0**) |
+
+    **İki satıcı, iki enstrüman, aynı cevap** — bu, iki koşunun her birinden
+    ayrı ayrı daha değerli: başarısızlık kuralın, veri artefaktının değil.
+
+    Üç yan bulgu kayıt altında:
+    - **İki metal artık AYNI parametreleri seçti** (onay≥2, 2,0σ, sert çıkış);
+      Faz 1'de gümüş 3,0σ seçmişti. **Ayrı ayrı ölçülmüş aynı sayılar sorun
+      değil, kopyalanmış aynı sayılar sorundur** — ve ikisi dışarıdan ayırt
+      edilemez, o yüzden ölçüm her birinin yanındaki yorumda duruyor.
+    - `test_flow_signal.py`'nin "ikisi farklı olmalı" testi bu yüzden **düştü
+      ve yeniden yazıldı**. Bir ölçümün sonucunu çiviyle tutturan bekçi, ölçüm
+      yeniden koşulduğunda — tam susması gereken anda — kırılır. Yerine
+      yapısal olan kondu: config varlık başına bakılıyor mu, iki seri farklı mı.
+    - **Bu belgelenmemiş bir WebSocket.** `tv_history.daily()` hiçbir zaman
+      exception fırlatmaz, boş çerçeve döner; hiçbir tahmin yolu onu import
+      etmez. Bozulursa bedeli bayat bir panel, kaçan bir karar değil.
+
     **Üretime giren tek şey bir PANEL.** `breakout` `trading.STRATEGIES`'te
     yok, `portfolios`'ta satırı yok, `ensemble.COMPONENTS`'te yok,
     `ml_model.FEATURE_COLUMNS`'ta kolonu yok. `tests/test_flow_signal.py`
@@ -309,8 +357,8 @@ farklı olabilecek her şey orada ve **her sayısı ölçülmüştür**
 | `price_scales.ema_cross` | 51,5 | 29,3 | aynı sebep (1,76 kat) |
 | `price_scales.sma200` | 6,5 | 3,72 | aynı sebep (1,75 kat) |
 | model dosyası | `xau_model.joblib` | `xag_model.joblib` | farklı özellik seti, değiştirilemezler |
-| `breakout.stop_sigmas` | 2,0 | 3,0 | gümüş 1,86 kat oynak; 2σ gürültüyle tetikleniyor |
-| `breakout.flat_exposure` | 0,35 | 0,00 | altında sert çıkış eğitim yarısında KAYBETTİ |
+| `breakout.symbol` | `COMEX:GC1!` | `COMEX:SI1!` | panelin hacmi buradan okuması ölçülmüş bir zorunluluk |
+| `breakout.stop_sigmas` | 2,0 | 2,0 | **ayrı ayrı ölçüldü, aynı çıktı** — Faz 1'de 2,0 vs 3,0'dı |
 
 **"Varlık ekle" tek satırlık bir ayar değişikliği gibi görünüp öyle
 değildir.** Altının sayılarını gümüşe kopyalamak hiçbir hata vermez; sadece
@@ -1396,9 +1444,14 @@ Ana kolon sonuçlar — üzerinde para olan defterler. Bu kuralda para yok, çü
 ön-kayıtlı barajı geçemedi (11. madde). Tam genişlik vermek, sayfanın bu kuralı
 gerçekten desteklediği defterlerden daha çok desteklediğini söylerdi.
 
-Yine de bir **grafiği** var, çünkü bir seviye bir sayı değildir: "fiyat $392,
-değer alanı $405'te bitiyor" okuyucunun kafasında yaptığı bir aritmetik; aynı
+Yine de bir **grafiği** var, çünkü bir seviye bir sayı değildir: "fiyat $4.329,
+değer alanı $4.731'de bitiyor" okuyucunun kafasında yaptığı bir aritmetik; aynı
 iki işaret tek eksende bir bakış.
+
+**Seviyeler `$/ons`, ve bu Faz 2'nin bütün amacıydı.** Faz 1'de kart GLD
+dolarında konuşuyordu ($404,96) ve ons altın izleyen biri her seviyeyi kafasında
+çeviriyordu. Kart artık ayrıca "seviyeler şu enstrümandadır, metalin kapanışı
+şudur" cümlesini de **taşımıyor** — taşıması gereken bir şey kalmadı.
 
 **Grafik kasıtlı olarak sermaye grafiklerinden farklı bir hayvandır.** Orada her
 çizgi yarışan bir defter, soru "hangisi yukarıda". Burada **tek bir özne** var —

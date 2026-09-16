@@ -15,12 +15,24 @@ IT DELIBERATELY TRADES NOTHING
 research/flow.py scored this rule against a bar declared before any result
 was looked at: beat buy-and-hold on Calmar on the BUYABLE instrument at the
 $10,000 rung in BOTH metals, and finish no more than 25% behind it in money.
-Out of sample, 2016-2026:
 
-    gold    Calmar 0.566 vs 0.495  PASS  |  $24,556 vs $37,163  -33.9%  FAIL
-    silver  Calmar 0.116 vs 0.232  FAIL  |  $16,488 vs $31,275  -47.3%  FAIL
+It was run TWICE, on two data sources, and failed both times. Phase 1 built
+the signal on GLD/SLV because Yahoo cannot serve futures volume; phase 2
+rebuilt it on COMEX:GC1!/SI1! from TradingView, which can -- and which is
+quoted per troy ounce, the unit the panel is actually read in. Out of sample
+on the buyable leg:
 
-So the bar was not cleared and no paper portfolio was created. The panel
+    phase 1, 2016-2026 (signal on GLD/SLV)
+      gold    Calmar 0.566 vs 0.495  PASS  |  $24,556 vs $37,163  -33.9%  FAIL
+      silver  Calmar 0.116 vs 0.232  FAIL  |  $16,488 vs $31,275  -47.3%  FAIL
+
+    phase 2, 2015-2026 (signal on COMEX, ETF leg lagged one session)
+      gold    Calmar 0.520 vs 0.463  PASS  |  $20,548 vs $35,284  -41.8%  FAIL
+      silver  Calmar 0.154 vs 0.236  FAIL  |  $17,996 vs $32,715  -45.0%  FAIL
+
+Two vendors, two instruments, the same answer -- which is worth more than
+either run alone: the failure is the rule's, not a data artefact. So the bar
+was not cleared and no paper portfolio was created. The panel
 ships anyway, with that table on it, because the rule's state is a real and
 legible description of the market -- and because a project whose value is
 honest negative results should be able to show a measured loss on screen.
@@ -50,14 +62,16 @@ import pandas as pd
 import assets as assets_module
 import fetch_data
 import flow_signal
+import tv_history
 from db import get_client
 
-# Deep enough that the state at the newest session is a genuine continuation
-# rather than an artefact of where the walk started. The binding requirement
-# is flow_signal.AVWAP_ANCHOR_LOOKBACK (252 sessions) plus a full warm-up;
-# eight years is ~2000 rows, still one request, and positions in this rule
-# average under a month, so nothing that matters today was opened outside it.
-HISTORY_YEARS = 8
+# Daily bars requested from TradingView. Deep enough that the state at the
+# newest session is a genuine continuation rather than an artefact of where
+# the walk started: the binding requirement is
+# flow_signal.AVWAP_ANCHOR_LOOKBACK (252 sessions) plus a full warm-up, and
+# positions in this rule average under a month, so nothing that matters today
+# was opened outside a ~8-year window. One request either way.
+HISTORY_BARS = 2000
 # How much of the path is published. ~9 months: long enough that the chart
 # shows several complete positions, short enough that one row per session
 # per asset stays a trivial write.
@@ -81,36 +95,18 @@ def build_rows(asset) -> list[dict]:
     if params is None:
         return []
 
-    etf = fetch_data.drop_forming_bar(
-        fetch_data.get_daily(params.etf_symbol, years=HISTORY_YEARS))
-    if etf.empty:
-        print(f"WARNING: {params.etf_symbol} icin veri gelmedi -- {asset.key} atlaniyor.")
+    # The COMEX contract, from TradingView. Yahoo cannot serve this series'
+    # volume -- research/flow.py part 0 -- and volume is the whole panel.
+    # Quoted per troy ounce, which is the unit every level on the card is
+    # read in and the reason phase 2 moved off GLD/SLV.
+    bars = fetch_data.drop_forming_bar(
+        tv_history.daily(params.symbol, bars=HISTORY_BARS))
+    if bars.empty:
+        print(f"WARNING: {params.symbol} icin veri gelmedi -- {asset.key} atlaniyor.")
         return []
 
-    frame = flow_signal.add_flow_columns(etf)
+    frame = flow_signal.add_flow_columns(bars)
 
-    # The metal's own close, on the ETF's calendar, backward-fill only. It is
-    # DISPLAY: the panel prints both because they are different instruments
-    # and the reader is holding the metal, not the fund. No signal column
-    # reads it -- see flow_signal.py's docstring for why the signal lives on
-    # the ETF series in the first place.
-    metal = fetch_data.drop_forming_bar(
-        fetch_data.get_daily(asset.symbol, years=HISTORY_YEARS))
-    if not metal.empty:
-        series = metal.set_index(pd.DatetimeIndex(metal["time"]).normalize())["close"]
-        series = series[~series.index.duplicated(keep="last")]
-        frame["metal_close"] = series.reindex(
-            pd.DatetimeIndex(frame["time"]).normalize(), method="ffill").to_numpy()
-    else:
-        frame["metal_close"] = float("nan")
-
-    # reset_index is not cosmetic here. breakout_path records `entry_index` as
-    # a POSITION within the frame it walked, while dropna leaves the original
-    # labels with gaps in them. The two happen to be read positionally below
-    # and would agree either way -- until someone reasonably reads
-    # `entry_index` as a label and looks the row up with .loc, which would
-    # silently return a different session. Making label and position the same
-    # removes the trap rather than documenting it.
     ready = frame.dropna(subset=list(REQUIRED)).reset_index(drop=True)
     if ready.empty:
         print(f"WARNING: {asset.key} icin yeterli gecmis yok -- atlaniyor.")
@@ -139,9 +135,8 @@ def build_rows(asset) -> list[dict]:
         rows.append({
             "asset": asset.key,
             "session_date": row["time"].date().isoformat(),
-            "etf_symbol": params.etf_symbol,
+            "source_symbol": params.symbol,
             "close": _num(row["close"]),
-            "metal_close": _num(row.get("metal_close")),
             "state": int(row["state"]),
             "stop": _num(row["stop"]),
             "entry_price": _num(row["entry_price"]),
@@ -176,11 +171,9 @@ def build_rows(asset) -> list[dict]:
 def report(asset, rows: list[dict]) -> None:
     last = rows[-1]
     print(f"\n{'=' * 72}\n### {asset.label} -- kirilim takibi "
-          f"({asset.breakout.etf_symbol} hacminden)\n{'=' * 72}")
-    metal = (f" | {asset.symbol} ${last['metal_close']:,.2f}"
-             if last["metal_close"] else "")
-    print(f"Son seans {last['session_date']}: {asset.breakout.etf_symbol} "
-          f"${last['close']:,.2f}{metal}")
+          f"({asset.breakout.symbol}, $/ons)\n{'=' * 72}")
+    print(f"Son seans {last['session_date']}: {last['source_symbol']} "
+          f"${last['close']:,.2f}/ons")
     if last["state"]:
         gain = last["close"] / last["entry_price"] - 1.0 if last["entry_price"] else 0.0
         print(f"DURUM: POZISYONDA -- giris {last['entry_date']} "
@@ -209,9 +202,12 @@ def run_asset(db, asset) -> int:
                 rows[start:start + 100], on_conflict="asset,session_date").execute()
     except Exception as exc:  # noqa: BLE001
         print(f"\nHATA: {asset.key} icin breakout_state yazilamadi ({exc}).")
-        print("  supabase/schema.sql'in 2026-09-15 migration'i Supabase SQL")
-        print("  Editor'de calistirilmamis olabilir -- tablo yoksa PostgREST")
-        print("  sorguyu komple reddeder ve sayfadaki kart bos kalir.")
+        print("  supabase/schema.sql'in 2026-09-15b migration'i Supabase SQL")
+        print("  Editor'de calistirilmamis olabilir. O migration tabloyu DUSURUP")
+        print("  yeniden kuruyor: `etf_symbol` -> `source_symbol` oldu ve")
+        print("  `metal_close` kalkti, cunku sinyal artik ETF'te degil COMEX")
+        print("  kontratinda ($/ons). Bilinmeyen bir kolon icin PostgREST TUM")
+        print("  insert'i reddeder ve sayfadaki kart bos kalir.")
         return 0
     report(asset, rows)
     return 1
