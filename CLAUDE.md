@@ -24,8 +24,9 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
                               HİÇBİR ŞEY İŞLEMİYOR: kural ön-kayıtlı barajı
                               geçemedi (research/README.md 18. bölüm), o
                               yüzden `breakout` trading.STRATEGIES'te YOK.
-                              Hacmi GLD/SLV'den okur, çünkü vadeli hacim
-                              serisi ölçülerek kullanılamaz bulundu.
+                              Hacmi TradingView'den COMEX:GC1!/SI1! olarak
+                              okur (tv_history.py), çünkü Yahoo o kontratların
+                              hacmini sunamıyor -- ve o kontrat $/ons kote.
   -> backend/daily_report.py  her iş günü 06:00 UTC (09:00 TRT) -- günlük
                               özet maili; hiçbir şey yazmaz, sadece okur
   -> backend/export_backtest.py  ELLE, cron YOK -- backtest'in sermaye
@@ -187,10 +188,17 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
     açıkça yazıyor**. `research/README.md` 14. ve **16.** bölüm.
 
 11. **Kırılımda girip trend kırılana kadar tutan kural ölçüldü ve baraja
-    takıldı — ama asıl bulgu ondan önce geldi: bu projenin VADELİ HACİM
-    SERİSİ YOK.** Order flow ve volume profile hacim enstrümanlarıdır, ve
-    `research/flow.py`'nin ilk işi hacmin kendisini sınamak oldu. İki vadeli
-    seri **iki farklı şekilde** düşüyor, bu yüzden üç test var:
+    takıldı — ama asıl bulgu ondan önce geldi: HACİM SERİSİNİN KENDİSİ
+    ÖLÇÜLMEDEN KULLANILAMAZ.** Order flow ve volume profile hacim
+    enstrümanlarıdır, ve `research/flow.py`'nin ilk işi hacmin kendisini
+    sınamak oldu.
+
+    **Bu madde iki fazlı okunur ve karıştırılmamalı: Faz 1 Yahoo'yla, Faz 2
+    TradingView'le koştu. Bugün canlıda olan Faz 2'dir.** Aşağıdaki her tablo
+    ve her sayı hangi faza ait olduğuyla etiketli.
+
+    **Faz 1 (Yahoo):** iki vadeli seri **iki farklı şekilde** düşüyor, bu
+    yüzden üç test var:
 
     - `GC=F` **oturumlar arasında kararsız**: aynı 250 tarih, diskteki panel
       anlık görüntüsüyle bugünün çekişi arasında **%3,6 tutuyor**, korelasyon
@@ -205,16 +213,20 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
     sembol de geçiyor**. Tek başına koşulsaydı kullanılamaz iki seriye temiz
     kâğıt verirdi. `part0` üçünü birden basıyor.
 
-    Bu yüzden `flow_signal.py` **hacimle ilgili her şeyi ETF serisinden
-    okuyor** ve metali kendi fiyatıyla işliyor — deponun sinyal girdisiyle
-    enstrümanının bilerek ayrıldığı **tek** yeri. 16. maddedeki faz kayması
-    burada yapısal olarak imkânsız: kural zaten ETF mumunda yaşıyor.
+    **Faz 1'in çözümü buydu:** `flow_signal.py` hacimle ilgili her şeyi
+    `GLD`/`SLV`'den okudu ve metali kendi fiyatıyla işledi — sinyal girdisiyle
+    enstrümanın bilerek ayrıldığı bir kurgu. **Faz 2 bunu ortadan kaldırdı**
+    (aşağıda): kural artık `COMEX:GC1!`/`SI1!`'in kendi mumunda yaşıyor, yani
+    hacim de fiyat da tek bir seriden geliyor ve o seri `$/ons` kote.
 
     **Kuralın kendisi:** değer alanının üstüne kapanış + AVWAP üstü + pozitif
     akış + en az iki osilatör onayı → gir; oynaklık ölçekli (yalnızca yukarı
     hareket eden) stop ya da iki seans AVWAP altı → çık. Baraj sonuçlara
     bakılmadan ilan edildi: "$10.000 rungunda, ETF üzerinde, iki metalde de
     Calmar'da al-ve-tut'u geç **ve** parada %25'ten fazla geride kalma".
+
+    **Faz 1 sonucu** (sinyal GLD/SLV üzerinde) — bugünün kartındaki sayılar
+    bunlar DEĞİL:
 
     | metal | Calmar | al-tut | son $ | al-tut $ |
     |---|---|---|---|---|
@@ -226,7 +238,7 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
     bırakıyor. 17. maddedeki $1.413'ün dokuz katı: orada "para değil sükûnet"
     bir savunmaydı, burada bir maliyettir.
 
-    **Dokuz bileşenin hiçbiri tek başına yön de taşımıyor**: 5 ve 20 günlük
+    **Dokuz bileşenin hiçbiri tek başına yön de taşımıyor** (Faz 1): 5 ve 20 günlük
     ufuklarda, iki metalde, 36 hücrenin sıfırı eşiği geçti ve **hiçbiri
     |t|=1'e bile ulaşmadı** (en büyüğü 0,80). Altının VAH kırılımı 20 günde
     +3,0 puan, gümüşünki −5,2 — işaret metaller arasında ters dönüyor.
@@ -257,6 +269,8 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
     **tam bir seans gecikmeyle** uyguluyor (vadeli mumu NY 17:00'da, ETF 16:00'da
     kapanıyor — gecikmesiz bir bacak 16. maddedeki seans sınırı etkisini
     tekrarlardı), ve süpürme aynı kurgu üzerinde puanlanıyor.
+
+    **Faz 2 sonucu** — kartın bugün bastığı sayılar bunlar:
 
     | metal | Calmar | al-tut | son $ | al-tut $ |
     |---|---|---|---|---|
@@ -1470,12 +1484,18 @@ fiyat — ve geri kalan her şey ona karşı çizilmiş bir **seviye**. Sonuçla
   ekseninin bir özelliğidir, fiyat ekseninde bir değer değil.
 - **Stop YALNIZCA pozisyon içindeyken çiziliyor.** Boştayken basılan bir stop
   seviyesi kurulu olmayan bir seviyedir ve çizgiden ayırt edilemez.
-- **Y ekseni 6 tik istiyor, sermaye panelinin 4'ünü değil.** `niceTicks` adımı
-  bir üst 1-2-5 katına **yuvarlıyor**, yani 4 isteyen 2 alabiliyor: altının
-  $309–$520 penceresinde ham adım 52,8 → 100'e yuvarlanıyor ve tüm işi bir
-  fiyatı seviyeler arasına yerleştirmek olan grafikte **iki gridline** kalıyor.
-  6 istendiğinde 35,2 → 50 ve dört tik geliyor. İki metalin gerçek penceresinde
-  ölçüldü.
+- **Y ekseni 6 tik istiyor, sermaye panelinin 4'ünü değil** — ve bu **Faz 1'de
+  ölçülmüş**, Faz 2'de artık bağlayıcı olmayan bir sabittir. `niceTicks` adımı
+  bir üst 1-2-5 katına **yuvarlıyor**, yani 4 isteyen 2 alabiliyor: Faz 1'in
+  GLD dolarındaki $309–$520 penceresinde ham adım 52,8 → 100'e yuvarlanıyor ve
+  tüm işi bir fiyatı seviyeler arasına yerleştirmek olan grafikte **iki
+  gridline** kalıyordu; 6 istendiğinde 35,2 → 50 ve dört tik geliyordu.
+  **Faz 2'nin $/ons pencerelerinde yeniden ölçüldü (2026-09-16) ve ikisi aynı
+  sonucu veriyor**: altın (3.465–5.372) 4 de 6 da dört tik, gümüş (43,11–115,50)
+  ikisi de üç tik. Yani 6 bugün hiçbir şey satın almıyor ama hiçbir şeye de mal
+  olmuyor — 4'e döndürmeden önce iki metalin O GÜNKÜ penceresinde yeniden ölç,
+  çünkü pencere fiyatla birlikte kayıyor ve arıza yalnızca belirli aralıklarda
+  ortaya çıkıyor.
 
 **Onay oyları backend'de karar veriliyor, JS'te değil** (`votes_detail` kolonu).
 Altı eşik "geleneksel nötr nokta" olsa da bir eşik karşılaştırması **kararın
@@ -1498,6 +1518,21 @@ tablosu yok diye. `loadBacktest`'in kuralının aynısı.
 
 **Tablo yoksa kart kendini gizlemiyor, sebebini yazıyor.** Kaybolmuş bir kart,
 okuyucuya neden kaybolduğunu öğrenecek hiçbir yol bırakmaz.
+
+**Kart sekmeye bağlı, o yüzden düzyazısı da öyle olmak zorunda.** 2026-09-16'da
+düzeltildi: açıklama bloğu ve dipnot yalnızca **altını** anlatıyordu ("spot
+altının hacmi yok", "günde ~200 bin kontrat", gümüşe hiç değinmeyen bir Yahoo
+karşılaştırması) ve `Kırılım Takibi — Gümüş` başlığının altında aynen
+basılıyordu. Bir kart `asset-scoped` ise metni **ya iki metali de adıyla anmalı**
+(ETF kartının "gümüşün al-ve-tut düşüşü %76,3, altınınki %45,6" cümlesi gibi)
+**ya da varlık başına ayrılmalı** — `BREAKOUT_VERDICT[...].spotNote` bunun için
+var. Üçüncü yol yok: sekmeyi takip eden bir başlığın altına tek metalin sayısını
+basmak, okuyucuya o sayının seçili metale ait olduğunu söyler.
+
+> Ve o ayrım **bir etiket değişkeni olamaz**: Türkçe eki çekiyor ("altının" /
+> "gümüşün"), yani `${label}'in` biçiminde bir şablon iki metalden biri için
+> mutlaka yanlış. Cümle parçası bütün hâlde saklanıyor — kartın yüzde
+> cümlelerinin ek almaktan tamamen kaçınmasıyla aynı sebep.
 
 **Günlük mailde BİLEREK yok, ve bu bir eksik değil bir sınır.** `daily_report.py`
 para olan şeyleri raporluyor (defterler, tahmin, ETF kitapları) artı bir insanın

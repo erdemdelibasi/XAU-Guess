@@ -1585,11 +1585,17 @@ const BREAKOUT_VERDICT = {
     final: 20548, benchFinal: 35284, entries: 62, inPosition: 0.29,
     // assets.GOLD.breakout -- mirrored for a caption, never for a decision.
     minConfirmations: 2, stopSigmas: 2.0,
+    // The WHOLE phrase, not a metal name a template glues a suffix onto:
+    // Turkish inflects it ("altının" / "gümüşün"), so a shared sentence with
+    // ${label}'in in it is wrong for one of the two metals. Same reason the
+    // card's percentage sentences avoid a trailing suffix entirely.
+    spotNote: "Spot altının (XAU/USD)",
   },
   silver: {
     etf: "SLV", years: 10.9, calmar: 0.154, benchCalmar: 0.236,
     final: 17996, benchFinal: 32715, entries: 56, inPosition: 0.23,
     minConfirmations: 2, stopSigmas: 2.0,
+    spotNote: "Spot gümüşün (XAG/USD)",
   },
 };
 
@@ -1789,7 +1795,7 @@ function renderBreakout(rows, asset) {
     `${verdict.entries} giriş; pozisyonda geçen süre %${Math.round(100 * verdict.inPosition)}. `
     + `Baraj sonuçlara bakılmadan ilan edildi ve geçilemedi &mdash; `
     + `<code>backend/research/flow.py</code>. Seviyeler <strong>${esc(last.source_symbol)}`
-    + `</strong> üzerindedir, yani <strong>$/ons</strong>. Spot altının (XAU/USD) `
+    + `</strong> üzerindedir, yani <strong>$/ons</strong>. ${verdict.spotNote} `
     + `hacmi <strong>hiçbir kaynakta yok</strong> &mdash; tezgâh üstü piyasa, konsolide `
     + `tape yok &mdash; o yüzden hacim profili COMEX kontratından okunuyor.`;
 }
