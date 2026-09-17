@@ -1604,7 +1604,8 @@ function renderBreakoutBook(portfolios, price, asset, costBasis) {
   const variant = `<p class="muted small">Bu defter, kartın ölçtüğü `
     + `konfigürasyonun <strong>tam giriş/tam çıkış</strong> kardeşini koşuyor: `
     + `süpürme kural boştayken %35 yatırımda kalmayı seçti, bu motorun ise `
-    + `hedef pozisyonu yok. Aynı test yarısında o varyant Calmar `
+    + `hedef pozisyonu yok. Aynı test yarısında, aynı alınabilir bacakta `
+    + `(${esc(BREAKOUT_VERDICT[currentAsset].etf)}) o varyant Calmar `
     + `<strong>${fmtNumber(v.bookCalmar, 3)}</strong> (al-ve-tut `
     + `${fmtNumber(v.benchCalmar, 3)}) ve $10.000'lik hesapta `
     + `<strong>${fmtUsd(v.bookFinal, 0)}</strong> &mdash; al-ve-tut'un `
@@ -1972,21 +1973,37 @@ function renderBreakout(rows, asset) {
     }).join("");
 
   // The measurement, on the card. It is a loss and it is printed as one.
+  //
+  // AND IT NAMES BOTH INSTRUMENTS, because they are deliberately different
+  // and the card had stopped saying so. Everything above this line speaks
+  // COMEX and $/ounce -- the levels, the chart, the book's fills -- and then
+  // this sentence said "GLD üzerinde" with no explanation, which reads as a
+  // leftover from phase 1 (when the whole panel really was in GLD dollars)
+  // rather than as the deliberate split it is: the rule is BUILT on the
+  // futures contract because that is the only series with real volume, and
+  // the verdict is READ on the ETF because no retail account can hold a COMEX
+  // contract. Two instruments, one rule, and a reader should not have to
+  // infer that from a three-word parenthesis.
   const shortfall = 1 - verdict.final / verdict.benchFinal;
   const calmarWon = verdict.calmar > verdict.benchCalmar;
-  document.getElementById("breakout-verdict").innerHTML = calmarWon
-    ? `Ölçüm: bu kural ${fmtNumber(verdict.years, 1)} yıl örneklem dışı, ${esc(verdict.etf)} `
-      + `üzerinde (alınabilir bacak, sinyal 1 seans gecikmeli) <strong>düşüşü azaltıyor</strong> `
-      + `(Calmar ${fmtNumber(verdict.calmar, 3)} — `
+  const measuredOn =
+    `<strong>Ölçüm iki ayrı enstrümanda duruyor</strong> ve bu bilerek böyle: `
+    + `kural <strong>${esc(last.source_symbol)}</strong> üzerinde kuruluyor `
+    + `(yukarıdaki her seviye orada, <strong>$/ons</strong>), hüküm ise `
+    + `<strong>${esc(verdict.etf)}</strong> üzerinde okunuyor &mdash; alınabilir `
+    + `bacak, sinyal 1 seans gecikmeli &mdash; çünkü perakende bir hesap COMEX `
+    + `kontratı tutamaz. `;
+  document.getElementById("breakout-verdict").innerHTML = measuredOn + (calmarWon
+    ? `${fmtNumber(verdict.years, 1)} yıl örneklem dışı o bacakta `
+      + `<strong>düşüşü azaltıyor</strong> (Calmar ${fmtNumber(verdict.calmar, 3)} — `
       + `al-ve-tut ${fmtNumber(verdict.benchCalmar, 3)}) ama <strong>parada geride kalıyor</strong>: `
       + `$10.000'lik hesapta ${fmtUsd(verdict.final, 0)}, al-ve-tut ${fmtUsd(verdict.benchFinal, 0)} `
       + `(%${fmtNumber(100 * shortfall, 1)} daha az). ${BREAKOUT_BOOK_NOTE}`
-    : `Ölçüm: bu kural ${fmtNumber(verdict.years, 1)} yıl örneklem dışı, ${esc(verdict.etf)} `
-      + `üzerinde (alınabilir bacak, sinyal 1 seans gecikmeli) `
+    : `${fmtNumber(verdict.years, 1)} yıl örneklem dışı o bacakta `
       + `<strong>her iki ölçüde de al-ve-tut'un gerisinde</strong>: Calmar `
       + `${fmtNumber(verdict.calmar, 3)} — ${fmtNumber(verdict.benchCalmar, 3)}, ve `
       + `$10.000'lik hesapta ${fmtUsd(verdict.final, 0)} — ${fmtUsd(verdict.benchFinal, 0)} `
-      + `(%${fmtNumber(100 * shortfall, 1)} daha az). ${BREAKOUT_BOOK_NOTE}`;
+      + `(%${fmtNumber(100 * shortfall, 1)} daha az). ${BREAKOUT_BOOK_NOTE}`);
 
   // No "the levels are in GLD dollars, convert them yourself" sentence any
   // more, and that absence is the point of the phase-2 source change: the
@@ -1996,8 +2013,12 @@ function renderBreakout(rows, asset) {
   document.getElementById("breakout-note").innerHTML =
     `${verdict.entries} giriş; pozisyonda geçen süre %${Math.round(100 * verdict.inPosition)}. `
     + `Baraj sonuçlara bakılmadan ilan edildi ve geçilemedi &mdash; `
-    + `<code>backend/research/flow.py</code>. Seviyeler <strong>${esc(last.source_symbol)}`
-    + `</strong> üzerindedir, yani <strong>$/ons</strong>. ${verdict.spotNote} `
+    // The "levels are in <symbol>, i.e. $/ounce" sentence used to live here.
+    // It moved into the verdict paragraph above, which now has to name both
+    // instruments anyway; leaving a copy here printed the same fact twice
+    // two lines apart. What stays is this note's own point, which nothing
+    // else on the card makes: spot has no volume at all.
+    + `<code>backend/research/flow.py</code>. ${verdict.spotNote} `
     + `hacmi <strong>hiçbir kaynakta yok</strong> &mdash; tezgâh üstü piyasa, konsolide `
     + `tape yok &mdash; o yüzden hacim profili COMEX kontratından okunuyor.`;
 }

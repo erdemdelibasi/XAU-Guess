@@ -1,6 +1,6 @@
 // Bump CACHE_NAME whenever frontend behaviour changes meaningfully, or a
 // browser can keep serving the old JS/HTML from cache indefinitely.
-const CACHE_NAME = "xau-guess-v30";
+const CACHE_NAME = "xau-guess-v31";
 const SHELL_FILES = [
   "./",
   "./index.html",

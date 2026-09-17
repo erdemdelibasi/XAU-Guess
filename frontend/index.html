@@ -699,6 +699,18 @@
             ve üç mertebelik o uyumsuzluk hangisinin yanlış olduğunu söylüyor.
             Üstelik COMEX kontratı zaten <strong>$/ons</strong> kote ediliyor
             &mdash; yani bu karttaki her seviye, izlediğin birimdedir.</p>
+            <p><strong>Kural nerede kuruluyor, hüküm nerede okunuyor:</strong> ikisi
+            farklı enstrüman ve bu bilerek böyle. Kural <code>COMEX:GC1!</code> /
+            <code>COMEX:SI1!</code> üzerinde yaşıyor &mdash; gerçek hacmi olan tek
+            seri o, ve kartın bastığı her seviye <strong>$/ons</strong> orada.
+            Ama hüküm <code>GLD</code> / <code>SLV</code> üzerinde okunuyor, çünkü
+            <strong>perakende bir hesap COMEX kontratı tutamaz</strong>: "sinyal
+            var mı" ile "bir insan bunu gerçekten alabilir mi" ayrı sorular, ve bu
+            deponun 16. bölümde ölçtüğü şey tam olarak ikisinin ayrışabildiğiydi
+            (madencilerin kazancı vadelide vardı, ETF'te yoktu). O yüzden alınabilir
+            bacak sinyali <strong>bir tam seans gecikmeyle</strong> uyguluyor:
+            vadelinin mumu New York 17:00'da, ETF'inki 16:00'da kapanıyor, ve
+            gecikmesiz bir bacak traderın sahip olmadığı bir saati harcardı.</p>
             <p><strong>Neye yaramaz:</strong> ölçüm sonucu yukarıda, kartın kendi
             üzerindedir. Kısaca: <strong>bu kural al-ve-tut'u geçmiyor</strong> &mdash;
             2026-09-17'de yeniden ölçüldükten sonra <em>iki metalde de, iki ölçüde

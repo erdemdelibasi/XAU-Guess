@@ -636,7 +636,9 @@ def render_text(report: dict) -> str:
             lines.append("    (Kırılım kuralı: ön-kayıtlı barajı iki ayrı veri "
                          "kaynağında geçemedi; defterin koştuğu varyant on yıllık "
                          "testte al-ve-tut'un altında kaldı — altında %51,2, "
-                         "gümüşte %59,3. Defter kaybı canlı göstermek için var)")
+                         "gümüşte %59,3. Bu defter COMEX kontratında $/ons işlem "
+                         "görüyor, ölçüm ise alınabilir bacakta (GLD/SLV). "
+                         "Defter kaybı canlı göstermek için var)")
 
         kf = section["kanal_finans"]
         if kf:
@@ -751,7 +753,9 @@ def _books_table_html(section: dict) -> str:
               f'<br><span style="color:{MUTED};">Kırılım kuralı: ön-kayıtlı barajı '
               f'iki ayrı veri kaynağında geçemedi; defterin koştuğu varyant on '
               f"yıllık testte al-ve-tut'un %51,2 (gümüşte %59,3) altında kaldı. "
-              f'Defter kaybı canlı göstermek için var.</span>')
+              f'Defter COMEX kontratında $/ons işlem görüyor, ölçüm alınabilir '
+              f'bacakta (GLD/SLV) okunuyor. Defter kaybı canlı göstermek için '
+              f'var.</span>')
     note = (f'<tr><td colspan="6" style="padding:6px 9px 10px;font-size:11px;color:{MUTED};'
             f'line-height:1.45;">'
             f'Al-ve-tut\'u geçen: {verdict}{caveat}</td></tr>')

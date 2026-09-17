@@ -1617,6 +1617,17 @@ dolarında konuşuyordu ($404,96) ve ons altın izleyen biri her seviyeyi kafas�
 çeviriyordu. Kart artık ayrıca "seviyeler şu enstrümandadır, metalin kapanışı
 şudur" cümlesini de **taşımıyor** — taşıması gereken bir şey kalmadı.
 
+**Ama hüküm hâlâ ETF'te okunuyor ve kart bunu 2026-09-17'ye kadar
+söylemiyordu.** Kart baştan sona COMEX ve `$/ons` konuşurken hüküm cümlesi
+açıklamasız "GLD üzerinde" diyordu — okuyucuya Faz 1'den kalmış bir cümle gibi
+görünüyor, oysa **bilerek iki ayrı enstrüman**: kural gerçek hacmi olan tek
+seride kuruluyor, hüküm ise perakende bir hesabın tutabileceği seride
+okunuyor (16. bölümün ölçtüğü ayrışmanın ta kendisi). Cümle artık ikisini de
+adıyla anıyor ve sebebini yazıyor; açıklama bloğunda da kendi paragrafı var.
+**Bir kart iki enstrüman taşıyorsa ikisini de adıyla anmak zorundadır** —
+`asset-scoped` bir kartın iki metali de adıyla anması gerektiğiyle aynı
+kural, bir eksen aşağıda.
+
 **Grafik kasıtlı olarak sermaye grafiklerinden farklı bir hayvandır.** Orada her
 çizgi yarışan bir defter, soru "hangisi yukarıda". Burada **tek bir özne** var —
 fiyat — ve geri kalan her şey ona karşı çizilmiş bir **seviye**. Sonuçları:

@@ -175,3 +175,54 @@ def test_an_edge_is_reported_in_points_not_percent():
 def test_missing_values_render_as_a_dash_not_a_crash():
     for fn in (report.fmt_usd, report.fmt_pct, report.fmt_signed_pct, report.fmt_points):
         assert fn(None) == "-"
+
+
+# --------------------------------------------------------------------------
+# The breakout book's caveat -- the one line in this mail that is about a rule
+# measured to LOSE. It was shipped untested, which is the wrong thing to ship
+# untested: it only renders when that book exists, so a broken branch would
+# have stayed invisible until the first morning it mattered.
+# --------------------------------------------------------------------------
+
+def _book(**overrides) -> dict:
+    book = {"value_start": 1000.0, "value_now": 1000.0, "ounces": 0.0,
+            "exposure": 0.0, "target_exposure": 0.0, "stop_loss_price": None,
+            "buys": 0, "sells": 0, "today": 0.0, "total": 0.0,
+            "vs_benchmark": 0.0}
+    book.update(overrides)
+    return book
+
+
+def _section(books: dict) -> dict:
+    return {"asset": assets.GOLD, "books": books, "beat_benchmark": []}
+
+
+def test_the_breakout_caveat_names_both_instruments():
+    """The book trades the COMEX contract in $/ounce; the measurement beside
+    it was made on the buyable ETF leg. A reader who is told one number and
+    shown the other has no way to know they are different instruments -- the
+    same confusion the card's verdict sentence had to be fixed for."""
+    html = report._books_table_html(_section({"breakout": _book()}))
+
+    assert "Kırılım kuralı" in html
+    assert "COMEX" in html and "GLD/SLV" in html
+    assert "%51,2" in html
+
+
+def test_the_caveat_disappears_when_the_book_does():
+    """No book, no caveat. A warning about a portfolio that is not in the
+    table is a sentence with nothing to attach to."""
+    html = report._books_table_html(_section({"buyhold": _book()}))
+    assert "Kırılım kuralı" not in html
+
+
+def test_the_caveat_prints_even_in_a_week_it_leads():
+    """Deliberately unlike the miners line, which only prints when miners is
+    ahead. This one is not a caveat about a win -- it is the rule's measured
+    result, and the week it happens to lead is exactly the week a reader most
+    needs it."""
+    section = _section({"breakout": _book(vs_benchmark=0.12),
+                        "buyhold": _book()})
+    section["beat_benchmark"] = ["breakout"]
+    html = report._books_table_html(section)
+    assert "ön-kayıtlı barajı" in html
