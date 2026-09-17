@@ -30,8 +30,26 @@ on the buyable leg:
       gold    Calmar 0.520 vs 0.463  PASS  |  $20,548 vs $35,284  -41.8%  FAIL
       silver  Calmar 0.154 vs 0.236  FAIL  |  $17,996 vs $32,715  -45.0%  FAIL
 
-Two vendors, two instruments, the same answer -- which is worth more than
-either run alone: the failure is the rule's, not a data artefact.
+    phase 2 RE-RUN 2026-09-17 -- same rule, same bar, alignment fixed
+      gold    Calmar 0.452 vs 0.460  FAIL  |  $22,151 vs $35,012  -36.7%  FAIL
+      silver  Calmar 0.146 vs 0.230  FAIL  |  $18,811 vs $31,935  -41.1%  FAIL
+
+The re-run exists because phase 2's "one full session of lag" was not there.
+TradingView stamps a daily bar with the session's OPEN and Yahoo with the
+trade date it closes on, so research/flow.py's ETF join landed a session
+early and the lag cancelled it back out -- a signal known at 17:00 New York
+was executed at that same day's 16:00 ETF close. tv_history.to_trade_dates()
+fixed the stamp. Gold's Calmar win went with it: the rule now loses on both
+counts in both metals.
+
+And the BOOK is not even running that configuration. The sweep picks a 0.35
+floor for both metals now; this book is all-in / all-out, so it runs the
+hard-exit sibling, measured on the same test half at Calmar 0.341 (gold) and
+0.053 (silver), 51.2% and 59.3% behind buy-and-hold in money. The card says
+so beside the panel.
+
+Three vendors' worth of construction, one answer -- which is worth more than
+any single run: the failure is the rule's, not a data artefact.
 
 The book was opened anyway (2026-09-16), on purpose, with that table printed
 on the card beside it. What it adds to the table is a thing a table cannot

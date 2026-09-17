@@ -4,9 +4,17 @@ breakout rule from flow_signal.py.
 WHY THIS BOOK EXISTS EVEN THOUGH THE RULE FAILED ITS BAR
 --------------------------------------------------------
 research/flow.py scored this rule against a bar declared before any result
-was looked at, twice, on two vendors and two instruments. It failed both
-times: gold wins on Calmar and finishes 34-42% behind buy-and-hold in money,
-silver loses on both counts. research/README.md section 18 has the tables.
+was looked at, three times now: on two vendors, two instruments, and -- after
+2026-09-17 -- with the buyable leg's session lag actually applied rather than
+cancelled out by a misaligned join. It failed every time, and the last run is
+the worst of them: gold no longer wins Calmar either (0.452 against 0.460),
+and both metals finish 37-41% behind buy-and-hold in money.
+
+This book runs a variant worse still, and the card says so rather than
+borrowing the verdict's number: the sweep keeps 35% invested while the rule
+is flat, which an all-in/all-out engine cannot hold, so the book is the
+hard-exit sibling -- Calmar 0.341 in gold, 51.2% behind in money.
+research/README.md section 18 has every table.
 
 The book was opened anyway, deliberately and with that result printed beside
 it, because the question it answers is not "should I trade this" -- that was
@@ -54,12 +62,18 @@ behaviour rather than a bug. The book runs the rule from the day it starts.
 FILLS ARE AT THE SIGNAL'S OWN SERIES
 -------------------------------------
 The fill price is the TradingView COMEX close the decision was made on, NOT
-fetch_data.get_live_price()'s GC=F. Those two are different continuous-
-contract stitchings of the same contract and differ by a median 0.88% on
-closes (research/README.md, phase 2), so deciding on one and filling at the
-other would book that seam as P&L. The frontend already marks every portfolio
-at COMEX:GC1!/SI1!, which is this series -- so for this book the decision
-price, the fill price and the mark are finally all one series.
+fetch_data.get_live_price()'s GC=F. Deciding on one series and filling at
+another books the gap between them as P&L, whatever that gap happens to be
+today.
+
+The SIZE of that gap was itself mismeasured and the correction is worth
+keeping. It was recorded here as "a median 0.88% on closes", read off a join
+that compared TradingView's session-open stamp against Yahoo's trade date --
+i.e. it was measuring a daily return. Aligned (2026-09-17): gold agrees to
+the tick, median |gap| 0.000% over 250 sessions, and silver differs by 0.457%
+because Yahoo's SI=F front month genuinely is stitched differently. So this
+choice costs nothing in gold and still matters in silver, which is the
+opposite of the reason first written down for it.
 """
 from __future__ import annotations
 

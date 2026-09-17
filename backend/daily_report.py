@@ -634,8 +634,9 @@ def render_text(report: dict) -> str:
         # when a reader most needs it.
         if section["books"].get(BREAKOUT_BOOK):
             lines.append("    (Kırılım kuralı: ön-kayıtlı barajı iki ayrı veri "
-                         "kaynağında geçemedi — altında %41,8, gümüşte %45,0 "
-                         "parada geride. Defter kaybı canlı göstermek için var)")
+                         "kaynağında geçemedi; defterin koştuğu varyant on yıllık "
+                         "testte al-ve-tut'un altında kaldı — altında %51,2, "
+                         "gümüşte %59,3. Defter kaybı canlı göstermek için var)")
 
         kf = section["kanal_finans"]
         if kf:
@@ -748,8 +749,9 @@ def _books_table_html(section: dict) -> str:
     # most needs it. Same job as the miners line in the text report.
     caveat = ("" if not section["books"].get(BREAKOUT_BOOK) else
               f'<br><span style="color:{MUTED};">Kırılım kuralı: ön-kayıtlı barajı '
-              f'iki ayrı veri kaynağında geçemedi (altında %41,8, gümüşte %45,0 '
-              f'parada geride). Defter kaybı canlı göstermek için var.</span>')
+              f'iki ayrı veri kaynağında geçemedi; defterin koştuğu varyant on '
+              f"yıllık testte al-ve-tut'un %51,2 (gümüşte %59,3) altında kaldı. "
+              f'Defter kaybı canlı göstermek için var.</span>')
     note = (f'<tr><td colspan="6" style="padding:6px 9px 10px;font-size:11px;color:{MUTED};'
             f'line-height:1.45;">'
             f'Al-ve-tut\'u geçen: {verdict}{caveat}</td></tr>')

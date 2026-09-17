@@ -593,6 +593,10 @@ end $$;
 --             Re-measured on the new source, the rule STILL fails its bar --
 --             gold Calmar 0.520 vs 0.463 but 41.8% less money, silver behind
 --             on both. So there is still no `breakout` portfolio.
+--             (Both of those became untrue later and the note is kept as
+--             written: a book was opened 2026-09-16, and the 2026-09-17
+--             re-run -- after tv_history stopped stamping bars a session
+--             early -- put gold behind on Calmar too, 0.452 vs 0.460.)
 --
 --   drop table if exists breakout_state;
 --   create table if not exists breakout_state (

@@ -1347,7 +1347,7 @@ function bookPanelHtml(strategy, ctx) {
   const vsBenchmark =
     benchmarkValue && !strategy.benchmark ? value / benchmarkValue - 1 : null;
 
-  // Two of the eleven books watch a LEVEL rather than a target exposure, so
+  // Two of this metal's books watch a LEVEL rather than a target exposure, so
   // they show that instead. Printing "hedef %0" for an all-in/all-out book
   // states a target it does not have and that it will never move toward.
   let extraRow;
@@ -1476,6 +1476,17 @@ function renderStrategies(portfolios, price, asset, costBasis) {
   const totalTrades = ledger.length;
   const totalFees = ledger.reduce((sum, t) => sum + (Number(t.fee_usd) || 0), 0);
 
+  // Which books are drawn somewhere else, DERIVED rather than typed. The
+  // sentence below used to name `kanalfinans` as "the eleventh" and say
+  // "eleven books" -- and the moment `breakout` opened a twelfth book, the
+  // count was wrong while `totalTrades` beside it, which counts every fill on
+  // this metal, had already started including it. A number that is computed
+  // standing next to a number that is asserted is how a page starts
+  // contradicting itself. Same fix as the live chart's caption.
+  const elsewhere = STRATEGIES.filter((s) => s.follower || s.breakoutBook);
+  const elsewhereText = elsewhere.map((s) => esc(s.label)).join(" ve ")
+    + (elsewhere.length > 1 ? " kendi kartlarında" : " kendi kartında");
+
   // Two labelled groups, BOTH fully visible. An earlier version folded the
   // signalled seven into a <details>; nothing on this page is hidden behind a
   // click except the "what does this mean" explainers, because a panel that
@@ -1500,13 +1511,13 @@ function renderStrategies(portfolios, price, asset, costBasis) {
     <div class="strategy-grid signalled">${signalled.map(panelFor).join("")}</div>
 
     <!-- The one number the combined trade log carried that a per-book log
-         cannot: what all eleven books have paid between them, and the rate
-         they pay it at. backend/backtest.py's whole cost ladder exists because
-         the same strategy beats buy-and-hold at 2 bp and loses badly at 150,
-         so this is not a footnote. -->
+         cannot: what every book on this metal has paid between them, and the
+         rate they pay it at. backend/backtest.py's whole cost ladder exists
+         because the same strategy beats buy-and-hold at 2 bp and loses badly
+         at 150, so this is not a footnote. -->
     <p class="muted small">
-      Her defterin kendi son işlemleri kutusunun içinde; on birincisi
-      (<code>kanalfinans</code>) Kanal Finans kartında. On bir defter bugüne
+      Her defterin kendi son işlemleri kutusunun içinde; ${elsewhereText}.
+      Bu metalin <strong>${STRATEGIES.length}</strong> defteri bugüne
       kadar toplam <strong>${totalTrades}</strong> işlem yaptı ve
       <strong>${fmtUsd(totalFees, 2)}</strong> komisyon ödedi; oran bu metal için
       tek yönde ${fmtNumber(asset.feeBps, 0)} baz puandır &mdash; bir stratejinin
@@ -1579,8 +1590,29 @@ function renderBreakoutBook(portfolios, price, asset, costBasis) {
       + `defteri değil, al-ve-tut'un açılıştan bu yana ne yaptığını ölçüyor; `
       + `karşılaştırma ilk dolumdan sonra anlam kazanır.</p>`
     : "";
+
+  // The card's verdict sentence above measures the configuration the sweep
+  // CHOSE; this book runs a different one, and saying so is not a footnote.
+  // The sweep keeps 35% of the book invested while the rule is flat, and an
+  // all-in/all-out engine cannot hold that -- so the book is the hard-exit
+  // sibling, and it is measured on the same test half rather than assumed to
+  // behave like its twin. It does not: 11 points of Calmar and 15 points of
+  // money worse, in gold. Quoting the verdict's numbers beside this box would
+  // be the one thing this card exists not to do.
+  const v = BREAKOUT_VERDICT[currentAsset];
+  const bookGap = 1 - v.bookFinal / v.benchFinal;
+  const variant = `<p class="muted small">Bu defter, kartın ölçtüğü `
+    + `konfigürasyonun <strong>tam giriş/tam çıkış</strong> kardeşini koşuyor: `
+    + `süpürme kural boştayken %35 yatırımda kalmayı seçti, bu motorun ise `
+    + `hedef pozisyonu yok. Aynı test yarısında o varyant Calmar `
+    + `<strong>${fmtNumber(v.bookCalmar, 3)}</strong> (al-ve-tut `
+    + `${fmtNumber(v.benchCalmar, 3)}) ve $10.000'lik hesapta `
+    + `<strong>${fmtUsd(v.bookFinal, 0)}</strong> &mdash; al-ve-tut'un `
+    + `%${fmtNumber(100 * bookGap, 1)} altında. Yani defter, yukarıdaki ölçümün `
+    + `bile gerisinde bir varyantı taşıyor.</p>`;
+
   host.innerHTML = `<div class="strategy-grid follower-grid">`
-    + bookPanelHtml(strategy, ctx) + `</div>` + caveat;
+    + bookPanelHtml(strategy, ctx) + `</div>` + caveat + variant;
 }
 
 // How long the paper books have been running, from the first fill on record.
@@ -1714,10 +1746,25 @@ const BREAKOUT_INDICATORS = [
    beats buy-and-hold on Calmar and finishes a third behind it in money, and
    printing only the first number would be exactly the overstatement
    research/README.md section 17 exists to correct. */
+/* research/flow.py part 5, RE-MEASURED 2026-09-17.
+ *
+ * The first phase-2 numbers (gold Calmar 0.520 vs 0.463, silver 0.154 vs
+ * 0.236) were produced by a construction that claimed a one-session lag on
+ * the buyable leg and did not have one: TradingView stamps a daily bar with
+ * the session's OPEN, so the ETF join landed a day early and the lag
+ * cancelled it back out into an hour of look-ahead. Fixed in
+ * tv_history.to_trade_dates(); these are the re-run's figures, and gold no
+ * longer wins Calmar either.
+ *
+ * `book*` is the variant the $1,000 paper book actually runs. The sweep now
+ * picks a 0.35 floor for both metals and breakout_trading.py is all-in /
+ * all-out, so the book is the hard-exit sibling of the rule the bar judged --
+ * measured on the same test half rather than assumed to be the same. */
 const BREAKOUT_VERDICT = {
   gold: {
-    etf: "GLD", years: 10.9, calmar: 0.520, benchCalmar: 0.463,
-    final: 20548, benchFinal: 35284, entries: 62, inPosition: 0.29,
+    etf: "GLD", years: 10.9, calmar: 0.452, benchCalmar: 0.460,
+    final: 22151, benchFinal: 35012, entries: 62, inPosition: 0.29,
+    bookCalmar: 0.341, bookFinal: 17072,
     // assets.GOLD.breakout -- mirrored for a caption, never for a decision.
     minConfirmations: 2, stopSigmas: 2.0,
     // The WHOLE phrase, not a metal name a template glues a suffix onto:
@@ -1727,9 +1774,10 @@ const BREAKOUT_VERDICT = {
     spotNote: "Spot altının (XAU/USD)",
   },
   silver: {
-    etf: "SLV", years: 10.9, calmar: 0.154, benchCalmar: 0.236,
-    final: 17996, benchFinal: 32715, entries: 56, inPosition: 0.23,
-    minConfirmations: 2, stopSigmas: 2.0,
+    etf: "SLV", years: 10.2, calmar: 0.146, benchCalmar: 0.230,
+    final: 18811, benchFinal: 31935, entries: 53, inPosition: 0.22,
+    bookCalmar: 0.053, bookFinal: 12995,
+    minConfirmations: 4, stopSigmas: 2.0,
     spotNote: "Spot gümüşün (XAG/USD)",
   },
 };

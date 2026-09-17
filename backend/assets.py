@@ -104,12 +104,21 @@ GOLD = Asset(
     # p90 over 6022 sessions: macd_hist/close 0.00581, ema9/ema21-1 0.01940,
     # close/sma200-1 0.15368. Saturation 10.6% / 4.7% / 4.7%.
     price_scales=PriceScales(macd=172.0, ema_cross=51.5, sma200=6.5),
-    # research/flow.py PHASE 2, training half 2004-11 -> 2015-10 (10.9 years)
-    # on COMEX:GC1!. Out of sample on 2015-2026 this configuration scored
-    # Calmar 0.520 against buy-and-hold's 0.463 on the buyable leg and
-    # finished 41.8% BEHIND it in money, which is why nothing trades on it.
+    # research/flow.py PHASE 2, RE-MEASURED 2026-09-17 after the TradingView
+    # alignment fix (tv_history.to_trade_dates): the first phase-2 run's
+    # "one session of lag" on the buyable leg had been cancelled out by a
+    # misaligned join, so its numbers described a rule with an hour of
+    # look-ahead in it. Training half 2004-11 -> 2015-10 (10.9 years) on
+    # COMEX:GC1!. Out of sample on 2015-2026 this configuration scored Calmar
+    # 0.452 against buy-and-hold's 0.460 -- it no longer wins that either --
+    # and finished 36.7% BEHIND it in money.
+    #
+    # `flat_exposure` 0.35 is what the grid chose and it is NOT what the paper
+    # book holds: breakout_trading.py is all-in / all-out, so the book runs
+    # the hard-exit sibling (Calmar 0.341, 51.2% behind). Both are printed by
+    # flow.py part 5; the bar judges the chosen one.
     breakout=BreakoutParams(symbol="COMEX:GC1!", min_confirmations=2,
-                            stop_sigmas=2.0, flat_exposure=0.0),
+                            stop_sigmas=2.0, flat_exposure=0.35),
 )
 
 SILVER = Asset(
@@ -145,22 +154,23 @@ SILVER = Asset(
     # sessions with a median |score| of 0.715, i.e. it had stopped grading
     # and started voting. Nothing raised; the scoreboard just quietly moved.
     price_scales=PriceScales(macd=93.4, ema_cross=29.3, sma200=3.72),
-    # research/flow.py PHASE 2, measured on SILVER's own training half
-    # (2004-11 -> 2015-10, COMEX:SI1!) and NOT copied -- the values happening
-    # to match gold's is a RESULT, not a shortcut. Phase 1, on SLV, picked a
-    # 3.0-sigma stop here against gold's 2.0; with real COMEX volume in place
-    # of the ETF's, both grids land on the same cell.
+    # research/flow.py PHASE 2, RE-MEASURED 2026-09-17 on SILVER's own
+    # training half (2006-04 -> 2016-06, COMEX:SI1!) and NOT copied.
     #
-    # That is worth one sentence because it is the opposite of this file's
-    # usual warning: the danger is normally copying gold's number onto silver,
-    # and the defence is measuring. Here measuring produced the same number,
-    # which is fine. Re-run flow.py before assuming it stays that way.
+    # The re-run is also a small lesson in not writing a result down too
+    # early. Phase 1 (on SLV) picked 3.0 sigmas here against gold's 2.0; the
+    # first phase-2 run had both metals landing on the SAME cell and this
+    # comment said so. With the alignment fixed they separate again, on a
+    # different axis: silver needs FOUR confirmations to enter where gold
+    # needs two. Measured separately each time, which is the only reason any
+    # of these three sentences can be trusted.
     #
-    # Out of sample on 2015-2026 it lost on BOTH counts (Calmar 0.154 against
-    # buy-and-hold's 0.236, and 45.0% less money), which the panel says on
-    # screen rather than leaving to the reader.
-    breakout=BreakoutParams(symbol="COMEX:SI1!", min_confirmations=2,
-                            stop_sigmas=2.0, flat_exposure=0.0),
+    # Out of sample on 2016-2026 it lost on both counts (Calmar 0.146 against
+    # buy-and-hold's 0.230, and 41.1% less money). `flat_exposure` 0.35 is
+    # the grid's choice and not what the book holds -- see gold's note; the
+    # book's hard-exit variant scores 0.053 and 59.3% behind.
+    breakout=BreakoutParams(symbol="COMEX:SI1!", min_confirmations=4,
+                            stop_sigmas=2.0, flat_exposure=0.35),
 )
 
 ASSETS = {GOLD.key: GOLD, SILVER.key: SILVER}

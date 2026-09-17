@@ -274,21 +274,74 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
     kapanıyor — gecikmesiz bir bacak 16. maddedeki seans sınırı etkisini
     tekrarlardı), ve süpürme aynı kurgu üzerinde puanlanıyor.
 
-    **Faz 2 sonucu** — kartın bugün bastığı sayılar bunlar:
+    **Faz 2'nin İLK sonucu** (2026-09-16) — ve bu sayılar artık ekranda DEĞİL:
 
     | metal | Calmar | al-tut | son $ | al-tut $ |
     |---|---|---|---|---|
     | altın | **0,520** | 0,463 | $20.548 | $35.284 (**−%41,8**) |
     | gümüş | 0,154 | 0,236 | $17.996 | $32.715 (**−%45,0**) |
 
-    **İki satıcı, iki enstrüman, aynı cevap** — bu, iki koşunun her birinden
-    ayrı ayrı daha değerli: başarısızlık kuralın, veri artefaktının değil.
+    **Çünkü ilan edilen gecikme fiilen uygulanmıyordu (2026-09-17'de bulundu).**
+    `tv_history.daily()` TradingView'in ham damgasını kullanıyordu; TradingView
+    günlük vadeli barı seansın **açıldığı** günle damgalıyor (NY 18:00), Yahoo
+    ve CME ise **kapandığı işlem günüyle**. Aynı değerler, bir gün kaymış
+    etiket — ve iki hata birbirini götürdüğü için tablo makul görünüyordu:
 
-    Üç yan bulgu kayıt altında:
-    - **İki metal artık AYNI parametreleri seçti** (onay≥2, 2,0σ, sert çıkış);
-      Faz 1'de gümüş 3,0σ seçmişti. **Ayrı ayrı ölçülmüş aynı sayılar sorun
-      değil, kopyalanmış aynı sayılar sorundur** — ve ikisi dışarıdan ayırt
-      edilemez, o yüzden ölçüm her birinin yanındaki yorumda duruyor.
+    - `fetch_data.drop_forming_bar` barın kendi takvim gününü okuyor, yani
+      açılış damgalı bir bar için test **bir tam seans erken**: canlı ölçüldü,
+      seans açıkken **0 satır düşürdü**. `track_breakout.py` her gece **bir
+      saatlik yarım barı** son kapanmış seans diye yayımlıyordu
+      (`breakout_state`'in 2026-09-16 satırı 4.309,1, gerçek kapanış 4.408,2)
+      ve defter kararını onun üzerinde veriyordu. **Panel kendini ertesi gün
+      düzeltir, bir dolum düzelmez.**
+    - `research/flow.py` ETF kapanışını barın etiket gününe bağlıyor; açılış
+      damgasında bu, vadeli bar **başlamadan önceki** ETF kapanışı oluyor ve
+      `lagged()`'in bir satırlık kayması hatayı geri alıyordu. Net: NY 17:00'da
+      bilinen sinyal aynı günün 16:00 ETF kapanışında işleniyordu — **tam da
+      16. maddenin seans sınırı etkisi**, onu önlemek için yazılmış önlemin
+      içinde.
+    - "İki satıcının dikişi farklı, medyan %0,88" bulgusu da aynı kaymanın
+      artefaktıydı: doğru hizalandığında altın **%0,000**, gümüş %0,457.
+
+    Düzeltme tek yerde: `tv_history.to_trade_dates()` damgayı işlem gününün NY
+    gece yarısına taşıyor — `fetch_data`'nın Yahoo barını damgaladığı yerin
+    aynısı. `tests/test_data_hygiene.py` beş testle kilitliyor.
+
+    **Faz 2, yeniden koşuldu (2026-09-17)** — kartın bugün bastığı sayılar
+    bunlar:
+
+    | metal | seçilen | Calmar | al-tut | son $ | al-tut $ |
+    |---|---|---|---|---|---|
+    | altın | onay≥2, 2,0σ, boşta %35 | 0,452 | 0,460 | $22.151 | $35.012 (**−%36,7**) |
+    | gümüş | onay≥4, 2,0σ, boşta %35 | 0,146 | 0,230 | $18.811 | $31.935 (**−%41,1**) |
+
+    **Altının Calmar üstünlüğü ileri bakıştan geliyormuş**: gerçek gecikmeyle
+    0,452 vs 0,460, yani kural artık **iki metalde de, iki ölçüde de** geride.
+    Para açığı ise küçüldü (%41,8 → %36,7) — ileri bakış Calmar'ı şişiriyordu,
+    parayı değil.
+
+    **Ve defter ölçülen konfigürasyonu koşmuyor.** Süpürme boşta %35 seçti,
+    `breakout_trading.py` ise tam giriş/tam çıkış ("kırılana kadar tut" bir
+    kesir olamaz). Defterin varyantı aynı test yarısında ayrıca ölçüldü ve
+    **daha kötü**: altın Calmar 0,341 / $17.072 (−%51,2), gümüş 0,053 /
+    $12.995 (−%59,3). Kartta defter kutusunun altında bu yazıyor; barajın
+    hangi varyantı yargıladığı **değiştirilmedi** (iki kardeşten iyi olanı
+    sonradan seçmek ön-kaydın önlemek için var olduğu şeydir).
+
+    **Üç koşu, iki satıcı, iki enstrüman, aynı cevap** — bu, herhangi birinin
+    tek başına söylediğinden fazlasını söylüyor: başarısızlık kuralın, veri
+    artefaktının değil.
+
+    Yan bulgular kayıt altında:
+    - **İki metal AYNI parametreleri seçmiyor** — ve bu satır bu dosyada üç
+      kez değişti: Faz 1'de ayrıydılar (2,0σ vs 3,0σ), ilk Faz 2 koşusunda
+      aynı hücreye oturdular, yeniden koşumda **üçüncü bir eksende** ayrıldılar
+      (gümüş dört onay istiyor, altın iki). **Ayrı ayrı ölçülmüş aynı sayılar
+      sorun değil, kopyalanmış aynı sayılar sorundur** — ve ikisi dışarıdan
+      ayırt edilemez, o yüzden ölçüm her birinin yanındaki yorumda duruyor.
+    - **"Muhafazakâr taraf kazanıyor" bir merak değil, hizalama şüphesidir.**
+      İlk Faz 2 koşusu "gecikmeli ETF bacağı vadeli bacağı geçiyor, açıklanamadı"
+      diye kaydetmişti; açıklaması gecikmenin hiç olmamasıydı.
     - `test_flow_signal.py`'nin "ikisi farklı olmalı" testi bu yüzden **düştü
       ve yeniden yazıldı**. Bir ölçümün sonucunu çiviyle tutturan bekçi, ölçüm
       yeniden koşulduğunda — tam susması gereken anda — kırılır. Yerine
@@ -393,6 +446,7 @@ farklı olabilecek her şey orada ve **her sayısı ölçülmüştür**
 | model dosyası | `xau_model.joblib` | `xag_model.joblib` | farklı özellik seti, değiştirilemezler |
 | `breakout.symbol` | `COMEX:GC1!` | `COMEX:SI1!` | panelin hacmi buradan okuması ölçülmüş bir zorunluluk |
 | `breakout.stop_sigmas` | 2,0 | 2,0 | **ayrı ayrı ölçüldü, aynı çıktı** — Faz 1'de 2,0 vs 3,0'dı |
+| `breakout.min_confirmations` | 2 | **4** | 2026-09-17 yeniden koşumu ayırdı; gümüş girmek için iki kat onay istiyor |
 
 **"Varlık ekle" tek satırlık bir ayar değişikliği gibi görünüp öyle
 değildir.** Altının sayılarını gümüşe kopyalamak hiçbir hata vermez; sadece
@@ -963,7 +1017,8 @@ davranış.
 `predictions` tablosunda `unique(symbol, target_date)` var ve `predict.py`
 pahalı hiçbir işe girmeden önce kontrol ediyor. Elle tetiklenen bir koşu
 cron'la çakışsaydı aynı seans için iki satır yazılır, bileşen sicilleri çift
-sayar ve dokuz portföyün `maybe_trade()`'i iki kez ateşlenirdi.
+sayar ve `trading.STRATEGIES`'teki on portföyün `maybe_trade()`'i iki kez
+ateşlenirdi.
 
 ---
 

@@ -1562,13 +1562,15 @@ pozisyon alıp haftalarca içinde oturuyor. Dolayısıyla IC ile ya da 5 günlü
 isabetle puanlanamaz: soru "yarın ne olacak" değil, **"aldığı pozisyon, kendi
 çıkışına kadar tutulduğunda metali geçiyor mu"**.
 
-> **Bu bölüm İKİ FAZ taşıyor ve ikisi de burada duruyor.** Aşağıdaki Bölüm
+> **Bu bölüm İKİ FAZ ve ÜÇ KOŞU taşıyor; hiçbiri silinmedi.** Aşağıdaki Bölüm
 > 0–5 **Faz 1**'dir: sinyal `GLD`/`SLV` üzerinde kuruldu, çünkü Yahoo vadeli
-> hacmi sunamıyordu. **Faz 2** (en sonda) aynı soruyu ikinci bir satıcıya
-> sordu, sinyali `COMEX:GC1!`/`SI1!`'e taşıdı — ve hüküm değişmedi. Faz 1
-> silinmedi, çünkü iki farklı kaynakta aynı sonucun çıkması, herhangi bir
-> koşunun tek başına söylediğinden fazlasını söylüyor. **Üretimde çalışan
-> Faz 2'dir.**
+> hacmi sunamıyordu. **Faz 2** aynı soruyu ikinci bir satıcıya sordu ve
+> sinyali `COMEX:GC1!`/`SI1!`'e taşıdı. **Faz 2, 2026-09-17'de yeniden
+> koşuldu**, çünkü ilk koşumdaki "bir tam seans gecikme" fiilen uygulanmıyordu
+> — TradingView günlük barı seansın **açıldığı** günle damgalıyor, Yahoo
+> kapandığı işlem günüyle, ve iki hata birbirini götürüyordu. Üç koşunun da
+> hükmü aynı yönde; ama sayılar değişti ve **altının Calmar üstünlüğü
+> kayboldu**. **Üretimde çalışan, yeniden koşulmuş Faz 2'dir.**
 
 ### Ön-kayıtlı baraj — sonuçlara bakılmadan ÖNCE yazıldı
 
@@ -1840,6 +1842,8 @@ kuralın, bir veri artefaktının değil.
 Üç yan bulgu:
 
 - **İki metal artık AYNI parametreleri seçti** (onay≥2, 2,0σ, sert çıkış).
+  *(Bu bulgu yeniden koşumda düştü: hizalama düzelince gümüş onay≥4'e,
+  iki metal birden 0,35 tabana geçti. Aşağıya bakın.)*
   Faz 1'de gümüş 3,0σ ve gold 0,35 taban seçmişti. Gerçek COMEX hacmi ETF'inkinin
   yerine geçince iki ızgara aynı hücreye oturdu. **Ayrı ayrı ölçülmüş aynı sayılar
   sorun değildir; kopyalanmış aynı sayılar sorundur**, ve ikisi dışarıdan ayırt
@@ -1850,9 +1854,107 @@ kuralın, bir veri artefaktının değil.
 - **Gecikmeli ETF bacağı, vadeli bacağından İYİ** (altında Calmar 0,531 vs
   0,429, 2bp'de). Beklenmedik ve açıklanmadı; makul hipotez sinyalin oluştuğu
   mumun kendisinde işlem yapmamanın bir maliyeti olmadığı, ama bu bir hipotez.
+  **Açıklaması 2026-09-17'de bulundu ve hipotez değildi: gecikme yoktu.**
+  "Muhafazakâr olması gereken bacağın kazanması" gizli bir ileri bakışın
+  dışarıdan göründüğü şeydir — bir sonraki sefere bu, açıklanmayı bekleyen
+  bir merak değil, **doğrudan bir hizalama şüphesi** olarak okunmalı.
 - **Bölüm 2'de `akış` işaret değiştirdi**: GLD'de +1,1 puan, COMEX'te −1,3 puan
   (altın, 5 gün). Enstrüman değişince işaretin dönmesi, o hücrenin gürültü
   olduğunun ayrı bir kanıtı.
+
+#### Faz 2 yeniden koşuldu (2026-09-17): ilan edilen gecikme uygulanmıyordu
+
+**Arıza tek bir satırdaydı, iki yerde birden hasar verdi ve ikisi birbirini
+gizledi.** `tv_history.daily()` TradingView'in ham damgasını olduğu gibi
+kullanıyordu. TradingView günlük vadeli barı seansın **açıldığı** anla
+damgalıyor (NY 18:00); Yahoo ve CME **kapandığı işlem günüyle**. Aynı değerler,
+bir gün kaymış etiket:
+
+| kapanış | Yahoo `GC=F` | TV `COMEX:GC1!` |
+|---|---|---|
+| 4.332,8 | 2026-09-15 | 2026-09-14 |
+| 4.387,5 | 2026-09-16 | 2026-09-15 |
+| 4.408,2 | 2026-09-17 | 2026-09-16 |
+
+Üç sonucu oldu:
+
+1. **`drop_forming_bar` hiçbir şey düşürmüyordu.** Guard, barın kendi takvim
+   gününü borsanın saatine karşı okuyor; açılış damgalı bir bar için o test
+   **bir tam seans erken**. Canlı ölçüldü (2026-09-17 12:51 UTC, seans açıkken):
+   **0 satır düştü**. Yani `track_breakout.py` her gece **bir saatlik yarım
+   barı** son kapanmış seans diye yayımlıyordu — `breakout_state`'in
+   2026-09-16 satırı **4.309,1** taşıyor, o seansın gerçek kapanışı **4.408,2**
+   — ve 2026-09-16'dan beri defter kararını da onun üzerinde veriyordu. Pencere
+   her koşuda yeniden yazıldığı için panel ertesi gün kendini düzeltiyor;
+   **bir dolum düzelmez.** Bu, 25 yıllık panelde aynı hatayı önlemek için
+   yazılmış guard'ın, ikinci satıcı kapısından geri gelmiş hâli.
+2. **Alınabilir bacağın "bir tam seans gecikmesi" yoktu.** `flow_frame` ETF
+   kapanışını barın etiket gününe bağlıyor; açılış damgasına bağlanınca bu,
+   vadeli bar daha **başlamadan önceki** ETF kapanışı oluyor — ve `lagged()`'in
+   bir satırlık kayması hatayı tam olarak geri alıyordu. Net etki: NY 17:00'da
+   bilinen sinyal, **aynı günün 16:00 ETF kapanışında** işleniyordu. 16. bölümün
+   `miners` altında bulduğu seans sınırı artefaktının ta kendisi, bu kez onu
+   önlemek için yazılmış önlemin içinde.
+3. **"İki satıcının sürekli kontrat dikişi farklı" bulgusu artefaktmış.** Ham
+   tarihlerle eşleştirilmiş iki seri arasındaki fark günlük getirinin kendisidir
+   (altında medyan %1,04); doğru hizalandığında **altın %0,000** (250 seans),
+   gümüş **%0,457** — yani gümüşte gerçek bir dikiş farkı var, altında yok.
+   `lags.py`'nin var olma sebebi olan hatanın aynısı, bu kez iki satıcı arasında.
+
+**Düzeltme tek yerde:** `tv_history.to_trade_dates()` damgayı seansın kapandığı
+işlem gününün NY gece yarısına taşıyor — `fetch_data`'nın tamamlanmış bir Yahoo
+barını damgaladığı yerin aynısı. Böylece guard, ETF birleştirmesi, `session_date`
+etiketleri ve iki satıcılı her karşılaştırma aynı anda düzeliyor.
+`tests/test_data_hygiene.py` beş testle kilitliyor: akşam damgası kayar, gündüz
+damgası kaymaz, DST sınırında tarih bozulmaz, damga Yahoo'nunkiyle aynı biçimde
+gelir, ve **oluşmakta olan bar düşer**.
+
+##### Yeniden koşum: aynı ön-kayıt, aynı bölme, gerçek gecikme
+
+| metal | seçilen konfigürasyon | Calmar | al-tut | (1) | son $ | al-tut $ | fark | (2) |
+|---|---|---|---|---|---|---|---|---|
+| Altın | onay≥2, 2,0σ, boşta %35 | 0,452 | 0,460 | **HAYIR** | $22.151 | $35.012 | **−%36,7** | HAYIR |
+| Gümüş | onay≥4, 2,0σ, boşta %35 | 0,146 | 0,230 | **HAYIR** | $18.811 | $31.935 | **−%41,1** | HAYIR |
+
+**Altının Calmar üstünlüğü ileri bakıştan geliyormuş.** İlk koşumda (1)'i
+geçiyordu (0,520 vs 0,463); gecikme gerçekten uygulandığında 0,452 vs 0,460.
+Bu kural artık **iki metalde de, iki ölçüde de** al-ve-tut'un gerisinde — Faz
+1'den bu yana ilk kez hiçbir hücrede kazanmıyor. Para açığı ise **azaldı**
+(%41,8 → %36,7): ileri bakış Calmar'ı şişirirken parayı şişirmiyordu, çünkü
+kazandırdığı şey iyi zamanlanmış çıkışlardı.
+
+Parametreler de değişti ve bir önceki koşumun yan bulgusunu düşürdü: **iki metal
+artık aynı hücrede değil** (gümüş dört onay istiyor, altın iki), ve **ikisi de
+sert çıkışı bırakıp %35 tabanı seçti** — `trading.TREND_OFF_EXPOSURE`'ın 0,35
+olmasıyla aynı aile, `defense.py`'nin ölçtüğü "dipte tamamen satmak düşüşü
+artırır" bulgusu.
+
+##### Defter, ölçülen konfigürasyonu koşmuyor — ve bu ekranda yazılı
+
+Süpürme boşta %35 seçti; `breakout_trading.py` ise tam giriş / tam çıkış, çünkü
+"kırılana kadar tut" bir kesir olarak ifade edilemiyor. Yani $1.000'lık defter,
+barajın yargıladığı kuralın **sert çıkış kardeşini** koşuyor. Aynı test yarısında,
+aynı rungda ölçüldü (`flow.py` Bölüm 5, baraja **dahil değil**):
+
+| metal | defterin varyantı | al-tut | son $ | al-tut $ | fark |
+|---|---|---|---|---|---|
+| Altın | 0,341 | 0,460 | $17.072 | $35.012 | **−%51,2** |
+| Gümüş | 0,053 | 0,230 | $12.995 | $31.935 | **−%59,3** |
+
+Defterin kutusunun altındaki cümle bu tabloyu basıyor. Alternatif — kartın
+hükmünü defterin yanında da göstermek — defterin koşmadığı bir kuralın sayısını
+onun performansı gibi okutmak olurdu; bu kartın var olma sebebinin tam tersi.
+Barajın hangi varyantı yargıladığı **değiştirilmedi**: iki kardeşten iyi olanı
+sonradan seçmek, ön-kaydın önlemek için var olduğu şeydir.
+
+##### Ders: iki hata birbirini götürdüğünde ortaya bir *sonuç* çıkar
+
+Tek başına her biri fark edilirdi — yayımlanan yarım bar bir gün içinde göze
+çarpardı, gecikmesiz bir bacak ise "çok iyi" görünürdü. Birlikte, **makul bir
+tablo** ürettiler. Gösterge, ilk koşumun "açıklanamadı" diye kaydettiği yan
+bulguydu: *muhafazakâr olması gereken gecikmeli bacak, gecikmesiz vadeli bacağı
+geçiyordu.* Bu depoda bundan sonra o cümle bir merak değil, doğrudan bir
+**hizalama şüphesi** olarak okunmalı.
 
 ### Açık uçlar
 

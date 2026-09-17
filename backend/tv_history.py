@@ -63,6 +63,8 @@ import string
 
 import pandas as pd
 
+import fetch_data
+
 WS_URL = "wss://data.tradingview.com/socket.io/websocket"
 ORIGIN = "https://www.tradingview.com"
 # Sent as-is by the web client for a logged-out visitor.
@@ -78,6 +80,73 @@ SYMBOLS = {"gold": "COMEX:GC1!", "silver": "COMEX:SI1!"}
 # in a cron job fails the step instead of holding it open.
 TIMEOUT_SECONDS = 25
 MAX_ATTEMPTS = 3
+
+
+def to_trade_dates(times: pd.Series) -> pd.Series:
+    """TradingView's session-OPEN stamp -> the trade date the session closes on.
+
+    THE BUG THIS EXISTS TO PREVENT, WHICH WAS LIVE FOR A DAY
+    --------------------------------------------------------
+    TradingView stamps a daily futures bar with the moment the session
+    OPENED -- 18:00 New York, i.e. 22:00 UTC on the PREVIOUS calendar day.
+    Yahoo (and CME) label the same bar with the trade date it closes on. The
+    values are the same series; only the label differs:
+
+        4,332.8  ->  Yahoo 2026-09-15   TradingView 2026-09-14
+        4,387.5  ->  Yahoo 2026-09-16   TradingView 2026-09-15
+        4,408.2  ->  Yahoo 2026-09-17   TradingView 2026-09-16
+
+    This function's docstring used to say "columns match fetch_data.get_daily
+    exactly, so a caller can swap sources without touching the code
+    downstream" -- true of the columns, false of the dates, and the second
+    half is what callers relied on. Three things broke silently:
+
+      * fetch_data.drop_forming_bar reads the bar's own calendar date and
+        asks whether that day's 17:00 New York has passed. For a bar labelled
+        with the session's OPEN, that test is a full session early, so it
+        dropped NOTHING (measured 2026-09-17 12:51 UTC, mid-session: 0 rows
+        removed). track_breakout.py therefore published a one-hour-old
+        forming bar as the newest closed session every night -- the row for
+        2026-09-16 carried 4,309.1 against that session's real close of
+        4,408.2 -- and breakout_trading.py made the book's decision, and
+        would have booked its fill price, on it. The panel rewrites its
+        window and self-corrects; a fill does not.
+      * research/flow.py joins the ETF close on the bar's date. Attached to
+        the open-stamp, that is the ETF close from BEFORE the futures bar
+        even started, so `lagged()`'s one-session lag only cancelled the
+        error out: the signal (known 17:00 New York) was executed at the same
+        day's 16:00 ETF close. Exactly the session-boundary look-ahead
+        README section 16 found under `miners` and that lag was written to
+        prevent.
+      * The two vendors' closes were compared date-against-date and found to
+        differ by a median 0.88%, recorded as a continuous-contract stitching
+        difference. Aligned, gold agrees to the tick: median |gap| 0.0000%
+        over 120 sessions (silver 0.39%, a real difference in Yahoo's front
+        month). A misaligned join measuring a daily return and reporting it
+        as a vendor disagreement is the same failure research/lags.py exists
+        to catch.
+
+    THE RULE
+    --------
+    A stamp at or after the session close hour belongs to the NEXT calendar
+    day's trade date; anything earlier is already labelled by its own day.
+    That is CME's own definition rather than a per-symbol constant, so an
+    equity-style bar stamped at midnight exchange time passes through
+    untouched and a 24-hour contract rolls. The returned stamp is midnight
+    New York of the trade date, which is precisely how fetch_data stamps a
+    completed Yahoo daily bar -- so the contract the old docstring claimed is
+    now actually true, and bar_is_complete reads the same calendar date for
+    both vendors.
+    """
+    local = times.dt.tz_convert(fetch_data.EXCHANGE_TZ)
+    # Naive midnight first, THEN localise. Adding a tz-aware Timedelta across
+    # a DST boundary shifts the wall clock by an hour and would stamp a bar
+    # at 23:00 of the previous day -- which is a different calendar date, and
+    # the calendar date is the entire point of this function.
+    days = local.dt.normalize().dt.tz_localize(None)
+    days = days + pd.to_timedelta(
+        (local.dt.hour >= fetch_data.SESSION_CLOSE_HOUR).astype(int), unit="D")
+    return days.dt.tz_localize(fetch_data.EXCHANGE_TZ).dt.tz_convert("UTC")
 
 
 def _frame(payload: str) -> str:
@@ -139,10 +208,12 @@ async def _fetch(symbol: str, bars: int) -> list[dict]:
 def daily(symbol: str, bars: int = 6000) -> pd.DataFrame:
     """Daily OHLCV for `symbol`, oldest first. Empty frame on any failure.
 
-    Columns match fetch_data.get_daily exactly (time/open/high/low/close/
-    volume, tz-aware UTC), so a caller can swap sources without touching the
-    code downstream of it -- which is what lets research/flow.py score the
-    same rule on both vendors.
+    Columns AND date semantics match fetch_data.get_daily (time/open/high/
+    low/close/volume, tz-aware UTC, stamped at midnight New York of the trade
+    date), so a caller can swap sources without touching the code downstream
+    of it -- which is what lets research/flow.py score the same rule on both
+    vendors. The date half of that promise is to_trade_dates()'s job and was
+    missing until 2026-09-17; read its docstring before changing it.
 
     Never raises. The panel this feeds is allowed to go stale; nothing it
     feeds makes a trading decision.
@@ -160,7 +231,10 @@ def daily(symbol: str, bars: int = 6000) -> pd.DataFrame:
 
         frame = pd.DataFrame([r["v"][:6] for r in rows],
                              columns=["ts", "open", "high", "low", "close", "volume"])
-        frame["time"] = pd.to_datetime(frame["ts"], unit="s", utc=True)
+        # Stamped by the TRADE DATE, not by the session's open -- see
+        # to_trade_dates(). Without this the frame silently disagrees with
+        # every Yahoo-derived series in the project by one session.
+        frame["time"] = to_trade_dates(pd.to_datetime(frame["ts"], unit="s", utc=True))
         frame = frame.drop(columns=["ts"])
         for column in ("open", "high", "low", "close", "volume"):
             frame[column] = pd.to_numeric(frame[column], errors="coerce")

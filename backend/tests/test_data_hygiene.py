@@ -206,3 +206,79 @@ def test_insert_does_not_swallow_unrelated_errors():
 
     with pytest.raises(RuntimeError, match="connection refused"):
         predict.insert_prediction(_Boom(), {"asset": "gold"})
+
+
+# ---------------------------------------------------------------------------
+# The same bug, through the second vendor's door (2026-09-17)
+# ---------------------------------------------------------------------------
+# TradingView stamps a daily futures bar with the moment the session OPENED
+# (18:00 New York); Yahoo and CME label it with the trade date it closes on.
+# tv_history.daily() promised "columns match fetch_data.get_daily exactly" and
+# the columns did -- the dates did not, and the guard above reads a date. It
+# therefore removed nothing from a TradingView frame, and track_breakout.py
+# published a one-hour-old forming bar as the newest closed session every
+# night. Measured live: the published 2026-09-16 row carried 4,309.1 against
+# that session's real close of 4,408.2.
+
+
+def _tv_bar(date_str: str, hour: int) -> pd.Timestamp:
+    """A bar as TradingView stamps one: the session's OPEN, in UTC."""
+    return pd.Timestamp(f"{date_str} {hour:02d}:00", tz=ET).tz_convert("UTC")
+
+
+def _trade_dates(*bars: pd.Timestamp) -> list[dt.date]:
+    import tv_history
+
+    stamped = tv_history.to_trade_dates(pd.Series(list(bars)))
+    return [t.tz_convert(ET).date() for t in stamped]
+
+
+def test_evening_stamp_rolls_to_the_next_trade_date():
+    """The Sunday-evening open is Monday's session. Getting this wrong is not
+    a cosmetic label: it is a full session of misalignment against every
+    Yahoo-derived series in the project."""
+    assert _trade_dates(_tv_bar("2026-09-13", 18)) == [dt.date(2026, 9, 14)]
+    assert _trade_dates(_tv_bar("2026-09-16", 18)) == [dt.date(2026, 9, 17)]
+
+
+def test_daytime_stamp_is_left_alone():
+    """An equity-style bar stamped at midnight exchange time is already
+    labelled by its own trade date. The rule is CME's definition, not a
+    per-symbol constant, so it has to pass those through untouched."""
+    assert _trade_dates(_tv_bar("2026-09-16", 0)) == [dt.date(2026, 9, 16)]
+
+
+def test_the_roll_survives_a_dst_boundary():
+    """2026-11-01 is the day EDT ends. Adding a tz-aware 24 hours to midnight
+    here lands on 23:00 of the SAME day -- a different calendar date, which is
+    the only thing this function produces. Naive arithmetic, then localise."""
+    stamped = _trade_dates(_tv_bar("2026-11-01", 18))
+    assert stamped == [dt.date(2026, 11, 2)]
+
+
+def test_a_tradingview_bar_is_stamped_like_a_yahoo_one():
+    """Midnight New York, exactly as fetch_data stamps a completed daily bar.
+    The two vendors have to be indistinguishable to everything downstream --
+    that is what lets research/flow.py score one rule on both."""
+    import tv_history
+
+    stamped = tv_history.to_trade_dates(pd.Series([_tv_bar("2026-09-16", 18)]))
+    assert stamped.iloc[0].tz_convert(ET).hour == 0
+
+
+def test_forming_tradingview_bar_is_dropped():
+    """The invariant that actually broke. At 19:00 New York -- when the cron
+    runs -- the session that opened an hour ago has not closed, so its bar
+    must not be published as a session, and the previous one must survive."""
+    import tv_history
+
+    times = tv_history.to_trade_dates(pd.Series([
+        _tv_bar("2026-09-15", 18), _tv_bar("2026-09-16", 18)]))
+    frame = pd.DataFrame({"time": times, "close": [4387.5, 4309.1]})
+
+    kept = fetch_data.drop_forming_bar(frame, _now("2026-09-16", 19))
+    assert len(kept) == 1, "the bar that opened at 18:00 is still trading"
+    assert kept["close"].iloc[0] == 4387.5
+
+    done = fetch_data.drop_forming_bar(frame, _now("2026-09-17", 19))
+    assert len(done) == 2, "after its own 17:00 close it is a real session"

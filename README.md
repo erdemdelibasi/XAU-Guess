@@ -131,8 +131,13 @@ defteri **vardır** (metal başına $1.000, 2026-09-16'da açıldı) ve
 `Kırılım Takibi` kartının içinde, kendi ölçümünün yanında durur.
 
 **O defterin kazanması beklenmiyor.** Kural ön-kayıtlı barajı iki ayrı veri
-kaynağında geçemedi — altında Calmar'ı geçiyor ama parada %41,8 geride,
-gümüşte her iki ölçüde de geride (`backend/research/README.md` 18. bölüm).
+kaynağında, üç koşuda geçemedi: 2026-09-17'de ölçüm yeniden koşuldu (alınabilir
+bacağın ilan edilmiş bir seans gecikmesi, TradingView ile Yahoo'nun tarih
+etiketleri arasındaki bir kayma yüzünden fiilen uygulanmıyordu) ve kural artık
+**iki metalde de, iki ölçüde de** geride — altın Calmar 0,452 vs 0,460 ve parada
+%36,7 geride, gümüş 0,146 vs 0,230 ve %41,1 geride. Defterin fiilen koştuğu
+varyant (tam giriş/tam çıkış) bundan da kötü: %51,2 ve %59,3 geride
+(`backend/research/README.md` 18. bölüm).
 Defter kopyalanmak için değil, **ölçülmüş bir kaybın tabloda değil canlı
 olarak, al-ve-tut'un yanında görünmesi** için var.
 
@@ -140,7 +145,7 @@ Her portföy kutusunun içinde, kendi **son altı işlemi** duruyor: tarihi,
 yönü, tutarı ve dolum fiyatı, üstünde de o defterin toplam işlem sayısı ve
 ödediği komisyon. Bir kartın "%17 pozisyon" yazması, o pozisyonun dün mü üç
 hafta önce mi ayarlandığını söylemez; kutunun kendi defteri söyler. Tek bir
-birleşik liste bunu yapamıyordu — zamana göre sıralandığında on bir defter iç
+birleşik liste bunu yapamıyordu — zamana göre sıralandığında her defter iç
 içe geçiyor ve sessiz kalan defter listeden tamamen düşüyordu. Panellerin
 altındaki toplam komisyon cümlesi de tesadüf değil: `backtest.py`'nin maliyet
 merdiveni tam olarak bu sayının stratejileri sıraladığını gösteriyor.

@@ -83,6 +83,20 @@ pre-registration rather than inheriting Phase 1's verdict:
     the rest of the scoreboard. It is NOT the verdict: no retail account
     holds a COMEX contract.
 
+PHASE 2 WAS RE-RUN ON 2026-09-17, BECAUSE ITS LAG WAS NOT REAL
+---------------------------------------------------------------
+The pre-registration above is unchanged and so is the split; what changed is
+that the construction now does what it says. TradingView stamps a daily bar
+with the session's OPEN and Yahoo with the trade date it closes on, so the
+ETF join landed a session early and `lagged()` cancelled it back out: a
+signal known at 17:00 New York was executed at the SAME day's 16:00 ETF
+close. A one-hour look-ahead can only flatter the rule, so phase 2's first
+numbers were measured on a construction more generous than the one they
+claimed -- including the sweep that chose the parameters.
+tv_history.to_trade_dates() fixed the stamp and every number below comes
+from the re-run. Both sets are kept in research/README.md section 18 rather
+than overwritten, for the same reason phase 1 was kept.
+
 Run:  cd backend/research && python flow.py            (~3 min, both metals)
 """
 from __future__ import annotations
@@ -268,11 +282,12 @@ def part0() -> None:
     print("  Ustelik COMEX kontrati ZATEN $/ons kote ediliyor, yani panel hem gercek")
     print("  hacme hem okuyucunun istedigi birime ayni anda kavusuyor. Sinyal bu")
     print("  yuzden Faz 2'de COMEX:GC1!/SI1! uzerinde kuruluyor.")
-    print("\n  Bir uyari, (D)'nin kapanis sutunundan: iki saticinin surekli kontrat")
-    print("  dikisi ayni degil (medyan mutlak fark yukarida). Bu, portfoylerin")
-    print("  degerlendigi seriyle panelin serisi arasinda ZATEN var olan ve")
-    print("  CLAUDE.md'de kayitli olan farkin aynisi -- arayuz GC1!'e markliyor,")
-    print("  backend GC=F ile dolduruyor.")
+    print("\n  (D)'nin kapanis sutunu 2026-09-17'de YENIDEN olculdu ve onceki")
+    print("  okuma bir hizalama artefaktiydi: TradingView gunluk bari seansin")
+    print("  ACILDIGI gunle damgaliyor, Yahoo kapandigi islem gunuyle. Ham")
+    print("  tarihlerle eslestirilince gunluk getirinin kendisi 'satici farki'")
+    print("  diye olculuyordu (altinda medyan %1,04). tv_history.to_trade_dates()")
+    print("  damgayi duzeltti; asil fark yukaridaki sutunda.")
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +305,15 @@ def flow_frame(asset) -> pd.DataFrame:
 
     The ETF close is joined on the futures calendar, backward only, for the
     buyable-instrument leg. No signal column reads it.
+
+    THE JOIN IS ONLY HONEST BECAUSE tv_history STAMPS TRADE DATES. Until
+    2026-09-17 it stamped the session's OPEN, so this reindex attached the
+    ETF close from the day BEFORE the futures bar finished -- and lagged()
+    below then shifted execution forward by one row, cancelling that error
+    out into a same-session look-ahead. Two mistakes that hid each other, and
+    the symptom was a side finding recorded here as "unexplained": the LAGGED
+    ETF leg beat the futures-on-futures leg (0.531 vs 0.429 at 2bp), which is
+    what a hidden look-ahead looks like from outside.
     """
     frame = flow_signal.add_flow_columns(
         fetch_data.drop_forming_bar(tv_history.daily_for(asset.key, bars=TV_BARS)))
@@ -517,6 +541,13 @@ def lagged(targets: np.ndarray) -> np.ndarray:
     A full session of lag is conservative in the safe direction: it can only
     make the ETF leg look worse than a real trader could have done, never
     better.
+
+    IT ONLY MEANS THAT IF THE FRAME IS ALIGNED. This shift is one ROW, so it
+    buys a full session only while `etf_close` sits on the same trade date as
+    the futures bar beside it -- which is tv_history.to_trade_dates()'s job.
+    While that stamping was wrong this shift quietly restored what the join
+    had taken away, and this docstring described a lag the numbers did not
+    have.
     """
     out = np.empty_like(targets)
     out[0] = 0.0
@@ -548,7 +579,22 @@ def part4(asset, test: pd.DataFrame, chosen: tuple, years: float) -> dict:
                                test, lagged(targets), "etf_close", years)
     fut_flat = flat_fee_report(f"vadeli ({tv_history.SYMBOLS[asset.key]}) -- kiyas icin",
                                test, targets, "close", years)
-    return {"flat": etf_flat, "futures_flat": fut_flat, "entries": entries,
+
+    # THE VARIANT THE LIVE BOOK ACTUALLY RUNS, when it is not the chosen one.
+    # breakout_trading.py is all-in / all-out: "hold until the trend breaks"
+    # cannot express a 35% floor, so whenever the sweep picks flat>0 the paper
+    # book is running the hard-exit sibling of the rule this study judged.
+    # Measured on the same test half, at the same rungs, so the book on screen
+    # quotes a number of its OWN instead of borrowing the verdict's -- the
+    # same reason the ETF books do not quote the futures column.
+    book_flat = etf_flat
+    if chosen[2] != 0.0:
+        book_targets = flow_signal.exposure_path(path, 0.0).to_numpy(dtype=float)
+        book_flat = flat_fee_report(
+            f"ETF ({ETF[asset.key]}) -- DEFTERIN varyanti: tam giris / tam cikis",
+            test, lagged(book_targets), "etf_close", years)
+    return {"flat": etf_flat, "futures_flat": fut_flat, "book_flat": book_flat,
+            "book_is_chosen": chosen[2] == 0.0, "entries": entries,
             "in_position": float(path["state"].mean())}
 
 
@@ -623,6 +669,24 @@ def verdict(results: dict) -> None:
               f"{('EVET' if c_ok else 'HAYIR'):>8}"
               f"{cell['final']:>12,.0f}{cell['bench_final']:>12,.0f}"
               f"{-100 * shortfall:>+8.1f}%{('EVET' if m_ok else 'HAYIR'):>8}")
+
+    # The book's own variant, when the sweep chose a floor the book cannot
+    # hold. NOT part of the bar -- the bar judges the configuration the sweep
+    # selected, and moving the goalposts to whichever sibling scores better is
+    # exactly what a pre-registration exists to stop. It is printed because a
+    # $1,000 book is running it in public.
+    if any(not res.get("book_is_chosen", True) for res in results.values()):
+        print("\n      Defterin fiilen kostugu varyant (tam giris/tam cikis), ayni")
+        print("      test yarisinda -- BARAJA DAHIL DEGIL:")
+        for key, res in results.items():
+            cell = (res.get("book_flat") or {}).get(VERDICT_ACCOUNT)
+            label = assets_module.get(key).label
+            if not cell:
+                continue
+            gap = 1.0 - cell["final"] / cell["bench_final"]
+            print(f"      {label:<10}{cell['calmar']:>9.3f}{cell['bench_calmar']:>9.3f}"
+                  f"{'':>8}{cell['final']:>12,.0f}{cell['bench_final']:>12,.0f}"
+                  f"{-100 * gap:>+8.1f}%")
 
     print()
     if passed_calmar and passed_money:

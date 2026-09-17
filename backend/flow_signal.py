@@ -89,18 +89,24 @@ class BreakoutParams:
 
     Lives on assets.Asset for the reason that module's docstring gives: a
     constant that can differ per asset must be looked up, never hardcoded.
-    Each metal's values are measured on ITS OWN training half. In phase 1
-    (on the ETFs) the two disagreed -- gold 2.0 sigmas with a 0.35 floor,
-    silver 3.0 with none. In phase 2, with real COMEX volume, both grids
-    landed on the same cell. Identical values that were measured separately
-    are fine; identical values that were COPIED are the failure this repo
-    keeps finding, and the two are indistinguishable from the outside, which
-    is why the measurement lives in the comment beside each one.
+    Each metal's values are measured on ITS OWN training half, and what they
+    have done since is an argument for measuring rather than copying: phase 1
+    (on the ETFs) had them disagree on the stop, the first phase-2 run had
+    them agree on every axis, and the 2026-09-17 re-run separates them again
+    on a third -- silver needs FOUR confirmations to enter where gold needs
+    two. Identical values that were measured separately are fine; identical
+    values that were COPIED are the failure this repo keeps finding, and the
+    two are indistinguishable from outside, which is why the measurement
+    lives in the comment beside each one.
 
-    `flat_exposure` is recorded even though no portfolio ships: it was part
-    of the configuration that produced the out-of-sample number the panel
-    quotes, and dropping it would leave that number describing a rule nobody
-    can reconstruct.
+    `flat_exposure` IS RECORDED AND IS NOT WHAT THE BOOK HOLDS. The sweep now
+    picks a 0.35 floor for both metals, and breakout_trading.py is all-in /
+    all-out -- "hold until the trend breaks" cannot express "keep 35% while
+    you wait". So this field describes the configuration whose out-of-sample
+    number the card quotes as the verdict, while the book runs the hard-exit
+    sibling, which research/flow.py part 5 measures on the same test half and
+    prints beside it. Dropping the field would leave the verdict describing a
+    rule nobody can reconstruct; silently trading it would be worse.
     """
     # TradingView ticker of the series the signal is built on -- the COMEX
     # contract, quoted per troy ounce. Named `symbol` rather than
