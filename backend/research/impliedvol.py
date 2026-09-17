@@ -46,6 +46,34 @@ better forecast, then any Calmar difference it produces is a scale artefact --
 a different average exposure over a window that happens to trend -- and
 adopting it would be acting on the artefact.
 
+PART 1T, ADDED 2026-09-17: THE SELECTION STEP THAT WAS MISSING
+---------------------------------------------------------------
+Part 1 runs on the TEST half. That is the right place to REPORT a forecast
+comparison and the wrong place to SELECT from one, and the difference matters
+because of an argument this study invites: "the encompassing test says rv60
+adds nothing beside GVZ (t=+0.14), so the honest weight is w=1.0 -- chosen on
+forecast quality, with no Calmar involved, therefore not a fitted parameter."
+
+That argument is circular as it stands. The fact it leans on was measured on
+the same half the Calmar would then be read from, so w=1.0 would be selected
+on the test data and confirmed on the test data.
+
+Part 1T closes it by re-running the encompassing regression on the TRAINING
+half, where selecting is allowed. Pre-registered before it was first run:
+
+    At horizon 60 (= trading.VOL_LOOKBACK_DAYS), on the training half, on the
+    NON-OVERLAPPING subsample: if GVZ's coefficient survives (|t| > 2, b > 0)
+    AND the incumbent's does not (|t| <= 2), then w=1.0 is selected a priori
+    on forecast quality alone and Part 2's test half becomes a real
+    validation. If both survive, or GVZ does not, nothing is selected and
+    production keeps w=0 -- and Part 2's grid disagreement stands as the
+    reason, unchanged.
+
+Note what Part 1T cannot rescue: the training half also prices the swap in
+Calmar, and it prices it WORSE (w=1.0 scores 0.057 against production's 0.086
+for `voltarget`). A forecast that is better and trades worse in the same half
+is a finding about regimes, not a licence to take the other half's answer.
+
 Part 1 also refuses the easy version of its own question. GVZ and trailing
 realised volatility correlate at r=0.85, so "GVZ scores better alone" is
 nearly guaranteed and nearly meaningless. The question that matters is whether
@@ -229,6 +257,64 @@ def part1(df: pd.DataFrame, label: str) -> bool:
     return passed_any
 
 
+def part1_training(df: pd.DataFrame, label: str) -> bool:
+    """The encompassing test on the TRAINING half -- the only half selection
+    is allowed to touch. See the module docstring for the pre-registration.
+
+    Everything here is the same arithmetic as part1(); only the half differs,
+    and the scale ratio is still the one measured on this same training half,
+    so no number in this function has seen the test data.
+    """
+    print("\n" + "=" * 92)
+    print(f"KISIM 1T -- SECIM ADIMI: KAPSAMA TESTI EGITIM YARISINDA  ({label})")
+    print("=" * 92)
+
+    split = len(df) // 2
+    train = df.iloc[:split]
+    ratio_mask = train["rv"].notna() & (train["rv"] > 0)
+    ratio = float((train.loc[ratio_mask, "implied"] / train.loc[ratio_mask, "rv"]).median())
+
+    horizon = trading.VOL_LOOKBACK_DAYS
+    fwd = forward_vol(df["ret"], horizon)
+    scaled = df["implied"] / ratio
+
+    mask = fwd.notna() & df["rv"].notna() & scaled.notna()
+    mask.iloc[split:] = False          # TRAINING half only
+    y = fwd[mask].to_numpy(float)
+    rv = df["rv"][mask].to_numpy(float)
+    iv = scaled[mask].to_numpy(float)
+
+    print(f"  EGITIM yarisi, ufuk {horizon} gun, n={len(y)}")
+    print(f"      {'tahminci':<28}{'r':>9}{'RMSE':>10}")
+    for name, pred in (("gecmis rv60 (URETIM)", rv), ("GVZ (olceklenmis)", iv)):
+        r = float(np.corrcoef(pred, y)[0, 1])
+        rmse = float(np.sqrt(np.mean((pred - y) ** 2)))
+        print(f"      {name:<28}{r:>9.4f}{100 * rmse:>9.2f}p")
+
+    beta, _ = ols(y, [rv, iv])
+    step = max(horizon, 1)
+    yn, rvn, ivn = y[::step], rv[::step], iv[::step]
+    _, t_indep = ols(yn, [rvn, ivn])
+    print(f"      kapsama testi   gelecek_vol ~ a*rv60 + b*GVZ")
+    print(f"        a (rv60) = {beta[1]:+.4f}   b (GVZ) = {beta[2]:+.4f}")
+    print(f"        ORTUSMEYEN alt ornek (her {step}. satir, n={len(yn)}): "
+          f"t(a)={t_indep[1]:+.2f}  t(b)={t_indep[2]:+.2f}")
+
+    gvz_survives = abs(t_indep[2]) > 2.0 and beta[2] > 0
+    rv_survives = abs(t_indep[1]) > 2.0
+    selected = gvz_survives and not rv_survives
+    print(f"\n      >>> ON-KAYIT: GVZ ayakta={'EVET' if gvz_survives else 'HAYIR'}, "
+          f"rv60 ayakta={'EVET' if rv_survives else 'HAYIR'}")
+    if selected:
+        print("      >>> w=1.0 EGITIM YARISINDA, yalnizca tahmin kalitesine bakarak")
+        print("          secildi. Kisim 2'nin test yarisi artik gercek bir dogrulama.")
+    else:
+        print("      >>> SECIM YOK. w=1.0'i tahmin kalitesine dayandirma argumani bu")
+        print("          yaride tutmuyor; uretim w=0'da kalir ve Kisim 2'nin izgara")
+        print("          uyusmazligi tek basina yeterli sebeptir.")
+    return selected
+
+
 # --------------------------------------------------------------------------
 # Part 2 -- does the better forecast survive contact with the trading rule?
 # --------------------------------------------------------------------------
@@ -269,8 +355,14 @@ def part2(df: pd.DataFrame, asset, label: str) -> None:
     for strategy in ("voltarget", "defensive"):
         print(f"\n  --- strateji: {strategy} "
               f"(hedef oynaklik %{100 * asset.target_volatility:.0f}, maliyet {COST_BPS}bp) ---")
+        # Final equity travels beside Calmar because section 17 is this
+        # repo's most expensive lesson: `voltarget` beats buy-and-hold on
+        # Calmar in every column measured and is worth $1,413 more on a
+        # $10,000 account over 16 years. A swap adopted on Calmar alone could
+        # be buying calm and paying for it in money without the table showing
+        # it.
         print(f"      {'w (GVZ agirligi)':<20}{'EGITIM Calmar':>15}{'piyasada':>11}"
-              f"{'TEST Calmar':>14}{'piyasada':>11}")
+              f"{'TEST Calmar':>14}{'piyasada':>11}{'TEST $10k':>12}")
 
         scores: dict[float, float] = {}
         test_scores: dict[float, tuple[float, float]] = {}
@@ -285,12 +377,15 @@ def part2(df: pd.DataFrame, asset, label: str) -> None:
                 if store == "train":
                     scores[weight] = m["calmar"]
                 else:
-                    test_scores[weight] = (m["calmar"], m["exposure"])
+                    test_scores[weight] = (m["calmar"], m["exposure"],
+                                           10_000.0 * equity[-1] / equity[0])
                 # Mean exposure is printed for every candidate, not just the
                 # winner: a weight that "wins" purely by holding more or less
                 # of a trending asset is a scale effect, and it is only
                 # visible in this column.
                 row += f"{m['calmar']:>15.3f}{100 * m['exposure']:>10.0f}%"
+                if store == "test":
+                    row += f"{10_000.0 * equity[-1] / equity[0]:>12,.0f}"
             marker = "   <-- URETIM" if weight == 0.0 else ""
             print(f"      {weight:<20.2f}{row}{marker}")
 
@@ -345,6 +440,11 @@ def main() -> int:
     gold = assets_module.GOLD
     df = load_common(gold.key)
     gold_passed = part1(df, "ALTIN -- birincil")
+    # The selection step, on the training half. It cannot change what Part 2
+    # prints -- the grid is the grid -- but it decides whether the "w=1.0 was
+    # chosen on forecast quality, not on Calmar" argument is available at all.
+    # See the module docstring's pre-registration.
+    part1_training(df, "ALTIN -- birincil")
     if gold_passed:
         part2(df, gold, "ALTIN -- birincil")
     else:
@@ -365,7 +465,9 @@ def main() -> int:
     print("#" * 92)
     silver = assets_module.SILVER
     silver_df = load_common(silver.key)
-    if part1(silver_df, "GUMUS -- ikincil"):
+    silver_passed = part1(silver_df, "GUMUS -- ikincil")
+    part1_training(silver_df, "GUMUS -- ikincil")
+    if silver_passed:
         part2(silver_df, silver, "GUMUS -- ikincil")
     else:
         print("\n  KISIM 2 CALISTIRILMADI (gumus): GVZ rv60'in yaninda ek bilgi katmiyor.")

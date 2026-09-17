@@ -345,3 +345,23 @@ def test_stored_base_rate_is_the_assets_own(wired, monkeypatch):
         assert row["base_rate_used"] == pytest.approx(asset.base_rate_up)
         assert row["asset"] == asset.key
         assert {f"weight_{c}" for c in ensemble.COMPONENTS} <= set(row)
+
+
+def test_the_row_carries_the_session_close_not_only_the_quote(wired):
+    """The record is scored close-to-close (predict.resolve_due_predictions),
+    so the close it will be scored FROM has to be written down at prediction
+    time -- it cannot be recovered later from `price_at_prediction`, which is
+    a live quote taken two hours into the NEXT session.
+
+    Both numbers are in the row on purpose and they are not the same number:
+    the quote is what the portfolios traded at and what the live chart marks
+    to, the close is what the ensemble's evidence is measured against.
+    """
+    db = _Db()
+    assert predict.run_asset(db, assets.GOLD) == 1
+    row = _prediction_row(db)
+
+    panel_close = float(_panel()["close"].iloc[-1])
+    assert row["close_at_prediction"] == pytest.approx(panel_close)
+    assert row["price_at_prediction"] == 100.0, "the stubbed live quote"
+    assert row["close_at_prediction"] != row["price_at_prediction"]

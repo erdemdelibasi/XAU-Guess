@@ -929,6 +929,46 @@ kolonlar değişmedi (altın 27, gümüş 25 özellik).
 
 ---
 
+### Ek (2026-09-17): "ama rv60 hiçbir şey katmıyor, o hâlde w=1,0" — hayır
+
+Bu bölümü okuyan herkesin aklına gelen bir sonraki adım şu: *kapsama testi
+rv60'ın GVZ'nin yanında hiçbir şey katmadığını söylüyor (t=+0,14), o hâlde
+dürüst ağırlık 1,0'dır — üstelik bu bir Calmar'a bakılarak seçilmiş parametre
+değil, tahmin kalitesinden türetilmiş bir çıkarımdır.* Argüman güçlü duruyor ve
+**dairesel**: dayandığı olgu **test yarısında** ölçüldü, Calmar da orada
+okunacaktı. Yani w=1,0 test verisinde seçilip test verisinde doğrulanırdı.
+
+`impliedvol.part1_training` bu boşluğu kapatmak için eklendi: aynı kapsama
+testi, **eğitim yarısında** — seçimin serbest olduğu tek yer. Ön-kayıt önce
+yazıldı: *ufuk 60'ta, örtüşmeyen alt örneklemde GVZ'nin katsayısı ayakta kalır
+(|t|>2, b>0) ve rv60'ınki kalmazsa, w=1,0 yalnızca tahmin kalitesine bakılarak
+a priori seçilmiş sayılır.*
+
+| yarı | a (rv60) | t(a) | b (GVZ) | t(b) | n (örtüşmeyen) |
+|---|---|---|---|---|---|
+| test (12. bölümün tablosu) | +0,067 | +0,14 | +0,680 | **+3,12** | 38 |
+| **eğitim (yeni)** | −0,003 | +0,87 | +0,648 | **+1,50** | 38 |
+
+**Seçim yok: eğitim yarısında GVZ de eşiği geçmiyor.** İkisi de geçmiyor —
+yani o yarı soruyu ne lehte ne aleyhte cevaplayabiliyor. Üretim `rv60`'ta
+kaldı.
+
+**Ve asıl bulgu bu tablonun kendisinde:** GVZ'nin tahmin üstünlüğü de,
+Calmar ızgarasının sıralaması da **yarıya bağlı**. İkisi aynı şeyin iki
+belirtisi ve o şey sütunun en sağında yazıyor: 4.595 günlük pencere, 60 günlük
+ufukta **yarı başına ~38 bağımsız gözlem** demek. 7. ve 13. bölümlerin
+"çözüm daha çok özellik değil, daha çok **bağımsız** gözlem" cümlesinin
+oynaklık tarafındaki karşılığı — ve burada daha da sert, çünkü ufuk uzadıkça
+bağımsız pencere sayısı doğrudan bölünüyor.
+
+> **Para sütunu da eklendi ve üçüncü bir şey söylüyor.** Test yarısını olduğu
+> gibi kabul edip seçim sorununu tamamen görmezden gelsek bile, `voltarget`
+> için $10.000'lik hesapta 9 yılda: w=0 **$33.012**, w=0,50 **$34.001**,
+> w=1,00 **$33.555**. Calmar w ile tekdüze artarken (0,703 → 0,818) **para
+> w=0,50'de tepe yapıp geri düşüyor** — 17. bölümün dersi bu çalışmanın
+> içinde. Tüm ızgaranın açtığı aralık **$989**, ki aynı bölüm $1.413'ü
+> "gürültü mesafesinde" diye kaydetmişti.
+
 ## 13. Bağlayıcı kısıta saldırı: havuzlanmış çok-varlıklı eğitim (`pooled.py`)
 
 9. bölümün sonucu bu deponun en çok alıntılanan ama en az üzerine gidilen

@@ -124,6 +124,18 @@ göre şekillenmiştir. `backend/research/README.md` tam ölçümleri taşıyor;
    ağırlık ızgarasını eğitim ve test yarıları **tam ters** sıralıyor
    (Spearman −1,00), yani bölme soruyu çözmedi, bir rejim değişimini ikiye
    ayırdı. `research/README.md` 12. bölüm.
+
+   **2026-09-17'de akla gelen kurtarma denendi ve o da düştü:** "rv60 zaten
+   hiçbir şey katmıyor (t=+0,14), o hâlde ağırlık uydurmaya gerek yok, w=1,0
+   al" argümanı **dairesel** — dayandığı kapsama testi TEST yarısında ölçüldü,
+   Calmar da orada okunacaktı. `impliedvol.part1_training` aynı testi eğitim
+   yarısında koştu: **GVZ orada eşiği geçmiyor** (t=+1,50, eşik 2,0; rv60 de
+   geçmiyor, t=+0,87). Sebep sütunun sonunda: 60 günlük ufukta 4.595 gün
+   **yarı başına ~38 bağımsız gözlem** demek. Üstelik test yarısını olduğu
+   gibi kabul etsek bile para Calmar'ı takip etmiyor — `voltarget`'ta
+   $10.000 hesapta w=0 $33.012, w=0,50 $34.001, w=1,00 $33.555; ızgaranın
+   tamamı $989, yani 17. bölümün "gürültü mesafesi" dediği yerde. **Üretim
+   `rv60`'ta kalıyor.**
 10. **Altın madencileri metali gerçekten öncülüyor — ve bu, bu depoda yön
     tarafında ÜRETİME GİREN ilk bulgudur.** `GDX` her iki metalde de örneklem
     dışı Bonferroni eşiğini geçti ve **yedi** öldürme denemesinden sağ çıktı:
