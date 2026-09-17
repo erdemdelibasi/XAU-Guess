@@ -207,6 +207,35 @@ def resolve_due_predictions(db, asset, panel: pd.DataFrame) -> int:
 
     A prediction is matched to the first session on or after its target date,
     so an exchange holiday resolves a day late rather than never.
+
+    AND IT IS SCORED CLOSE-TO-CLOSE, NOT FROM THE LIVE QUOTE (2026-09-17)
+    ---------------------------------------------------------------------
+    `price_at_prediction` is the live quote at 23:00 UTC, which is 19:00 New
+    York -- two hours INTO the next session, because the one this row was
+    computed from settled at 17:00. Every component answers a close-to-close
+    question (ml_model's label is `close[t+h] > close[t]`, and the base rates
+    in assets.py were measured the same way), so scoring the record from the
+    live quote asked a different question than the one the components were
+    asked and the one their evidence is weighed against.
+
+    Measured on 392 sessions of hourly history: the 19:00 quote sits a median
+    0.27% from gold's own close and 0.77% from silver's, which flips 5.9% of
+    gold's labels and 6.9% of silver's. Worse than the noise, it MOVES THE
+    BASE RATE -- on those same rows, close-to-close 61.2% against 59.4% from
+    the live quote in gold, and 58.2% against 54.3% in silver. The ensemble
+    measures every component against a base rate the record no longer had,
+    which is the same 1.8-point invisible bias assets.py exists to prevent,
+    self-inflicted inside the learning loop.
+
+    So the basis is `close_at_prediction`: the close of the session the
+    features were built from, written by this same script. Rows from before
+    that column existed fall back to `price_at_prediction` and say so -- a
+    mixed-basis sample is worse than a smaller one, but a row that can never
+    resolve is worse than both, and unlike the calibration columns these rows
+    are already counted in the component records.
+
+    `price_at_prediction` is untouched: it is what the portfolios actually
+    traded at, what the live equity curve marks to, and what the page shows.
     """
     sessions = panel["time"].dt.date.tolist()
     session_close = dict(zip(sessions, panel["close"]))
@@ -223,7 +252,12 @@ def resolve_due_predictions(db, asset, panel: pd.DataFrame) -> int:
             continue  # target session hasn't closed yet -- leave it pending
 
         resolution_price = float(session_close[match])
-        actual = "UP" if resolution_price > float(row["price_at_prediction"]) else "DOWN"
+        # The close the features were built from, falling back to the live
+        # quote only for rows written before that column existed.
+        basis = row.get("close_at_prediction")
+        legacy_basis = basis is None
+        basis = float(basis if basis is not None else row["price_at_prediction"])
+        actual = "UP" if resolution_price > basis else "DOWN"
 
         update = {
             "resolved_at": now_iso,
@@ -248,7 +282,8 @@ def resolve_due_predictions(db, asset, panel: pd.DataFrame) -> int:
         resolved += 1
         print(f"  cozuldu #{row['id']} (hedef {target}, seans {match}): "
               f"tahmin={row['predicted_direction']} gercek={actual} "
-              f"dogru={update['correct']}")
+              f"dogru={update['correct']}"
+              + ("  [eski satir: canli fiyat tabanli]" if legacy_basis else ""))
     return resolved
 
 
@@ -257,7 +292,8 @@ def resolve_due_predictions(db, asset, panel: pd.DataFrame) -> int:
 # a key has no column, so shipping these without the migration would mean no
 # prediction is written at all until someone notices.
 PENDING_MIGRATION_COLUMNS = ("tech_confidence_raw", "ml_confidence_raw",
-                             "macro_confidence_raw", "cold_start")
+                             "macro_confidence_raw", "cold_start",
+                             "close_at_prediction")
 
 
 def insert_prediction(db, row: dict):
@@ -410,6 +446,11 @@ def run_asset(db, asset) -> int:
         "target_date": target_date.isoformat(),
         "horizon_days": ml_model.HORIZON_DAYS,
         "price_at_prediction": current_price,
+        # The close of the session every feature was built from -- the basis
+        # the record is scored on, and NOT the same number as the live quote
+        # above. See resolve_due_predictions for what scoring from the quote
+        # did to the base rate the ensemble weighs each component against.
+        "close_at_prediction": _number(float(panel["close"].iloc[-1])),
         "price_source": price_source,
         "predicted_direction": final["direction"],
         "confidence": final["confidence"],

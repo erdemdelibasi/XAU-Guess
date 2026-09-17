@@ -1004,6 +1004,55 @@ yoksa raporu basıp 0 ile çıkıyor — yani `python daily_report.py` yerel
 önizleme olarak da kullanılabiliyor, eksik bir isteğe bağlı secret bozuk bir
 boru hattı gibi görünmüyor.
 
+### Taban oran düzeltmesinin EKSİK olduğu iki yer (2026-09-17)
+
+Yukarıdaki dört yer sayılırken bu ikisi gözden kaçmıştı, ve ikisi de aynı
+aileden: bir sayı, ölçüldüğü sorudan farklı bir soruya uygulanıyordu.
+
+**1. Sicil, modelin cevapladığı pencerede puanlanmıyordu.** `predict.py` 23:00
+UTC'de, yani New York 19:00'da koşuyor; `price_at_prediction` o andaki **canlı
+kotasyon**, oysa özelliklerin geldiği seans 17:00'da kapanmış. Her bileşen
+kapanış→kapanış bir soru cevaplıyor (`ml_model`'in etiketi `close[t+5] >
+close[t]`, `assets.py`'nin taban oranları da öyle ölçüldü), ama `correct`
+kolonu canlı kotasyondan puanlanıyordu.
+
+392 seanslık saatlik geçmişte ölçüldü: 19:00 kotasyonu o seansın kapanışından
+medyan **%0,27** (altın) / **%0,77** (gümüş) uzakta, bu da etiketlerin
+**%5,9'unu / %6,9'unu** çeviriyor. Asıl mesele gürültü değil: **aynı satırlarda
+taban oran** kapanış→kapanış %61,2 iken canlı→kapanış %59,4 (altın), %58,2'ye
+karşı %54,3 (gümüş). Yani ensemble her bileşeni, sicilin artık sahip olmadığı
+bir taban orana karşı ölçüyordu — `assets.py`'nin önlemek için var olduğu
+1,8 puanlık görünmez yanlılığın, öğrenme döngüsünün içinde kendi elimizle
+üretilmiş hâli.
+
+Düzeltme: yeni `predictions.close_at_prediction` kolonu (2026-09-17
+migration'ı) ve `resolve_due_predictions` artık onu taban alıyor. Kolonu
+olmayan **eski satırlar** canlı fiyat tabanında çözülmeye devam ediyor ve
+konsol bunu yazıyor — kalibrasyon kolonlarının aksine bu satırlar sicilde
+**zaten sayılıyor**, o yüzden atmak deliğe dönüşürdü. `price_at_prediction`
+değişmedi: portföyler o fiyattan işlem yaptı, canlı grafik ona marklıyor.
+
+**2. Kalibratör DOWN tarafını sistematik susturuyordu.** `calibration.apply`
+her çağrıdan `base_rate` çıkarıyordu — UP da olsa DOWN da olsa. Oysa
+`ensemble.py` bunun için **dört sayaç** taşıyor ve gerekçesini docstring'inde
+yazıyor: hep-UP diyen bileşen tanım gereği %55,7 tutturur, hep-DOWN diyen ise
+**%44,3**. DOWN çağrısını 0,557'ye karşı ölçmek, ondan metalin kendi
+eğiliminden **daha zor** bir barajı aşmasını istemekti; %50 tutturan bir DOWN
+tarafı — ki bu gerçek beceridir — negatife düşüp sıfıra kırpılıyordu. Ve
+`trading.py` pozisyonu bu sayıdan boyutluyor.
+
+Düzeltme: eğri artık `P(doğru)` değil, **her çağrının kendi bilgisizlik
+noktasına göre FAZLASI** üzerine fit ediliyor; `apply` de o tarafın kendi
+payına bölüyor. Tek eğri, tek örneklem — iki ayrı eğri örneklem yüzünden
+reddedildi (ML günlerin ~%75'inde UP diyor, ince taraf üç yıl bekletirdi ve
+bir tarafı kalibre, diğeri ham bir bileşen iki yönü iki ölçekte boyutlar).
+Dosya adı `calibration_<varlık>_v2.joblib`: eğrinin **şekli** değil **anlamı**
+değişti, ve eski bir dosya sessizce yeni nicelik gibi okunurdu.
+
+**İkisi de henüz ateşlememişti** — kalibrasyon `MIN_RECORDS_TO_FIT` (180 satır)
+dolmadığı için hiç dosya yazılmamıştı, sicil de daha onlarca satır. "İlk fit'ten
+önce yakalanan hata" penceresi, bu dosyanın zaten bir kez kullandığı pencere.
+
 ### Abstain bir hata değil
 
 Bir bileşen `confidence=0` döndürdüğünde o tur konuşmuyor demektir.
@@ -1821,7 +1870,7 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   gelmesi 180 çözülmüş satır sürer. Canlı sinyal *üreten* kodun testi hâlâ
   yok; o `backtest.py` + canlı izlemeyle doğrulanıyor.
 - **Yeni bir strateji fikri gelmeden önce `backend/research/README.md`'yi
-  oku.** Orada ölçülüp elenmiş **on sekiz** hipotez duruyor — oranla ilgili
+  oku.** Orada ölçülüp elenmiş **on dokuz** hipotez duruyor — oranla ilgili
   bir fikir 8. bölümde, Fed faiziyle ilgili olan 10. bölümde, reel faiz ve
   merkez bankası alımıyla ilgili olan 11. bölümde, yeni bir veri kaynağı
   eklemekle ilgili olan 12. bölümde, "daha çok veriyle eğitelim" ile ilgili
@@ -1829,7 +1878,8 @@ günlük değişim (ok yok) — hepsi beklendiği gibi çıktı.
   komisyon/hesap büyüklüğüyle ilgili olan 15. bölümde,
   "gerçekte hangi enstrümanı alıyorum" ile ilgili olan 16. ve 17.
   bölümde, kırılım/order flow/VWAP/hacim profili ya da bir osilatör onay
-  kümesiyle ilgili olan 18. bölümde büyük ihtimalle zaten var.
+  kümesiyle ilgili olan 18. bölümde, "modelin olasılığını nerede keselim"
+  ile ilgili olan 19. bölümde büyük ihtimalle zaten var.
 - **Yeni bir seri denemek isteyince `fetch_data.MACRO_SYMBOLS`'e EKLEME.**
   O sözlük canlı yolu da besliyor (`predict.py` her koşuda her girdiyi
   çekiyor), yani kapıdan geçmemiş bir seri oraya konunca günlük bir istek ve

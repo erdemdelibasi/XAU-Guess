@@ -106,14 +106,22 @@ class _Db:
 
 class _ShrinkingCalibrator:
     """Stands in for a fitted isotonic curve. Maps any raw confidence to a
-    P(correct) barely above the base rate, so calibration.apply() shrinks it
-    hard -- and that contrast is what makes "raw or calibrated?" observable."""
+    sliver of EXCESS over the call's no-information rate, so
+    calibration.apply() shrinks it hard -- and that contrast is what makes
+    "raw or calibrated?" observable.
+
+    The stub used to return `base_rate + 0.01` because the curve used to
+    predict P(correct). It predicts excess since 2026-09-17, and a stub still
+    speaking the old scale turned a 0.01 sliver into a 0.567 landslide --
+    which is why this test failed loudly on that change instead of quietly
+    passing. The `base` argument is kept so the fixtures read unchanged.
+    """
 
     def __init__(self, base):
         self.base = base
 
     def predict(self, xs):
-        return np.asarray([self.base + 0.01 for _ in xs])
+        return np.asarray([0.01 for _ in xs])
 
 
 @pytest.fixture

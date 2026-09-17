@@ -34,6 +34,15 @@ create table if not exists predictions (
 
     price_at_prediction     numeric     not null,
     price_source            text,       -- 'GC=F', 'PAXG->GC=F', 'SI=F(stale)' ...
+    -- The CLOSE of the session the features were built from, which is not the
+    -- same number as the live quote above: predict.py runs at 23:00 UTC, i.e.
+    -- 19:00 New York, two hours into the session AFTER the one it read. The
+    -- record is scored close-to-close from this column because that is the
+    -- question every component answers and the question assets.py's base
+    -- rates were measured on. Scoring from the quote moved the realised base
+    -- rate by 1.8 points in gold and 3.8 in silver -- see
+    -- predict.resolve_due_predictions.
+    close_at_prediction     numeric,
 
     -- Blended call.
     predicted_direction     text        not null check (predicted_direction in ('UP', 'DOWN')),
@@ -659,3 +668,23 @@ end $$;
 --   update portfolios set cash_usd = 1000, ounces = 0, position = 'CASH',
 --          target_exposure = 0, updated_at = now()
 --    where strategy = 'breakout';
+
+-- ---------------------------------------------------------------------------
+-- MIGRATION 2026-09-17 -- score the record on the close, not the live quote
+-- ---------------------------------------------------------------------------
+-- predict.py runs at 23:00 UTC = 19:00 New York, so `price_at_prediction` is
+-- a quote from two hours INTO the session after the one every feature was
+-- built from. The components all answer "close[t+5] > close[t]" and the base
+-- rates in assets.py were measured that way, so resolving against the quote
+-- scored the record on a different question than the ensemble weighs it
+-- against.
+--
+-- Measured on 392 sessions of hourly history: the quote sits a median 0.27%
+-- (gold) / 0.77% (silver) from that session's close, flipping 5.9% / 6.9% of
+-- labels, and shifting the realised base rate on the SAME rows from 61.2% to
+-- 59.4% (gold) and 58.2% to 54.3% (silver).
+--
+-- Rows written before this column exists keep resolving from
+-- `price_at_prediction` and the console says so. Safe to run twice.
+--
+--   alter table predictions add column if not exists close_at_prediction numeric;

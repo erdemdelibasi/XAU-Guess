@@ -189,7 +189,12 @@ def refit_calibrators(asset, resolved: list[dict]) -> None:
 
     for component in ("technical", "ml", "macro"):
         prefix = ensemble.COLUMN_PREFIX[component]
-        confidences, corrects = [], []
+        # The DIRECTION travels with the confidence now. calibration.fit
+        # measures each call against its own no-information rate (0.557 for an
+        # UP call on gold, 0.443 for a DOWN one), and it cannot do that from a
+        # confidence alone -- see that module's docstring for what subtracting
+        # one shared number did to the DOWN side.
+        confidences, corrects, directions = [], [], []
         skipped_legacy = 0
         for row in resolved:
             # The RAW confidence, never the stored calibrated one. A curve
@@ -205,15 +210,17 @@ def refit_calibrators(asset, resolved: list[dict]) -> None:
                 if row.get(f"{prefix}_confidence") is not None:
                     skipped_legacy += 1
                 continue
-            if was_correct is None or float(confidence) <= 0:
+            direction = row.get(f"{prefix}_direction")
+            if was_correct is None or float(confidence) <= 0 or direction not in ("UP", "DOWN"):
                 continue
             confidences.append(float(confidence))
             corrects.append(bool(was_correct))
+            directions.append(str(direction))
         if skipped_legacy:
             print(f"  {component:<12} {skipped_legacy} eski satir atlandi "
                   f"(ham guven kolonu yoktu)")
 
-        curve = calibration.fit(confidences, corrects, asset.base_rate_up)
+        curve = calibration.fit(confidences, corrects, directions, asset.base_rate_up)
         if curve is None:
             print(f"  {component:<12} fit YOK ({len(confidences)} kayit, "
                   f"gereken {calibration.MIN_RECORDS_TO_FIT}) -- kalibre edilmeden calisiyor")
@@ -222,7 +229,14 @@ def refit_calibrators(asset, resolved: list[dict]) -> None:
         # tonight must not lose the calibrator it earned last month.
         calibrators[component] = curve
         fitted += 1
-        print(f"  {component:<12} fit edildi ({len(confidences)} kayit)")
+        ups = sum(1 for d in directions if d == "UP")
+        # The UP/DOWN split is printed because it is the thing that decides
+        # whether the fitted curve says anything about the thin side: a
+        # component that called UP 340 times and DOWN 12 has a curve whose
+        # DOWN half rests on twelve observations, and the reader should be
+        # able to see that without opening the file.
+        print(f"  {component:<12} fit edildi ({len(confidences)} kayit: "
+              f"{ups} UP / {len(directions) - ups} DOWN)")
 
     if fitted:
         calibration.save(calibrators, asset.key)

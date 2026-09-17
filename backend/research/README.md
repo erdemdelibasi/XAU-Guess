@@ -1971,3 +1971,71 @@ geçiyordu.* Bu depoda bundan sonra o cümle bir merak değil, doğrudan bir
   örneklemin görebileceği en küçük farkın ne olduğu (`ablation.min_detectable_ic`
   ailesinden bir sayı) hesaplanmadı. |t| değerlerinin hepsinin 0,8'in altında
   olması bunu daha az acil kılıyor ama kapatmıyor.
+
+---
+
+## 19. ML bileşeninin yön eşiği: 0,5 mi, taban oran mı? (`threshold.py`)
+
+Bu depo taban oranı hemen her yerde düzeltiyor: `ensemble.py` kanıtı ona karşı
+olabilirlik oranıyla havuzluyor, `calibration.py` isotonic'i ona çapalıyor,
+mail ve arayüz `edge_over_base` basıyor, ve `edge.py`'nin kendi başlığı "%50'yi
+geçmek hiçbir şey kanıtlamaz" diyor.
+
+Bir yer düzeltmiyordu. `ml_model.ml_signal`:
+
+```python
+direction = "UP" if proba_up >= 0.5 else "DOWN"
+```
+
+Model bir **olasılık** üretiyor ve prior biliniyor (altın 0,557). Modelin 0,52
+dediği bir gün, boş bir tahminden **daha az** yükseliş beklediği gündür — ve
+bileşen onu YÜKSELİŞ diye raporluyordu. `edge.py` de aynı 0,5'te puanlıyor.
+
+Bunun burada özel bir ağırlığı var: `ensemble.combine` bir bileşenin **işaretini**
+ve geçmiş sicilini okuyor, günlük güven büyüklüğünü hiç okumuyor. Yani modelin
+olasılığının havuza tek kanalı, eşiğin hangi tarafına düştüğü. Eşik prior'ın
+yanlış tarafındaysa UP kovası prior-altı günlerle sulanır — ki bu tam olarak
+`component_evidence`'ın doğru şekilde ~0 döndürdüğü ve bileşenin sustuğu durum.
+
+### Ön-kayıt — ilk koşumdan önce yazıldı
+
+Eşik, AYNI yürüyen-ileri satırlarında, **iki metalde birden**: (1) iki taraf da
+kendi bilgisizlik noktasını geçmeli, (2) prequential Brier becerisi hem pozitif
+hem 0,50'ninkinden yüksek olmalı, (3) küçük taraf en az 200 kez konuşmalı.
+
+### Sonuç
+
+| metal | eşik | UP der | P(up\|UP) | fark | z | DOWN der | P(dn\|DN) | fark | z |
+|---|---|---|---|---|---|---|---|---|---|
+| altın | 0,50 | 3679 | %55,61 | +0,39 | 0,21 | 1214 | %45,96 | +1,19 | 0,37 |
+| altın | **0,552** | 2496 | %57,29 | **+2,07** | 0,93 | 2397 | %46,93 | **+2,16** | 0,95 |
+| gümüş | 0,50 | 3233 | %52,83 | +0,30 | 0,15 | 1661 | %48,04 | +0,58 | 0,21 |
+| gümüş | **0,525** | 2705 | %52,94 | +0,41 | 0,19 | 2189 | %47,97 | +0,50 | 0,21 |
+
+Prequential Brier becerisi (yalnızca prior = 0): altın −%0,016 → **+%0,121**,
+gümüş −%0,032 → −%0,030.
+
+**Baraj GEÇİLEMEDİ ve eşik 0,5'te kaldı.** Altında üç şartın üçü de geçiyor —
+iki tarafın da kaldıracı üç katına çıkıyor ve beceri negatiften pozitife
+dönüyor. Gümüşte beceri hâlâ **negatif**: şart (2) "pozitif VE daha yüksek"
+diyordu, "daha az kötü" demiyordu. Bu tezgâhın kuralı bir metalde çıkıp
+diğerinde çıkmayan sonucu benimsememektir (13. bölümdeki oynaklığa bölme
+açık ucunun aynısı).
+
+**Ve negatifin gücünü yazmak şart:** z değerlerinin **hiçbiri 1,0'a ulaşmıyor**
+(en büyüğü 0,95). Örtüşme düzeltmesinden sonra etkin gözlem ~980 ve bu
+örneklemin ayırt edebileceği en küçük fark ~3 puan; ölçülen 2,07. Yani çalışma
+"taban oran eşiği belirgin şekilde daha iyi" **diyemiyor**, ama "daha kötü"
+de diyemiyor. Doğru okuma: **işaret tutarlı, kanıt yetersiz.**
+
+Tekrar bakılması için iki tetik yazılı olsun:
+- **Canlı sicil 300 çözülmüş satırı geçtiğinde.** O zaman soru simülasyon değil
+  ölçüm olur, üstelik `model_state`'in dört sayacı zaten tam bu ayrımı tutuyor.
+- **`ensemble` bir gün büyüklüğü de okumaya başlarsa** eşik sorusu kendiliğinden
+  düşer: olasılık havuza doğrudan girer ve kesme noktası kalmaz.
+
+> Yan bulgu, kayıt için: modelin olasılık dağılımı prior'ın etrafında oturuyor
+> (altın ortalama %55,7, medyan %55,4 — `assets.py`'deki 0,557'nin üstüne
+> neredeyse birebir). Bu, 7. bölümün "taban oran öğrenilebilir olan tek şey"
+> bulgusunun bağımsız bir doğrulaması: model prior'ı öğrenmiş, üstüne az şey
+> koymuş.
