@@ -6,9 +6,15 @@ longer lives in this project -- it moved to ../Kanal-Finans-Fetcher, a sibling
 repo shared with XRP-Guess (see kanal_finans.py's module docstring for why).
 Its tests moved with it, into Kanal-Finans-Fetcher/tests/test_fetcher.py.
 What's tested here is everything that stayed: a stop-loss that quietly
-disarms, a level read from the wrong end of a range, and a pending mention
-that must retry (never get marked applied) if trading on it fails.
+disarms, a level read from the wrong end of a range, a pending mention that
+must retry (never get marked applied) if trading on it fails, and -- after
+2026-09-21 -- the console-encoding boundary that let a SUCCESSFUL fill be
+logged as a failure.
 """
+import io
+import pathlib
+import sys
+
 import pytest
 
 import kanal_finans
@@ -225,3 +231,100 @@ def test_only_real_metals_map_to_portfolios():
     """GENEL ("kıymetli madenler" with neither metal named) is informational:
     there is no "general metal" position to take."""
     assert set(kanal_finans.PORTFOLIO_ASSET) == {"ALTIN", "GUMUS"}
+
+
+# --------------------------------------------------------------------------
+# The console-encoding boundary (2026-09-21)
+#
+# Not a style matter: it is where a ledger and the line describing it were
+# able to disagree.
+# --------------------------------------------------------------------------
+
+class _LedgerTable:
+    def __init__(self, name, written):
+        self.name = name
+        self.written = written
+
+    def update(self, patch):
+        self.written.setdefault("portfolio_patches", []).append(patch)
+        return self
+
+    def insert(self, row):
+        self.written.setdefault("trades", []).append(row)
+        return self
+
+    def eq(self, _column, _value):
+        return self
+
+    def execute(self):
+        return type("R", (), {"data": None})()
+
+
+class LedgerDb:
+    """Records what _apply() writes, so a test can ask whether the ledger was
+    written even in a run where the line describing it could not be printed."""
+
+    def __init__(self):
+        self.written = {}
+
+    def table(self, name):
+        assert name in ("portfolios", "trades"), name
+        return _LedgerTable(name, self.written)
+
+
+def test_describing_a_fill_cannot_undo_it(monkeypatch):
+    """Measured live on 2026-09-21: _apply() inserted the trade row, then its
+    own print raised UnicodeEncodeError on a Turkish letter in `reason`. Task
+    Scheduler runs kanal_finans.py on Windows, where a redirected stdout
+    defaults to cp1252. The exception escaped apply_mention(), its caller
+    never reached mark_applied(), and the log reported "apply failed for
+    mention 10" over a fill that had already succeeded -- the ledger said one
+    thing and the record of it said the opposite.
+
+    Nothing double-filled, because decide_on_mention() guards BUY with
+    `units == 0` and SELL with `units > 0`, so all-in/all-out is idempotent by
+    construction. The damage was purely to the record, which in this repo is
+    the expensive half.
+
+    This drives _apply() through a REAL cp1252 encoder rather than a mock that
+    raises, and asks for both halves: nothing propagates out, and the trade is
+    on the books.
+    """
+    db = LedgerDb()
+    decision = kft.decide_on_mention(1000.0, 0.0, None, None, "BUY", None, None,
+                                     price=4000.0, fee_rate=ASSET.fee_rate)
+    # The guard is about any text the console cannot encode, not this one
+    # string. Forcing it keeps the test exercising the encoder even if the
+    # production reason ever becomes ASCII.
+    decision["reason"] = "Tunç Şatıroğlu: al"
+
+    monkeypatch.setattr(
+        sys, "stdout",
+        io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict"))
+
+    kft._apply(db, ASSET, decision, 4000.0, 1000.0, 0.0, mention_id=10)
+
+    assert len(db.written["trades"]) == 1
+    assert db.written["trades"][0]["triggered_by_mention_id"] == 10
+
+
+ENTRY_POINTS = ("predict.py", "retrain.py", "daily_report.py", "kanal_finans.py",
+                "track_etf.py", "track_breakout.py", "backtest.py",
+                "export_backtest.py")
+
+
+def test_every_entry_point_forces_utf8_stdout():
+    """The guard belongs on the entry point, because that is where stdout is.
+
+    Seven of the eight had it. The missing one was kanal_finans.py -- the ONLY
+    entry point Windows Task Scheduler runs, and therefore the only one where a
+    cp1252 stdout is reachable at all; the other seven run on Actions, where
+    stdout is UTF-8 already. That asymmetry is exactly why reading any single
+    file did not reveal it, so this asks about the whole set rather than about
+    kanal_finans.py.
+    """
+    backend = pathlib.Path(__file__).resolve().parent.parent
+    missing = [name for name in ENTRY_POINTS
+               if "sys.stdout.reconfigure" not in
+               (backend / name).read_text(encoding="utf-8")]
+    assert missing == []

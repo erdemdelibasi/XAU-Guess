@@ -137,8 +137,28 @@ def _apply(db, asset, decision: dict, price: float, cash: float, units: float,
         "triggered_by_mention_id": mention_id, "reason": decision["reason"],
     }).execute()
 
-    print(f"TRADE [{asset.key}/{STRATEGY}]: {decision['action']} "
-          f"{decision['unit_amount']:.4f} oz @ {price:,.2f} -- {decision['reason']}")
+    # The ledger is written above; everything from here only DESCRIBES it.
+    # On 2026-09-21 this print raised UnicodeEncodeError on the "Ş" of the
+    # speaker's name in `reason` -- Task Scheduler runs kanal_finans.py on
+    # Windows, where a redirected stdout defaults to cp1252 -- the exception
+    # escaped apply_mention(), and its caller never reached mark_applied().
+    # The log then reported "apply failed for mention 10" over a fill that had
+    # already succeeded. kanal_finans.py now forces UTF-8, which stops that at
+    # the source; this fallback is what makes describing a trade unable to
+    # disturb the trade itself whatever the console turns out to be, and it
+    # cannot raise in turn because ASCII always encodes.
+    #
+    # This is NOT a softening of the retry contract
+    # test_a_failed_trade_is_not_marked_applied locks. A trade that fails
+    # BEFORE the two writes above must still leave applied_at NULL so the next
+    # run retries it. What must not happen is the opposite case being reported
+    # as that one: a purely cosmetic failure AFTER the money has moved.
+    line = (f"TRADE [{asset.key}/{STRATEGY}]: {decision['action']} "
+            f"{decision['unit_amount']:.4f} oz @ {price:,.2f} -- {decision['reason']}")
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        print(line.encode("ascii", "replace").decode("ascii"))
 
 
 def apply_mention(db, asset, mention: dict, price: float) -> None:

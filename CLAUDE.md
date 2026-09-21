@@ -982,6 +982,46 @@ denmişti ve model karıştırdı — gerçek bir pozisyonda ~%1,8 fazla zarar.
 seviyeyi tekrar etmiyor; "eksik = değişmedi", "eksik = iptal" değil. Tersi
 her tekrar etmediği videoda zarar-kesi sessizce devre dışı bırakırdı.
 
+**Konsol kodlaması bir biçim meselesi değil: defterin kendisiyle onu anlatan
+satırın çelişebildiği yer.** 2026-09-21'de canlıda ölçüldü.
+`kanal_finans_trading._apply`, `trades` satırını yazdıktan **sonra** bir `print`
+basıyor ve o satır `reason`'ı içeriyor — `reason` ise her zaman
+"Tunç Şatıroğlu: al/sat" taşıyor. Windows'ta yönlendirilmiş stdout cp1252'ye
+düşer ve "Ş" orada kodlanamaz: print `UnicodeEncodeError` fırlattı, istisna
+`apply_mention`'dan dışarı sızdı, `kanal_finans.py` **`mark_applied`'a hiç
+gelemedi**, ve log gerçekleşmiş bir dolumun üzerine "apply failed for mention
+10" yazdı.
+
+**Çift dolum olmadı, ve bu bir şans değil**: `decide_on_mention` BUY'u
+`units == 0`, SELL'i `units > 0` ile koruyor, yani all-in/all-out yapı gereği
+idempotent — tekrar uygulama HOLD döner. Hasar tamamen **kayıttaydı**, ki
+değeri olumsuz sonuçları dürüst ölçmek olan bir depoda pahalı olan yarısı
+tam olarak budur.
+
+İki şey aynı anda yanlıştı, ikisi ayrı ayrı düzeltildi:
+
+1. **`kanal_finans.py`, sekiz entry point'in UTF-8 korumasını taşımayan
+   tekiydi** — ve asimetri tam da bu yüzden gözden kaçtı: diğer yedisi
+   Actions'ta koşuyor, orada stdout zaten UTF-8; cp1252'ye erişilebilen **tek**
+   entry point Task Scheduler'ın koşturduğu bu. Üstelik
+   `run_kanal_finans.ps1`'in yorumu *"kanal_finans.py already forces its stdout
+   to UTF-8"* diye yazıyordu ve bu **doğru değildi** — iki parçalı düzeltmenin
+   PowerShell yarısı yapılmış, Python yarısı hiç yapılmamıştı. Bir dosyanın
+   kendi hakkında yazdığı doğru sanılan iddia, hiçbir hata üretmeyen türden.
+   `test_every_entry_point_forces_utf8_stdout` bu yüzden tek dosyayı değil
+   **kümeyi** soruyor.
+2. **`_apply`'deki print artık defteri bozamıyor.** UTF-8 düzeltmesi sebebi
+   kaynağında kesiyor; bu koruma ise *anlatmanın yapmayı bozamamasını* garanti
+   ediyor, konsol ne çıkarsa çıksın. Kendisi fırlatamaz, çünkü ASCII her zaman
+   kodlanır.
+
+**Ve bu, retry sözleşmesinin gevşetilmesi DEĞİL.**
+`test_a_failed_trade_is_not_marked_applied` aynen geçerli: satırlar yazılmadan
+**önce** başarısız olan bir işlem `applied_at`'i NULL bırakmalı ve tekrar
+denenmeli. Olmaması gereken şey, para hareket ettikten **sonraki** tamamen
+kozmetik bir arızanın onunla aynı şeymiş gibi raporlanmasıydı — tek bir `try`
+bloğu ikisini ayırt edemiyor.
+
 ### Günlük mail: sayfayla aynı kuralları söylemek zorunda
 
 `daily_report.py` XRP-Guess'ten devralındı ama üç yeri **ölçüm yüzünden**

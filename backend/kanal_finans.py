@@ -45,12 +45,26 @@ never "cancelled".
 """
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 
-import assets as assets_module
-import db as db_module
-import fetch_data
-import kanal_finans_trading
+# Windows defaults a REDIRECTED stdout to cp1252. Same guard as predict.py,
+# same reason -- but THIS is the entry point where it actually bit, and the
+# asymmetry is why it was missed: the other seven run on Actions, where stdout
+# is UTF-8 already, while Task Scheduler runs this one on Windows. On
+# 2026-09-21 kanal_finans_trading._apply printed a `reason` of
+# "Tunc Satiroglu: al" -- with the real Turkish letters -- AFTER inserting the
+# trade row and BEFORE mark_applied() below could run. The fill succeeded and
+# the log said "apply failed for mention 10" over it. A ledger and the line
+# describing it must not be able to disagree; see the guard in _apply too.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+import assets as assets_module  # noqa: E402
+import db as db_module  # noqa: E402
+import fetch_data  # noqa: E402
+import kanal_finans_trading  # noqa: E402
 
 # Only these two map onto real paper portfolios. GENEL ("kiymetli
 # madenler/emtia" without naming one) is informational only -- there is no
