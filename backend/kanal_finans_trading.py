@@ -22,10 +22,34 @@ alım fırsatı olabilir" -- so a fixed "price reached resistance -> take profit
 rule would have actively inverted him on exactly the videos where he was most
 specific. Only the stop-loss is a hard automatic trigger.
 
-The stop-loss is watched CONTINUOUSLY, not just when a new video lands --
-predict.py calls maybe_check_stop_loss() on every daily cycle. That call
-touches only Supabase and an already-fetched price, never YouTube, so unlike
-kanal_finans.py itself it runs fine on GitHub Actions.
+THE STOP-LOSS IS A LEVEL A CALLER CHECKS, NOT AN ORDER SITTING IN A BOOK.
+check_stop_loss() sells at whatever price it is GIVEN, the moment it is
+called -- it does not remember the level was crossed earlier at a better
+price. That distinction cost real (paper) money on 2026-09-28: gold gapped
+from Friday's $4,321 close through the $4,285 stop over the weekend, when
+nothing was calling this at all, and the first check to notice -- hours into
+Monday, run by hand -- filled at $4,182.90 against what had by then become a
+$4,300 stop. 2.7% is the price of the gap between checks, not a bug in the
+check itself.
+
+So there are now TWO callers, on purpose, at different cadences:
+
+  kanal_finans.py's check_stop_losses(), every 15 minutes -- the PRIMARY
+  path. It is already awake for the mention poll and this adds two Yahoo
+  quotes and two Supabase reads, nothing YouTube-adjacent, so there is no
+  real cost to checking this often.
+
+  predict.py's daily cycle, once at 23:00 UTC -- the FALLBACK, for whenever
+  the local machine is asleep at a 15-minute trigger (see
+  run_kanal_finans.ps1's docstring: a skipped trigger is silently dropped,
+  not queued). Both call the same idempotent function, so a run that finds
+  the position already flat or the price already back above the stop just
+  does nothing; two callers is not a double-sell risk.
+
+Neither caller touches YouTube, so both run fine wherever they run --
+predict.py on GitHub Actions, kanal_finans.py's check on the same local
+machine as the mention poll (kanal_finans.py itself still cannot run on
+Actions, for the reason above about YouTube).
 """
 from __future__ import annotations
 
@@ -174,8 +198,10 @@ def apply_mention(db, asset, mention: dict, price: float) -> None:
 
 
 def maybe_check_stop_loss(db, asset, price: float) -> None:
-    """Called every cycle from predict.py. Never touches YouTube, so unlike
-    kanal_finans.py itself this runs fine on GitHub Actions."""
+    """Called from TWO places -- see the module docstring: kanal_finans.py's
+    check_stop_losses() every 15 minutes (primary) and predict.py's daily
+    cycle (fallback, for when the local machine missed a 15-minute trigger).
+    Never touches YouTube, so both callers run fine wherever they run."""
     state = get_state(db, asset.key)
     cash, units = float(state["cash_usd"]), float(state["ounces"])
     decision = check_stop_loss(units, state.get("stop_loss_price"), price, asset.fee_rate)

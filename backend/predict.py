@@ -535,10 +535,14 @@ def run_asset(db, asset) -> int:
             print(f"WARNING: {asset.key}/{name} portfolio update failed ({exc})")
 
     # The Kanal Finans portfolio is driven by video events, not by this
-    # signal -- but its stop-loss has to be watched continuously, not only
-    # when a new video lands. This touches Supabase and the price already
-    # fetched above, never YouTube, so it runs fine on GitHub Actions even
-    # though kanal_finans.py itself cannot (see that module's docstring).
+    # signal. Its stop-loss's PRIMARY watch is now kanal_finans.py's
+    # check_stop_losses(), every 15 minutes on the local machine (see
+    # kanal_finans_trading.py's module docstring for the 2026-09-28 gap that
+    # made a once-a-day check fill 2.7% below the level). This call is the
+    # FALLBACK for whenever that machine was asleep at a trigger -- it still
+    # touches only Supabase and the price already fetched above, never
+    # YouTube, so it runs fine on GitHub Actions even though kanal_finans.py
+    # itself cannot (see that module's docstring).
     try:
         kanal_finans_trading.maybe_check_stop_loss(db, asset, current_price)
     except Exception as exc:  # noqa: BLE001

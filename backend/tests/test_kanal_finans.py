@@ -224,6 +224,65 @@ def test_a_failed_trade_is_not_marked_applied(monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# check_stop_losses -- moved to every 15 minutes on 2026-09-28. Before this,
+# only predict.py's once-a-day call watched the level; gold gapped through
+# its stop over a weekend and the first check to notice, hours into Monday,
+# filled 2.7% below it. See kanal_finans.py's module docstring for the
+# measured incident.
+# --------------------------------------------------------------------------
+
+def test_check_stop_losses_checks_both_metals(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        kanal_finans.fetch_data, "get_live_price",
+        lambda symbol: (4200.0, symbol) if symbol == "GC=F" else (60.0, symbol))
+    monkeypatch.setattr(
+        kanal_finans.kanal_finans_trading, "maybe_check_stop_loss",
+        lambda db, asset, price: calls.append((asset.key, price)))
+
+    kanal_finans.check_stop_losses(db=object())
+
+    assert set(calls) == {("gold", 4200.0), ("silver", 60.0)}
+
+
+def test_check_stop_losses_one_asset_failing_does_not_block_the_other(monkeypatch):
+    """A Yahoo hiccup on one metal must not silently skip the other -- there
+    is always another run 15 minutes from now to retry, but only the asset
+    that actually failed needs it."""
+    calls = []
+
+    def _price(symbol):
+        if symbol == "GC=F":
+            raise RuntimeError("Yahoo hiccup")
+        return 60.0, symbol
+
+    monkeypatch.setattr(kanal_finans.fetch_data, "get_live_price", _price)
+    monkeypatch.setattr(
+        kanal_finans.kanal_finans_trading, "maybe_check_stop_loss",
+        lambda db, asset, price: calls.append((asset.key, price)))
+
+    kanal_finans.check_stop_losses(db=object())
+
+    assert calls == [("silver", 60.0)]
+
+
+def test_main_checks_stop_losses_after_applying_mentions(monkeypatch):
+    """Order matters: a mention applied this same run may have just set a
+    fresh stop level, so the check must see the post-apply state, not what
+    was on the books before it."""
+    order = []
+    monkeypatch.setattr(kanal_finans.db_module, "get_client", lambda: "db")
+    monkeypatch.setattr(kanal_finans, "apply_pending_mentions",
+                        lambda db: order.append("apply") or 0)
+    monkeypatch.setattr(kanal_finans, "check_stop_losses",
+                        lambda db: order.append("stop_loss"))
+
+    kanal_finans.main()
+
+    assert order == ["apply", "stop_loss"]
+
+
+# --------------------------------------------------------------------------
 # What still maps mentions to portfolios
 # --------------------------------------------------------------------------
 

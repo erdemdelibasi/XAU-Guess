@@ -45,9 +45,11 @@ bkz. aşağıdaki Kanal Finans notu)
                               XRP-Guess'le PAYLAŞILAN sibling repo, iki projeye
                               de kendi şemasıyla yazar (bkz. o reponun README'si)
   -> backend/run_kanal_finans_hidden.vbs -> run_kanal_finans.ps1
-                              her 15 dk, YouTube'a HİÇ gitmez: sadece
-                              fetcher'ın yazdığı bekleyen görüşleri portföye
-                              uygular (bkz. aşağıdaki Kanal Finans notu)
+                              her 15 dk, YouTube'a HİÇ gitmez: fetcher'ın
+                              yazdığı bekleyen görüşleri portföye uygular,
+                              SONRA her iki metalin zarar-kesini taze
+                              kotasyona karşı kontrol eder (2026-09-28'den
+                              beri -- bkz. aşağıdaki Kanal Finans notu)
        |
        v
 Supabase (Postgres + otomatik REST API, RLS ile korunur)
@@ -969,9 +971,37 @@ gitmeyi gerektirir.
 **Direnç seviyesi bilerek otomatik satış tetiklemez.** XRP-Guess canlı
 veride konuşmacının direnç kırılmasını bazen *alım fırsatı* olarak
 yorumladığını gördü; sabit "direnç = kar al" kuralı tam da en spesifik
-olduğu videolarda onu ters okurdu. Sadece zarar-kes otomatik tetikler, ve
-`predict.py`'nin her günlük döngüsünde **sürekli** izlenir — bu çağrı
-YouTube'a hiç gitmediği için Actions'ta sorunsuz çalışır.
+olduğu videolarda onu ters okurdu. Sadece zarar-kes otomatik tetikler.
+
+**Zarar-kes kontrolü 2026-09-28'de günde birden 15 dakikada bire taşındı, ve
+gerekçesi ölçüldü, sezgiyle değil.** Altın Cuma (25 Eylül) $4.321'den
+kapandı; hafta sonu boyunca kimse izlemiyordu (`kanal_finans.py` o zaman
+sadece mention uyguluyordu, `predict.py` günde bir kez, 23:00 UTC). Pazar
+22:00 UTC'deki yeniden açılışta fiyat zaten $4.294'e inmişti — o anki $4.285
+stopunu geçmiş — ve gece boyunca $4.177'ye kadar çöktü. Bunu fark eden ilk
+kontrol Pazartesi öğlene doğru elle çalıştırılan bir kontroldü ve $4.300
+stopuna karşı **$4.182,90**'dan doldu: **%2,7 kayıp, sırf kontrol
+seyrekliğinden.** `check_stop_loss()` hiçbir zaman bozuk değildi — çağrıldığı
+andaki canlı fiyattan satar, stop seviyesinden değil; asıl sorun ne sıklıkla
+çağrıldığıydı.
+
+Artık **iki çağıran** var, kasıtlı olarak:
+- `kanal_finans.py`'nin `check_stop_losses()`'ı, **her 15 dakikada bir** —
+  **asıl yol**. Bu giriş noktası zaten mention yoklaması için uyanık;
+  eklediği tek şey iki Yahoo kotasyonu ve iki Supabase okuması, YouTube'a
+  yakın hiçbir şey yok, yani bu sıklıkta kontrol etmenin gerçek bir bedeli
+  yok.
+- `predict.py`'nin günlük döngüsü, günde bir kez (23:00 UTC) — **yedek**,
+  yerel makine bir 15 dakikalık tetikleyicide uyurken diye
+  (`run_kanal_finans.ps1`'in belgelediği gibi, kaçan bir tetikleyici
+  sessizce düşer, kuyruğa girmez). İkisi de aynı `maybe_check_stop_loss()`'u
+  çağırıyor ve fonksiyon yalnızca fiyat gerçekten seviyeyi geçmişse işlem
+  yapıyor, yani iki çağıran çift satış riski değil.
+
+Bu çağrı YouTube'a hiç gitmediği için her ikisi de çalıştığı yerde sorunsuz
+çalışır — `predict.py` Actions'ta, `kanal_finans.py`'nin kontrolü ise
+mention yoklamasıyla aynı yerel makinede (`kanal_finans.py`'nin kendisi hâlâ
+Actions'ta çalışamaz, YouTube'a gittiği için).
 
 **Zarar-kes/direnç prompt'undaki "hangi uç" kuralı ters yönlerdir ve
 açıkça yazılmıştır**: zarar-keste EN YÜKSEK (fiyat düşerken oraya önce
