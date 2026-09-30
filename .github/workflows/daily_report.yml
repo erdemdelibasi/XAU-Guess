@@ -8,6 +8,14 @@ name: Daily Email Report
 # do not trade, predict.py does not run, and a Sunday mail would repeat
 # Friday's numbers as if they were new. Monday's mail covers Friday night's
 # prediction, which is what the portfolios are still holding.
+#
+# Since 2026-09-30 the PRIMARY trigger is not this cron but a workflow_dispatch
+# from the user's machine at 09:00 TR (backend/trigger_report.ps1, Task
+# Scheduler "XAU-Guess Report Trigger"). The cron had started 15-18 minutes
+# late for weeks, then 6.3 hours late on 09-29 and not by 10:45 TR on 09-30;
+# every run that started succeeded. The cron stays as the fallback for a
+# morning that machine is off, and stands down (first step) when the dispatch
+# already ran -- daily_report.py writes nothing, so two runs are two mails.
 on:
   schedule:
     - cron: "0 6 * * 1-5"
@@ -15,26 +23,52 @@ on:
 
 # Read-only: this job sends a mail, it writes nothing back to the repo. Unlike
 # predict.yml and daily_retrain.yml it has no model to commit, so it has no
-# reason to hold write access.
+# reason to hold write access. `actions: read` is for the stand-down check.
 permissions:
   contents: read
+  actions: read
 
 jobs:
   report:
     runs-on: ubuntu-latest
     steps:
+      # Only a SCHEDULED run checks, and it looks only for DISPATCHED runs: a
+      # dispatch is never skipped, so a skipped cron run can never make the
+      # next day's mail skip too. trigger_report.ps1 guards the other order
+      # (cron ran first, the machine woke up later). 18 hours, not the UTC
+      # date: a cron run delayed past midnight would count for the wrong day.
+      - name: Stand down if this morning's mail was already dispatched
+        id: gate
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cutoff=$(date -u -d '18 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          n=$(gh run list -R "$GITHUB_REPOSITORY" -w daily_report.yml --event workflow_dispatch -L 20 \
+                --json createdAt,conclusion \
+                --jq "[.[] | select(.createdAt >= \"$cutoff\" and .conclusion != \"failure\" and .conclusion != \"cancelled\")] | length")
+          echo "dispatched report runs since $cutoff: $n"
+          if [ "$n" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Standing down: this morning's mail was dispatched from the user's machine."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
 
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.skip != 'true'
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
         run: pip install -r backend/requirements.txt
 
       - name: Send daily report email
+        if: steps.gate.outputs.skip != 'true'
         working-directory: backend
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

@@ -32,7 +32,10 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
                               okur (tv_history.py), çünkü Yahoo o kontratların
                               hacmini sunamıyor -- ve o kontrat $/ons kote.
   -> backend/daily_report.py  her iş günü 06:00 UTC (09:00 TRT) -- günlük
-                              özet maili; hiçbir şey yazmaz, sadece okur
+                              özet maili; hiçbir şey yazmaz, sadece okur.
+                              Bu cron 2026-09-30'dan beri YEDEK: asıl tetik
+                              kullanıcının makinesinden (aşağıda), çünkü
+                              GitHub cron'u saatlerce geç başlatmaya başladı
   -> backend/export_backtest.py  ELLE, cron YOK -- backtest'in sermaye
                               eğrilerini frontend/data/backtest.json'a yazar.
                               Bir parametre değiştirdiğinde yeniden koş ve
@@ -50,6 +53,18 @@ bkz. aşağıdaki Kanal Finans notu)
                               SONRA her iki metalin zarar-kesini taze
                               kotasyona karşı kontrol eder (2026-09-28'den
                               beri -- bkz. aşağıdaki Kanal Finans notu)
+  -> backend/trigger_report_hidden.vbs -> trigger_report.ps1
+                              hafta içi 09:00 ("XAU-Guess Report Trigger") --
+                              daily_report.yml'ı workflow_dispatch ile başlatır.
+                              Ölçüldü: cron 29.09'da 6,3 saat geç başladı,
+                              30.09'da 10:45'e kadar hiç başlamadı; öncesinde
+                              hep 15-18 dk. İş yine GitHub'da koşar, bu makine
+                              yalnızca çağrıyı yapar. İki yönlü koruma aynı
+                              güne İKİ mail gitmesini önler: betik son 18
+                              saatte bir koşu varsa tetiklemez, cron koşusu
+                              da tetiklenmiş bir koşu varsa kendini atlar.
+                              Makine kapalıysa açılınca çalışır
+                              (StartWhenAvailable); açılmazsa cron gönderir
        |
        v
 Supabase (Postgres + otomatik REST API, RLS ile korunur)
