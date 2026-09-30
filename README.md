@@ -265,8 +265,8 @@ python realrate.py          # gercek reel faiz vs vekil; merkez bankasi izi
 
 ### 5. Günlük mail (isteğe bağlı)
 
-`backend/daily_report.py`, her iş günü **06:00 UTC** (09:00 TRT) Actions'ta
-koşar: gecenin tahmini, modelin taban orana kattığı fark, bileşenler, sicil,
+`backend/daily_report.py`, her iş günü **08:00 UTC** (11:00 TRT) Actions'ta
+koşar (tetiği kullanıcının makinesindeki görev verir, cron yedektir): gecenin tahmini, modelin taban orana kattığı fark, bileşenler, sicil,
 yirmi portföyün al-ve-tut'a karşı durumu ve Kanal Finans'ın son görüşü.
 Hiçbir şey yazmaz, sadece okur.
 

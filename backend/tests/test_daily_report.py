@@ -118,7 +118,7 @@ def test_the_mail_and_the_ui_share_one_threshold():
 def test_window_is_anchored_not_relative_to_now():
     """A cron a few minutes late and a manual run at lunchtime must report the
     SAME window, or two runs on one day disagree about that day."""
-    late_cron = dt.datetime(2026, 9, 9, 9, 4, tzinfo=report.TIMEZONE)
+    late_cron = dt.datetime(2026, 9, 9, report.REPORT_HOUR_TRT, 4, tzinfo=report.TIMEZONE)
     lunchtime = dt.datetime(2026, 9, 9, 13, 30, tzinfo=report.TIMEZONE)
     assert report.window_bounds(late_cron) == report.window_bounds(lunchtime)
 

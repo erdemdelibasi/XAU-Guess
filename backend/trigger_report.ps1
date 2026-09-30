@@ -1,6 +1,8 @@
-# Starts the Daily Email Report workflow from THIS machine at 09:00 TR on
+# Starts the Daily Email Report workflow from THIS machine at 11:00 TR on
 # weekdays (Task Scheduler "XAU-Guess Report Trigger"), instead of waiting for
-# GitHub Actions' own `schedule:` event.
+# GitHub Actions' own `schedule:` event. The hour must equal
+# daily_report.REPORT_HOUR_TRT (09:00 until 2026-09-30, then 11:00 at the
+# user's request).
 #
 # Measured 2026-09-29..30: the "0 6 * * 1-5" cron, which had started 15-18
 # minutes late every weekday since the mail existed, started 6.3 hours late

@@ -1,8 +1,10 @@
 name: Daily Email Report
 
-# 06:00 UTC = 09:00 Turkey time (fixed UTC+3, no DST), seven hours after
+# 08:00 UTC = 11:00 Turkey time (fixed UTC+3, no DST), nine hours after
 # predict.py's 23:00 UTC cron -- so the night's prediction is written,
-# resolved and traded on well before the mail is built.
+# resolved and traded on well before the mail is built. It was 09:00 until
+# 2026-09-30 (moved at the user's request); daily_report.REPORT_HOUR_TRT
+# must move with it, or the mail reports a window that ended hours earlier.
 #
 # Weekdays only, because there is no weekend session to report on: the metals
 # do not trade, predict.py does not run, and a Sunday mail would repeat
@@ -10,7 +12,7 @@ name: Daily Email Report
 # prediction, which is what the portfolios are still holding.
 #
 # Since 2026-09-30 the PRIMARY trigger is not this cron but a workflow_dispatch
-# from the user's machine at 09:00 TR (backend/trigger_report.ps1, Task
+# from the user's machine at 11:00 TR (backend/trigger_report.ps1, Task
 # Scheduler "XAU-Guess Report Trigger"). The cron had started 15-18 minutes
 # late for weeks, then 6.3 hours late on 09-29 and not by 10:45 TR on 09-30;
 # every run that started succeeded. The cron stays as the fallback for a
@@ -18,7 +20,7 @@ name: Daily Email Report
 # already ran -- daily_report.py writes nothing, so two runs are two mails.
 on:
   schedule:
-    - cron: "0 6 * * 1-5"
+    - cron: "0 8 * * 1-5"
   workflow_dispatch: {}
 
 # Read-only: this job sends a mail, it writes nothing back to the repo. Unlike

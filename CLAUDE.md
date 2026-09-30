@@ -31,7 +31,8 @@ GitHub Actions (cron, sunucusuz zamanlayıcı)
                               Hacmi TradingView'den COMEX:GC1!/SI1! olarak
                               okur (tv_history.py), çünkü Yahoo o kontratların
                               hacmini sunamıyor -- ve o kontrat $/ons kote.
-  -> backend/daily_report.py  her iş günü 06:00 UTC (09:00 TRT) -- günlük
+  -> backend/daily_report.py  her iş günü 08:00 UTC (11:00 TRT; 30.09'a kadar
+                              09:00'du, REPORT_HOUR_TRT onunla aynı olmalı) -- günlük
                               özet maili; hiçbir şey yazmaz, sadece okur.
                               Bu cron 2026-09-30'dan beri YEDEK: asıl tetik
                               kullanıcının makinesinden (aşağıda), çünkü
@@ -54,7 +55,7 @@ bkz. aşağıdaki Kanal Finans notu)
                               kotasyona karşı kontrol eder (2026-09-28'den
                               beri -- bkz. aşağıdaki Kanal Finans notu)
   -> backend/trigger_report_hidden.vbs -> trigger_report.ps1
-                              hafta içi 09:00 ("XAU-Guess Report Trigger") --
+                              hafta içi 11:00 ("XAU-Guess Report Trigger") --
                               daily_report.yml'ı workflow_dispatch ile başlatır.
                               Ölçüldü: cron 29.09'da 6,3 saat geç başladı,
                               30.09'da 10:45'e kadar hiç başlamadı; öncesinde

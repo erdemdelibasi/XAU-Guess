@@ -74,10 +74,15 @@ TR_MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz",
 # same window -- otherwise two runs on one day would disagree about the same
 # day and neither would be wrong.
 #
-# 09:00 TRT is 06:00 UTC, which is seven hours after predict.py's 23:00 UTC
-# cron. The night's prediction is written, resolved and traded on well before
-# the mail is built.
-REPORT_HOUR_TRT = 9
+# 11:00 TRT is 08:00 UTC, nine hours after predict.py's 23:00 UTC cron. The
+# night's prediction is written, resolved and traded on well before the mail
+# is built. (09:00 until 2026-09-30; moved to 11:00 at the user's request.)
+#
+# Must equal the hour the mail is TRIGGERED (backend/trigger_report.ps1's task
+# and daily_report.yml's cron): a run that starts before this hour reports
+# YESTERDAY's window, and one set earlier than the trigger silently drops the
+# hours in between from every mail.
+REPORT_HOUR_TRT = 11
 
 # Resolved rows needed before this mail is willing to rank the model against
 # "always UP". One trading quarter. Mirrors frontend/app.js's
