@@ -12,7 +12,7 @@ name: Daily Email Report
 # prediction, which is what the portfolios are still holding.
 #
 # Since 2026-09-30 the PRIMARY trigger is not this cron but a workflow_dispatch
-# from the user's machine at 11:00 TR (backend/trigger_report.ps1, Task
+# from the user's machine at 11:00 TR (backend/trigger_workflow.ps1, Task
 # Scheduler "XAU-Guess Report Trigger"). The cron had started 15-18 minutes
 # late for weeks, then 6.3 hours late on 09-29 and not by 10:45 TR on 09-30;
 # every run that started succeeded. The cron stays as the fallback for a
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Only a SCHEDULED run checks, and it looks only for DISPATCHED runs.
-      # trigger_report.ps1 guards the other order (cron ran first, the machine
+      # trigger_workflow.ps1 guards the other order (cron ran first, the machine
       # woke up later) -- and it must not count a run that stood down here: a
       # stood-down run still concludes "success", and on 10-02 one from the
       # previous afternoon blocked the morning dispatch. It replays this rule.

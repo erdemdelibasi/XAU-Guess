@@ -78,7 +78,7 @@ TR_MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz",
 # night's prediction is written, resolved and traded on well before the mail
 # is built. (09:00 until 2026-09-30; moved to 11:00 at the user's request.)
 #
-# Must equal the hour the mail is TRIGGERED (backend/trigger_report.ps1's task
+# Must equal the hour the mail is TRIGGERED (backend/trigger_workflow.ps1's task
 # and daily_report.yml's cron): a run that starts before this hour reports
 # YESTERDAY's window, and one set earlier than the trigger silently drops the
 # hours in between from every mail.

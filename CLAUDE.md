@@ -11,7 +11,8 @@ Farklar sezgiyle değil ölçümle seçildi ve nedenleri aşağıda yazılı.
 ## Mimari
 
 ```
-GitHub Actions (cron, sunucusuz zamanlayıcı)
+GitHub Actions (işler burada koşar; 2026-10-05'ten beri cron'ların HEPSİ
+YEDEK, asıl tetik kullanıcının makinesinden -- aşağıdaki trigger_workflow.ps1)
   -> backend/predict.py       her iş günü 23:00 UTC (COMEX kapanışından sonra)
                               iki metal için de sırayla çalışır
   -> backend/retrain.py       her gün 01:30 UTC
@@ -54,22 +55,35 @@ bkz. aşağıdaki Kanal Finans notu)
                               SONRA her iki metalin zarar-kesini taze
                               kotasyona karşı kontrol eder (2026-09-28'den
                               beri -- bkz. aşağıdaki Kanal Finans notu)
-  -> backend/trigger_report_hidden.vbs -> trigger_report.ps1
-                              hafta içi 11:00 ("XAU-Guess Report Trigger") --
-                              daily_report.yml'ı workflow_dispatch ile başlatır.
-                              Ölçüldü: cron 29.09'da 6,3 saat geç başladı,
-                              30.09'da 10:45'e kadar hiç başlamadı; öncesinde
-                              hep 15-18 dk. İş yine GitHub'da koşar, bu makine
+  -> backend/trigger_workflow_hidden.vbs -> trigger_workflow.ps1 -Workflow X
+                              üç görev, her biri bir cron'un TR saatinde
+                              workflow_dispatch ile başlatır:
+                                "XAU-Guess Predict Trigger"  predict.yml        Sa-Ct 02:00  12 sa
+                                "XAU-Guess Retrain Trigger"  daily_retrain.yml  her gün 04:30 12 sa
+                                "XAU-Guess Report Trigger"   daily_report.yml   hafta içi 11:00 18 sa
+                              Ölçüldü: rapor cron'u 29.09'da 6,3 saat geç
+                              başladı, 30.09'da 10:45'e kadar hiç başlamadı;
+                              28.09-05.10'da predict.yml'ın 23:00Z'si
+                              01:41-01:57Z'de, daily_retrain.yml'ın 01:30Z'si
+                              06:39-07:17Z'de başladı. İş yine GitHub'da koşar
+                              (public repo dakikaları, ücretsiz), bu makine
                               yalnızca çağrıyı yapar. İki yönlü koruma aynı
-                              güne İKİ mail gitmesini önler: betik son 18
-                              saatte bir koşu varsa tetiklemez, cron koşusu
-                              da tetiklenmiş bir koşu varsa kendini atlar.
+                              slotta İKİ koşuyu önler: betik pencere içinde bir
+                              koşu varsa tetiklemez, cron koşusu da (gate
+                              adımı/işi, AYNI pencere) tetiklenmiş bir koşu
+                              varsa kendini atlar. Raporda ikinci koşu ikinci
+                              mail demek; tahmin ve eğitimde zararsız
+                              (predict.py yazdığı seansı atlar, defterler
+                              pozisyon durumuna bakar) ama boşa.
                               Kendini atlamış cron koşusu "success" biter ama
-                              mail ATMAMIŞTIR -- betik onu saymaz (02.10'da
-                              saydı: 7 saat geç başlayıp atlamış bir koşu
-                              ertesi sabahın tetiğini bloke etti).
-                              Makine kapalıysa açılınca çalışır
-                              (StartWhenAvailable); açılmazsa cron gönderir
+                              hiçbir şey YAPMAMIŞTIR -- betik onu saymaz
+                              (02.10'da saydı: 7 saat geç başlayıp atlamış bir
+                              rapor koşusu ertesi sabahın tetiğini bloke etti).
+                              Pencere cron gecikmesinden (≤~7 sa) uzun, 24 sa
+                              eksi o gecikmeden kısa olmalı; 12 bunun ortası,
+                              rapor eski 18'inde kaldı. Makine kapalıysa
+                              açılınca çalışır (StartWhenAvailable); açılmazsa
+                              cron (geç de olsa) çalışır
        |
        v
 Supabase (Postgres + otomatik REST API, RLS ile korunur)
