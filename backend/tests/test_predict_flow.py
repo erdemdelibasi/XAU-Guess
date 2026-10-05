@@ -159,13 +159,6 @@ def wired(monkeypatch):
                                                  "score": 0.30, "proba_up": 0.65})
     monkeypatch.setattr(predict.ml_model, "train_model",
                         lambda *a, **k: pytest.fail("the model guard should not have fired"))
-
-    def _capture(asset, price, tech, macro, context):
-        seen["claude_args"] = {"tech": dict(tech), "macro": dict(macro),
-                               "context": dict(context), "price": price}
-        return {"direction": "UP", "confidence": 0.0, "score": 0.0}
-
-    monkeypatch.setattr(predict.claude_module, "claude_signal", _capture)
     return seen
 
 
@@ -177,16 +170,15 @@ def _prediction_row(db):
 # Tests
 # --------------------------------------------------------------------------
 
-def test_claude_sees_raw_confidences_not_calibrated_ones(wired, monkeypatch):
-    """`tech` and `macro` are REBOUND to their calibrated selves a few lines
-    before the Claude call, so passing those names handed the prompt
-    confidences shrunk against the base rate -- "everything is neutral", which
-    is a display convention rather than information about the market.
-
-    Nothing raised and nothing looked wrong, because the first calibrator does
-    not exist until calibration.MIN_RECORDS_TO_FIT (180) rows have resolved:
-    this would have started misreporting roughly nine months after it shipped,
-    long after anyone would connect the two.
+def test_raw_confidence_columns_keep_the_pre_calibration_number(wired, monkeypatch):
+    """`tech` and `macro` are REBOUND to their calibrated selves inside
+    run_asset, and retrain.py fits each night's curve on the *_raw columns
+    only -- fitting on the calibrated column would feed the calibrator its own
+    output. Nothing raises if the wrong number lands there, and the first
+    calibrator does not exist until calibration.MIN_RECORDS_TO_FIT (180) rows
+    have resolved, so it would surface months after it shipped. (This test
+    also guarded the raw read handed to the claude prompt until that
+    component was removed on 2026-10-05.)
     """
     asset = assets.GOLD
     monkeypatch.setattr(predict.calibration, "load", lambda key: {
@@ -198,25 +190,10 @@ def test_claude_sees_raw_confidences_not_calibrated_ones(wired, monkeypatch):
     assert predict.run_asset(db, asset) == 1
     row = _prediction_row(db)
 
-    # The calibrator really did bite on this run...
+    # The calibrator really did bite on this run, and the raw column kept
+    # the number from before it bit.
     assert row["tech_confidence"] < row["tech_confidence_raw"]
     assert row["macro_confidence"] < row["macro_confidence_raw"]
-    # ...and Claude was still handed the number from before it bit.
-    sent = wired["claude_args"]
-    assert sent["tech"]["confidence"] == pytest.approx(row["tech_confidence_raw"])
-    assert sent["macro"]["confidence"] == pytest.approx(row["macro_confidence_raw"])
-
-
-def test_claude_context_carries_the_counterpart_metal(wired, monkeypatch):
-    """Silver's panel holds gold's close, not silver's. A context built from a
-    hardcoded "silver" key left the silver prompt with no counterpart price in
-    it while still quoting the gold/silver ratio -- a ratio with neither leg
-    on screen."""
-    monkeypatch.setattr(predict.calibration, "load", lambda key: {})
-    predict.run_asset(_Db(), assets.SILVER)
-    context = wired["claude_args"]["context"]
-    assert context["gold"] is not None, "silver's prompt needs gold's level"
-    assert context["gold_silver_ratio"] is not None
 
 
 def test_every_portfolio_runs_exactly_once_per_prediction(wired, monkeypatch):

@@ -14,18 +14,16 @@ have deep history.
 The `ensemble` row here is NOT the live 5-signal blend under the same name in
 `trading.STRATEGIES` / the frontend's "Harman" portfolio. It is a plain
 average of `ml_score` and `tech_score` (see compute_signal_path) -- macro and
-news are excluded from the blend (macro gets its own separate row instead)
-and `claude` cannot appear at all. The live ensemble instead pools every
+news are excluded from the blend (macro gets its own separate row instead).
+The live ensemble instead pools every
 component through `ensemble.combine()`, weighted by base-rate-relative
 likelihood, not a flat average. Read this row as "does a naive tech+ml blend
 plus the same risk rules beat buy-and-hold", not as a backtested track record
 for the portfolio the dashboard shows under the same name.
 
-Not testable: `claude`. Replaying a paid LLM call across 6000 historical days
-would cost real money for a signal research/edge.py already suggests is worth
-little, and the model would be reading dates it has memorised. It runs
-live-only, exactly as XRP-Guess's claude/news/orderbook components did, and
-this limitation is printed in the report rather than hidden.
+Not testable: `kanalfinans` (a person's video archive nobody kept). The
+`claude` component, which could not be backtested either, was removed from
+the live system on 2026-10-05; this limitation is printed in the report.
 
 Costs are swept across research/wall.py's full ladder (2 / 10 / 40 / 150 bp
 round trip) instead of assuming one number. The cheap rung answers "is there
@@ -255,7 +253,7 @@ DISPLAY_NAME = {"ensemble": "ensemble(ml+tech)"}
 def simulate(path: pd.DataFrame, fee_rate: float, asset,
              flat_fee: float = 0.0) -> dict[str, Portfolio]:
     """Replay every strategy over `path` at one cost level."""
-    books = {s: Portfolio(s) for s in trading.STRATEGIES if s != "claude"}
+    books = {s: Portfolio(s) for s in trading.STRATEGIES}
     for _, row in path.iterrows():
         price = row["close"]
         for name, book in books.items():
@@ -339,7 +337,7 @@ def flat_fee_ladder(path: pd.DataFrame, asset, years: float) -> None:
     print()
 
     spread_rate = FLAT_FEE_SPREAD_BPS / 10_000.0
-    names = [s for s in trading.STRATEGIES if s != "claude"]
+    names = list(trading.STRATEGIES)
     header = f"{'strateji':<19}" + "".join(f"{'$' + format(n, ','):>13}" for n in ACCOUNT_SIZES)
     rows: dict[str, list] = {}
     trades: dict[str, int] = {}
@@ -473,14 +471,12 @@ def main() -> int:
     print("=" * 100)
     print("KAPSAM UYARISI")
     print("=" * 100)
-    print("  `claude` ve `kanalfinans` bu backtest'te YOK. Ilki icin 6000 gunluk gecmisi")
-    print("  ucretli bir LLM cagrisiyla tekrar oynatmak hem pahali hem anlamsiz olurdu")
-    print("  (model o tarihleri zaten biliyor); ikincisi bir insanin video arsivine bagli")
-    print("  ve o arsiv tutulmuyor. Ikisi de yalnizca canli degerlendirilebilir.")
+    print("  `kanalfinans` bu backtest'te YOK: bir insanin video arsivine bagli ve o")
+    print("  arsiv tutulmuyor, yalnizca canli degerlendirilebilir.")
     print()
-    print("  Tablodaki 'ensemble(ml+tech)' satiri da canlidaki 5 bilesenli 'Harman'")
+    print("  Tablodaki 'ensemble(ml+tech)' satiri da canlidaki 4 bilesenli 'Harman'")
     print("  portfoyunun gecmis performansi DEGIL -- sadece ml_score ile tech_score'un")
-    print("  duz ortalamasi (macro/news disarida, claude zaten yok). Canli ensemble")
+    print("  duz ortalamasi (macro/news disarida). Canli ensemble")
     print("  ensemble.combine() ile taban-orana gore olabilirlik oranlariyla havuzluyor,")
     print("  duz ortalama degil. Bu satiri 'ayni risk kurallariyla naif bir ml+teknik")
     print("  karisimi al-ve-tut'u geciyor mu' sorusunun cevabi olarak oku.")

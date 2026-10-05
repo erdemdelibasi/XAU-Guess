@@ -419,9 +419,10 @@ diğerlerinin yanında, kıyas rozetiyle duruyor.
 
 ## Önemli kısıtlar
 
-- **Gerçek para/emir yok.** Metal başına **on iki** portföy (onu `trading.py`'nin
+- **Gerçek para/emir yok.** Metal başına **on bir** portföy (dokuzu `trading.py`'nin
   motoruyla, biri Kanal Finans takipçisi, biri kırılım kuralı) — toplam yirmi
-  dört, artı GLD ve SLV için dörder ETF defteri. **Otuz ikisi de sanal.**
+  iki, artı GLD ve SLV için dörder ETF defteri. **Otuzu da sanal.** (On ikincisi,
+  `claude`, 2026-10-05'te bileşeniyle birlikte kaldırıldı; satırı donmuş duruyor.)
 - **Hiçbir piyasa verisi anahtarı gerekmiyor.** Yahoo Finance chart API
   (GC=F, SI=F + 14 makro seri), Binance'in kamuya açık
   `data-api.binance.vision` uç noktası (altının hafta sonu fiyatı için
@@ -430,8 +431,10 @@ diğerlerinin yanında, kıyas rozetiyle duruyor.
   sağlıyor; gümüşün Binance'te güvenilir bir muadili yok. `get_live_price`
   bu durumda son COMEX kapanışını döndürür ve kaynağı `SI=F(stale)` diye
   **etiketler**. Dürüst bir boşluk, kaynağı eğitim verisinden farklı bir
-  sayıdan iyidir. `ANTHROPIC_API_KEY` isteğe bağlı — yoksa `claude` bileşeni
-  sürekli nötr kalır, sistem çökmez.
+  sayıdan iyidir.
+- **Hiçbir ücretli API çağrılmıyor (2026-10-05'ten beri).** `ANTHROPIC_API_KEY`
+  artık hiçbir yerde okunmuyor; `claude` bileşeni kaldırıldı (aşağıda), Kanal
+  Finans çıkarımı ise fetcher'da Claude Code CLI ile aboneliğe geçti.
 - **FRED aralıklı erişilebiliyor — canlı yol ona bağlanamaz.** 2026-09-07'de
   tekrarlanan 60 sn zaman aşımı verdi (aynı anda her Yahoo çağrısı geçerken);
   2026-09-08'de aynı makineden her seri 1,2 sn altında geldi ve arada kodda
@@ -849,7 +852,19 @@ gelirin kendisini aşar); `metrics()` orada `nan` döndürür ve onu basmak
 silinmiş bir hesabı "veri yok" diye raporlamak olur -- `BUST` sentinel'i ve
 `_beats()` bunun için var. `research/README.md` 15. bölüm.
 
-### Claude bileşeni backtest edilemez
+### Claude bileşeni: 2026-10-05'te KALDIRILDI
+
+Kullanıcının isteğiyle ("o da başarısız", ve ücretli API istemiyor) bileşen,
+"Sadece Claude" portföyü, arayüz satırı ve `claude_signal.py` gitti.
+Kaldırıldığındaki sicil her metalde **13 çözülmüş çağrının 4'ü** (UP 0/5,
+DOWN 4/8), havuzdaki etkisi altında %4,8, gümüşte %8,2. **Bu bir hüküm değil**:
+13 satır, sayfanın kendi `MIN_ROWS_FOR_VERDICT` (60) eşiğinin çok altında —
+kaldırma bir ölçüm sonucu değil, kanıtı olmayan ve para isteyen bir parçadan
+vazgeçme kararı. `predictions.claude_*` kolonları, `model_state`'teki satırlar
+ve donmuş portföy (iki metalde de ~%85 yatırımda, $150 nakit) geçmiş olarak
+duruyor; hiçbir şey onları okumuyor. Aşağısı kaldırılmadan önceki kayıttır.
+
+#### (Kayıt) Claude bileşeni backtest edilemezdi
 
 6000 günlük geçmişi ücretli bir LLM çağrısıyla tekrar oynatmak hem pahalı
 hem anlamsız (model o tarihleri zaten biliyor). Canlı-only. Bu sınır
@@ -1168,7 +1183,7 @@ davranış.
 `predictions` tablosunda `unique(symbol, target_date)` var ve `predict.py`
 pahalı hiçbir işe girmeden önce kontrol ediyor. Elle tetiklenen bir koşu
 cron'la çakışsaydı aynı seans için iki satır yazılır, bileşen sicilleri çift
-sayar ve `trading.STRATEGIES`'teki on portföyün `maybe_trade()`'i iki kez
+sayar ve `trading.STRATEGIES`'teki dokuz portföyün `maybe_trade()`'i iki kez
 ateşlenirdi.
 
 ---
@@ -1272,6 +1287,12 @@ komşusunun yanına koyunca tan ile kırmızı bitişik oldu ve çift normal-gö
 tabanını geçemedi (ΔE 13,7 < 15); sona eklenince 19,3.
 `test_export_backtest.py` bu iki değişmezi de kilitliyor.
 
+**2026-10-05: `claude` gitti, 9. slot (turkuaz) BOŞ bırakıldı.** Rengi başka bir
+deftere vermek o defterin kimliğini yeniden boyamak olurdu. Kalan iki canlı-only
+defterin sırası palette.js ile seçildi: `breakout` önce, `kanalfinans` sonra —
+bitişik en kötü normal-görüş ayrımı 31,8 (miners/breakout); ters sırada 25,0'a
+düşüyordu. Diğer üç ölçü (2,1 / 12,6 / 3,78:1) değişmedi.
+
 ---
 
 ### Düzen: üç bant, ve hangi kartın nerede durduğu ölçümden geliyor
@@ -1332,7 +1353,8 @@ koşabileceğine karar vermek için zaten kullandığı sabitin aynısı:
   fiyatın kendi uzun ortalamasına tepki veriyorlar — ve `research/instrument.py`
   alınabilir enstrümanda al-ve-tut'u geçenlerin biri hariç hepsinin bu kümede
   olduğunu ölçtü.
-- Diğer altısı, `research/edge.py`'nin her ufukta "hep uzun"a yenildiğini
+- Diğer beşi (2026-10-05'e kadar altı, `claude` dahil), `research/edge.py`'nin
+  her ufukta "hep uzun"a yenildiğini
   ölçtüğü, `research/tilt.py`'nin ise tam olarak sıfır değerinde bulduğu bir yön
   çağrısına göre pozisyon alıyor.
 
@@ -1374,7 +1396,9 @@ iki sessiz arızayı da kilitliyor: sinyal ızgarasında kalan bir `follower`
 İki ızgara iki farklı şekil istiyor ve ikisi de ölçüldü. 1280px'te, ana kolonda:
 ölçülmüş dörtlü **2×2** oturuyor (panel 321px; üç sütun tek başına bir yetim
 satır bırakıyordu), sinyal altılısı ise daha dar tabanla (196px) **3×2**
-oturuyor (panel 210px). Takipçi defteri buradan çıkınca — yedi paneldi ve
+oturuyordu (panel 210px). `claude` 2026-10-05'te çıkınca grup beşe indi ve
+3+2 oturuyor — tek başına bir yetim değil, ama artık tam iki satır da değil;
+ölçülmedi, bir kart taşınacaksa önce ölç. Takipçi defteri buradan çıkınca — yedi paneldi ve
 üçüncü satırda **tek başına** kalıyordu — grup tam iki satıra denk geldi;
 yetim satırın kaybolması taşınmanın amacı değildi, ölçülen yan faydasıydı.
 Kanal Finans kartındaki tek kutu yan kolonun tamamını alıyor (412px).
@@ -1582,8 +1606,8 @@ duyan satırlarda susturur.
 
 ### Alınabilir enstrüman: ayrı defterler, ayrı kayıt, ayrı iddia
 
-`predict.py`'nin ürettiği yirmi iki portföyün hepsi (artı `track_breakout.py`'nin
-ikisi) **COMEX vadeli** fiyatıyla
+`predict.py`'nin ürettiği yirmi portföyün hepsi (artı `kanal_finans.py`'nin ve
+`track_breakout.py`'nin ikişer defteri) **COMEX vadeli** fiyatıyla
 değerleniyor ve perakende bir hesap vadeli kontrat tutamaz. 16. ve 17. bölümler
 bunun kozmetik bir fark olmadığını ölçtü. `backend/track_etf.py` bu yüzden var:
 aynı kuralları **GLD ve SLV** üzerinde, işlem başına **$1,50 sabit komisyonla**
@@ -1608,10 +1632,9 @@ birden yanlış söylerdi — `daily_report.ETF_CLAIM` ve frontend'in
 `TRACKED_ETFS`'i bu yüzden enstrüman başına ayrı bir dize taşıyor.
 
 **`assets.TRACKED`, `assets.ASSETS`'ten AYRI bir sözlüktür ve öyle kalmalı.**
-`ASSETS` `predict.py`'nin döndüğü şeydir: ML modeli, kalibratör, Claude çağrısı,
-ensemble, bir `predictions` satırı. Bunların hiçbiri burada geçerli değil ve
-GLD'yi oraya koymak günlük bir LLM çağrısı ile üçüncü bir model dosyası satın
-alıp karşılığında hiçbir şey vermezdi. `GLD.model_filename` bilerek **boş**,
+`ASSETS` `predict.py`'nin döndüğü şeydir: ML modeli, kalibratör, ensemble, bir
+`predictions` satırı. Bunların hiçbiri burada geçerli değil ve GLD'yi oraya
+koymak üçüncü bir model dosyası satın alıp karşılığında hiçbir şey vermezdi. `GLD.model_filename` bilerek **boş**,
 `leading_drivers` bilerek **boş tuple** — ikincisi önemli, çünkü altınınkileri
 yazmak GLD üzerinde yapılmamış bir `drivers.py` ölçümünü ima ederdi.
 

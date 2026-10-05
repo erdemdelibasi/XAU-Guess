@@ -100,7 +100,9 @@ GitHub Actions (cron)
 | `ml` | Gradient boosting, 27 (altın) / 25 (gümüş) özellik, 5 günlük etiket | evet |
 | `macro` | TIP / IEF / VIX — ölçülmüş öncü sürücüler | evet |
 | `news` | Google News RSS, metal başına ayrı sorgu ve sözlük | hayır (arşiv yok) |
-| `claude` | Claude'un bağımsız yargısı (metal başına günde 1 çağrı) | hayır |
+
+Beşinci bileşen `claude` (günlük bir dil modeli yargısı) 2026-10-05'te
+kaldırıldı: 13 çözülmüş çağrıda 4 isabet ve ücretli API gerektiren tek parçaydı.
 
 Bileşenler **log-odds uzayında**, beyan ettikleri güvene göre değil
 **ölçülmüş sicillerine** göre havuzlanır. O metalin taban oranından (altın
@@ -122,7 +124,7 @@ tutturur — ve tek yönlü davranan bir bileşen tabloda açıkça işaretlenir
 | `trend` | 200 günlük ortalamanın altında pozisyonu kıs |
 | `defensive` | İkisi birlikte |
 | `ensemble` | Tüm sinyaller + risk kuralları |
-| `technical` / `ml` / `macro` / `claude` | Tek sinyal, tek portföy |
+| `technical` / `ml` / `macro` | Tek sinyal, tek portföy |
 | `kanalfinans` | Tunç Şatıroğlu ne derse o. Tam giriş/çıkış, zarar-kes takipli |
 
 Listede **`breakout` yoktur** ve bunun sebebi ölçüm değil yapıdır: kırılım
@@ -229,7 +231,6 @@ Repo → Settings → Secrets and variables → Actions:
 |---|---|
 | `SUPABASE_URL` | evet |
 | `SUPABASE_SERVICE_KEY` | evet (`service_role`) |
-| `ANTHROPIC_API_KEY` | hayır — yoksa `claude` bileşeni nötr kalır |
 
 ### 3. Frontend
 
@@ -317,7 +318,7 @@ fişten çekiliyken görev hiç çalışmaz. `ExecutionTimeLimit` (a) için 20 d
   yıllık %11,8). Al-ve-tut'un bu kadar güçlü görünmesinin bir kısmı budur ve
   gelecek için garanti değildir. Savunma kurallarının bedeli boğada ödenir,
   karşılığı ayıda alınır.
-- **`claude`, `news` ve `kanalfinans` backtest edilemez** — geçmiş arşivleri
+- **`news` ve `kanalfinans` backtest edilemez** — geçmiş arşivleri
   yok. Değerleri ancak birkaç aylık canlı veriyle yargılanabilir.
 - **Gümüşün hafta sonu fiyatı yok.** Altın için PAXG bir 24/7 vekil sağlıyor;
   gümüşün güvenilir muadili yok, o yüzden hafta sonu son COMEX kapanışı

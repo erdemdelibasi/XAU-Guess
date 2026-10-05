@@ -93,11 +93,11 @@ MIN_ROWS_FOR_VERDICT = 60
 VERDICT_MIN_GAP = 0.02
 
 COMPONENT_LABELS = {"technical": "Teknik", "ml": "ML modeli", "macro": "Makro",
-                    "news": "Haber", "claude": "Claude"}
+                    "news": "Haber"}
 STRATEGY_LABELS = {
     "buyhold": "Al-ve-tut", "voltarget": "Oynaklık hedefi", "trend": "Trend filtresi",
     "defensive": "Savunma", "ensemble": "Harman", "technical": "Sadece teknik",
-    "ml": "Sadece ML", "macro": "Sadece makro", "claude": "Sadece Claude",
+    "ml": "Sadece ML", "macro": "Sadece makro",
     "miners": "Madenciler", "kanalfinans": "Kanal Finans TŞ",
     "breakout": "Kırılım kuralı",
 }

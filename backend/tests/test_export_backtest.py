@@ -107,14 +107,13 @@ def test_every_drawable_strategy_is_listed_in_the_legend_order():
     never a chip, so it can never be turned on -- and the adjacency the
     colorblind check scored would no longer be the adjacency on screen.
 
-    LIVE_SERIES is the superset. Three books exist only on the live chart:
-    `claude` cannot be backtested at all (replaying 6,000 days through a paid
-    LLM is both expensive and meaningless -- it knows those dates),
+    LIVE_SERIES is the superset. Two books exist only on the live chart:
     `kanalfinans` depends on a video archive nobody kept, and `breakout` runs
     a discrete engine of its own rather than an exposure the backtest sweeps.
+    (`claude` was a third until it was retired on 2026-10-05.)
     """
     colours = set(re.findall(r"^\s{2,4}(\w+):\s*\"#", read(CHART_JS), re.M))
-    live = set(_series_list("BACKTEST_SERIES")) | {"claude", "kanalfinans", "breakout"}
+    live = set(_series_list("BACKTEST_SERIES")) | {"kanalfinans", "breakout"}
     assert colours == live, f"colours {colours ^ live} are in one list and not the other"
 
 
@@ -124,16 +123,19 @@ def test_live_legend_extends_the_measured_one_rather_than_reordering_it():
     Colour follows the entity, so "blue is voltarget" has to hold in BOTH
     charts -- a reader who learns the mapping on one and finds it repainted on
     the other has learned nothing. Appending is also what keeps the validated
-    adjacency intact: slotting `claude` in beside its neighbour in STRATEGIES
-    put the tan next to the red and that pair failed the palette's
-    normal-vision floor.
+    adjacency intact: slotting a live-only book in beside its neighbour in
+    STRATEGIES once put the tan next to the red and that pair failed the
+    palette's normal-vision floor. The two live-only books follow in the
+    order palette.js scored best when `claude` left (2026-10-05): breakout
+    first keeps the worst adjacent normal-vision gap at 31.8 (miners/
+    breakout), against 25.0 for miners/kanalfinans the other way round.
     """
     measured = _series_list("BACKTEST_SERIES")
     live_src = re.search(r"const LIVE_SERIES = (.*?);", read(APP_JS), re.S)
     assert live_src, "LIVE_SERIES not found"
     assert "...BACKTEST_SERIES" in live_src.group(1),         "LIVE_SERIES must spread BACKTEST_SERIES, not restate it"
     appended = re.findall(r'"(\w+)"', live_src.group(1))
-    assert appended == ["claude", "kanalfinans", "breakout"], appended
+    assert appended == ["breakout", "kanalfinans"], appended
     assert measured[:1] == ["voltarget"]
 
 
@@ -144,8 +146,8 @@ def test_short_labels_exist_for_every_drawn_series():
     assert shorts
     named = set(re.findall(r"(\w+):", shorts.group(1)))
     # LIVE_SERIES, not BACKTEST_SERIES: the live books' chart draws three more.
-    drawn = set(_series_list("BACKTEST_SERIES")) | {"claude", "kanalfinans",
-                                                    "breakout", "buyhold"}
+    drawn = set(_series_list("BACKTEST_SERIES")) | {"kanalfinans", "breakout",
+                                                    "buyhold"}
     assert drawn <= named, f"no short label for {drawn - named}"
 
 
@@ -161,16 +163,15 @@ def test_benchmark_is_present_for_every_asset(payload):
 
 
 def test_untestable_strategies_are_excluded_and_say_so(payload):
-    """`claude` and `kanalfinans` cannot be backtested at all.
+    """`kanalfinans` cannot be backtested at all.
 
-    They must be absent AND named in `excluded`: a card that quietly drops two
-    of the eleven portfolios shown further up the page, with no note, reads as
-    a complete scoreboard.
+    It must be absent AND named in `excluded`: a card that quietly drops one
+    of the portfolios shown further up the page, with no note, reads as a
+    complete scoreboard.
     """
     for key, asset in payload["assets"].items():
-        assert "claude" not in asset["strategies"]
         assert "kanalfinans" not in asset["strategies"]
-    assert {"claude", "kanalfinans"} <= set(payload["excluded"])
+    assert "kanalfinans" in payload["excluded"]
 
     exported = set(next(iter(payload["assets"].values()))["strategies"])
     missing = set(trading.STRATEGIES) - exported - set(payload["excluded"])

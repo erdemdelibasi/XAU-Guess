@@ -1,9 +1,10 @@
 """Entry point, run once per trading day by GitHub Actions.
 
 For EACH metal (gold and silver) it makes one call on where that metal closes
-HORIZON_DAYS ahead, blending five components -- a rule-based technical read,
-an ML classifier, a macro-driver signal, headline sentiment, and Claude's own
-judgment -- then feeds the result into that metal's paper portfolios.
+HORIZON_DAYS ahead, blending four components -- a rule-based technical read,
+an ML classifier, a macro-driver signal and headline sentiment -- then feeds
+the result into that metal's paper portfolios. (A fifth, a daily Claude
+judgment, was removed on 2026-10-05; see ensemble.py.)
 
 WHY DAILY, AND WHY FIVE DAYS
 ----------------------------
@@ -36,8 +37,7 @@ the model file. A loop that shared any of those would produce silver numbers
 that look perfectly fine and are quietly gold's.
 
 No API keys are needed for market data -- Yahoo Finance and Binance's public
-endpoints only. ANTHROPIC_API_KEY is optional; without it the `claude`
-component stays neutral and everything else runs unchanged.
+endpoints only. No LLM is called any more, so no ANTHROPIC_API_KEY either.
 """
 from __future__ import annotations
 
@@ -58,7 +58,6 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import assets as assets_module  # noqa: E402
 import calibration  # noqa: E402
-import claude_signal as claude_module  # noqa: E402
 import ensemble  # noqa: E402
 import fetch_data  # noqa: E402
 import kanal_finans_trading  # noqa: E402
@@ -403,32 +402,14 @@ def run_asset(db, asset) -> int:
     # this had to be fixed before the first fit rather than after.
     raw_confidence = {"technical": tech["confidence"], "ml": ml["confidence"],
                       "macro": macro["confidence"]}
-    # Kept as whole signals, not just their confidences, because the Claude
-    # prompt below needs the PRE-calibration read and `tech`/`macro` are about
-    # to be rebound to the calibrated ones.
-    tech_raw, macro_raw = dict(tech), dict(macro)
     tech = calibration.apply(calibrators.get("technical"), tech, asset.base_rate_up)
     ml = calibration.apply(calibrators.get("ml"), ml, asset.base_rate_up)
     macro = calibration.apply(calibrators.get("macro"), macro, asset.base_rate_up)
 
     news = safe_signal(news_module.news_signal, asset, label="news")
-    context = macro_module.describe_context(features)
-    # Claude sees the pre-calibration technical/macro reads: calibrated
-    # confidences are shrunk against the base rate and would read to a model
-    # as "everything is neutral", which is a display convention rather than
-    # information about the market.
-    #
-    # It must be `tech_raw`/`macro_raw` and not `tech`/`macro`: those two names
-    # were rebound to the calibrated signals three lines up, so passing them
-    # here said the opposite of what this comment claims. Silent, too -- the
-    # prompt still rendered, just with every confidence pushed toward zero, and
-    # the first calibrator does not exist for another 180 resolved rows, so
-    # nothing would have looked wrong until long after it started mattering.
-    claude = safe_signal(claude_module.claude_signal, asset, current_price,
-                         tech_raw, macro_raw, context, label="claude")
 
     weights, records = get_component_records(db, asset.key)
-    signals = {"technical": tech, "ml": ml, "macro": macro, "news": news, "claude": claude}
+    signals = {"technical": tech, "ml": ml, "macro": macro, "news": news}
     final = ensemble.combine(signals, weights, records, asset.base_rate_up)
 
     # ---- sizing inputs ----------------------------------------------------
@@ -491,8 +472,6 @@ def run_asset(db, asset) -> int:
         row[f"weight_{component}"] = weights.get(component)
         if component in raw_confidence:
             row[f"{prefix}_confidence_raw"] = raw_confidence[component]
-    if claude.get("reasoning"):
-        row["claude_reasoning"] = claude["reasoning"]
 
     target_exposure = trading.compute_target_exposure(
         "ensemble", current_price, trend_average, volatility,
@@ -522,8 +501,7 @@ def run_asset(db, asset) -> int:
     # miners_signal.py). It is therefore absent from `signals` above and
     # appears only here, where a portfolio needs a direction and a confidence.
     miners = miners_signal.miners_signal(features)
-    strategy_signal = {"technical": tech, "ml": ml, "macro": macro, "claude": claude,
-                       "miners": miners}
+    strategy_signal = {"technical": tech, "ml": ml, "macro": macro, "miners": miners}
     for name in trading.STRATEGIES:
         signal = final if name == "ensemble" else strategy_signal.get(
             name, {"direction": "UP", "confidence": 0.0})

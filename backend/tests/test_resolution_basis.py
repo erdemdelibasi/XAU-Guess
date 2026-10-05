@@ -75,7 +75,6 @@ def _row(**kw):
         "ml_direction": "DOWN", "ml_confidence": 0.3,
         "macro_direction": "UP", "macro_confidence": 0.0,
         "news_direction": None, "news_confidence": None,
-        "claude_direction": None, "claude_confidence": None,
     }
     base.update(kw)
     return base

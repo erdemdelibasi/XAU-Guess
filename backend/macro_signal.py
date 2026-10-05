@@ -119,7 +119,8 @@ def macro_signal(features: pd.DataFrame, drivers: tuple[str, ...] = ("tip", "ief
 
 
 def describe_context(features: pd.DataFrame) -> dict:
-    """Human-readable macro state, for the UI and for claude_signal's prompt.
+    """Human-readable macro state (written for the retired claude prompt;
+    kept because test_indicators locks its counterpart-metal behaviour).
 
     Deliberately separate from the signal: these are levels a person wants to
     see (where is the dollar, where are real yields) and they are NOT what the

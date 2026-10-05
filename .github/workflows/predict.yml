@@ -38,9 +38,6 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          # Optional. Without it the `claude` component stays neutral and
-          # everything else runs unchanged -- see claude_signal.py.
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python predict.py
 
       # The ETF trackers (assets.TRACKED), in the same job rather than a

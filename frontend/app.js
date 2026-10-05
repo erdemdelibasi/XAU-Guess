@@ -35,7 +35,6 @@ const COMPONENTS = [
   { key: "ml", label: "ML modeli", weight: "weight_ml" },
   { key: "macro", label: "Makro sürücüler", weight: "weight_macro" },
   { key: "news", label: "Haber tonu", weight: "weight_news" },
-  { key: "claude", label: "Claude", weight: "weight_claude" },
 ];
 
 // Order matters: buyhold renders first as the benchmark everything else is
@@ -54,7 +53,6 @@ const STRATEGIES = [
   { key: "technical", label: "Sadece teknik", desc: "Yalnızca kural tabanlı teknik sinyal." },
   { key: "ml", label: "Sadece ML", desc: "Yalnızca gradient boosting modeli." },
   { key: "macro", label: "Sadece makro", desc: "Yalnızca ölçülmüş öncü sürücüler." },
-  { key: "claude", label: "Sadece Claude", desc: "Yalnızca Claude'un bağımsız yargısı." },
   { key: "miners", label: "Madenciler", desc:
     "GDX (altın madencileri ETF'i) bugün yükseldiyse yarın pozisyonu artırır. " +
     "Tek günlük ufuk. Kazancı VADELİ kontrat üzerinde ölçüldü ve büyük ölçüde " +
@@ -83,7 +81,7 @@ const BACKTEST_SERIES = ["voltarget", "trend", "defensive", "ensemble",
 const BACKTEST_SHORT = {
   buyhold: "Al-ve-tut", voltarget: "Oynaklık", trend: "Trend", defensive: "Savunma",
   ensemble: "Harman", technical: "Teknik", ml: "ML", macro: "Makro", miners: "Madenci",
-  claude: "Claude", kanalfinans: "Kanal F.", breakout: "Kırılım",
+  kanalfinans: "Kanal F.", breakout: "Kırılım",
 };
 
 const STARTING_CASH = 1000;
@@ -849,8 +847,6 @@ function renderComponents(row, asset) {
     note.hidden = true;
   }
 
-  const reasoning = document.getElementById("claude-reasoning");
-  reasoning.textContent = row.claude_reasoning ? `Claude: "${row.claude_reasoning}"` : "";
 }
 
 /* Each component's measured track record, per asset (`model_state`).
@@ -1164,13 +1160,14 @@ function nextActionFor(state, price, exposure, value) {
 
 // Legend order for the live chart. The first eight are BACKTEST_SERIES, in
 // the same order and the same colours, so "blue is voltarget" survives
-// between the two charts. `claude` and `kanalfinans` only exist here -- the
-// first cannot be backtested at all, the second follows a person rather than
-// a rule -- and they are APPENDED rather than slotted in beside their
-// neighbours in STRATEGIES: with `claude` sitting between macro and miners,
-// the tan and the red became adjacent and that pair failed the palette's
-// normal-vision floor. See chart.js.
-const LIVE_SERIES = [...BACKTEST_SERIES, "claude", "kanalfinans", "breakout"];
+// between the two charts. `breakout` and `kanalfinans` only exist here --
+// one runs a discrete engine, the other follows a person rather than a rule
+// -- and they are APPENDED rather than slotted in beside their neighbours in
+// STRATEGIES, so the validated adjacency of the first eight never moves.
+// Their order is palette.js's, re-run when `claude` (slot 9) left on
+// 2026-10-05: breakout first keeps the worst adjacent normal-vision gap at
+// 31.8 (miners/breakout); the other way round it fell to 25.0. See chart.js.
+const LIVE_SERIES = [...BACKTEST_SERIES, "breakout", "kanalfinans"];
 
 let liveSelection = new Set(["voltarget", "ensemble"]);
 

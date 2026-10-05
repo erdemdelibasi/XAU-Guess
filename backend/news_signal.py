@@ -148,9 +148,8 @@ def _fetch_headlines(query: str) -> list[dict]:
 def recent_headlines(asset_key: str = "gold") -> list[dict]:
     """Raw headlines from the last LOOKBACK_HOURS for this metal.
 
-    Shared with claude_signal.py, which wants the actual text to reason over
-    rather than this module's keyword tally. Empty list on any failure --
-    same fail-soft contract as news_signal() itself.
+    Empty list on any failure -- same fail-soft contract as news_signal()
+    itself.
     """
     try:
         items = _fetch_headlines(QUERIES.get(asset_key, QUERIES["gold"]))

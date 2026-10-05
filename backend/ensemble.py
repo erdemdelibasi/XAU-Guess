@@ -49,13 +49,19 @@ import math
 
 import assets
 
-COMPONENTS = ["technical", "ml", "macro", "news", "claude"]
-DEFAULT_WEIGHTS = {"technical": 0.25, "ml": 0.25, "macro": 0.25, "news": 0.10, "claude": 0.15}
+# `claude` (a daily LLM judgment) was the fifth until 2026-10-05, removed at
+# the user's request: 4 of 13 resolved calls right on each metal (UP 0/5,
+# DOWN 4/8) -- far below the 60-row verdict floor, so not a proven failure,
+# but nothing good either, and it was the only part of the nightly run that
+# needed a paid API. Its predictions columns and model_state rows stay.
+COMPONENTS = ["technical", "ml", "macro", "news"]
+# Cold-start/display only; the old 0.15 claude share spread back
+# proportionally so the set still sums to 1.0.
+DEFAULT_WEIGHTS = {"technical": 0.294, "ml": 0.294, "macro": 0.294, "news": 0.118}
 
 # predictions-table column prefix per component. "technical" is shortened to
 # "tech" there to keep column names compact.
-COLUMN_PREFIX = {"technical": "tech", "ml": "ml", "macro": "macro",
-                 "news": "news", "claude": "claude"}
+COLUMN_PREFIX = {"technical": "tech", "ml": "ml", "macro": "macro", "news": "news"}
 
 # P(the metal closes higher over HORIZON_DAYS): the prior the pool starts
 # from and the reference every component's evidence is measured against.

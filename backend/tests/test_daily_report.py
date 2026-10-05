@@ -134,7 +134,7 @@ def test_a_run_before_the_anchor_reports_the_previous_day():
 # --------------------------------------------------------------------------
 
 def test_every_portfolio_that_exists_is_reported():
-    """Twelve books per metal. A strategy added to trading.STRATEGIES but not
+    """Eleven books per metal. A strategy added to trading.STRATEGIES but not
     to the mail would silently stop being watched -- and the two books that
     are NOT in that tuple, because they run discrete engines of their own
     rather than a target exposure, have to be carried explicitly."""

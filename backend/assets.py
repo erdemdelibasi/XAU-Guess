@@ -182,9 +182,8 @@ DEFAULT = GOLD
 # ---------------------------------------------------------------------------
 # Deliberately a SEPARATE registry from ASSETS, not a third entry in it.
 # ASSETS is what predict.py iterates: full prediction pipeline, ML model,
-# calibrator, Claude call, ensemble, a `predictions` row. None of that applies
-# here and pretending otherwise would buy a daily LLM call and a third model
-# file in exchange for nothing.
+# calibrator, ensemble, a `predictions` row. None of that applies here and
+# pretending otherwise would buy a third model file in exchange for nothing.
 #
 # WHY ONLY MECHANICAL STRATEGIES RUN ON THESE
 # --------------------------------------------
@@ -192,7 +191,7 @@ DEFAULT = GOLD
 # a common window with a flat commission. Of everything that beat buy-and-hold
 # on the ETF at a $10,000 account, all but one (`ensemble`) is in
 # trading.MECHANICAL -- and every MECHANICAL strategy needs price history and
-# nothing else: no model, no macro panel, no Claude. The measured answer and
+# nothing else: no model, no macro panel. The measured answer and
 # the cheap implementation happen to be the same set, which is the only reason
 # this is a small file rather than a third pipeline.
 #

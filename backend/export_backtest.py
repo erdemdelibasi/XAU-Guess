@@ -41,10 +41,10 @@ answered a third question -- some other rung -- while sitting on a page whose
 paper books run at this one would be comparing two different worlds under one
 axis.
 
-`claude` is absent because it cannot be backtested at all (see backtest.py),
-and `kanalfinans` because it is driven by a video archive nobody kept. The
-frontend states both rather than showing nine curves under a caption that
-says ten.
+`kanalfinans` is absent because it is driven by a video archive nobody kept,
+and the frontend says so rather than showing fewer curves under a caption
+that implies more. (`claude` was excluded the same way until it left the
+live system on 2026-10-05.)
 
 Equity is sampled WEEKLY, not daily. At 4900 sessions a daily curve is ~5x
 the bytes for a line that is 1100px wide -- more points than pixels. The last
@@ -164,8 +164,6 @@ def main() -> int:
         # generation time would answer a different one and look fresher.
         "assets": {},
         "excluded": {
-            "claude": "Geçmişi ücretli bir LLM çağrısıyla tekrar oynatmak hem pahalı "
-                      "hem anlamsız olurdu (model o tarihleri zaten biliyor).",
             "kanalfinans": "Bir insanın video arşivine bağlı ve o arşiv tutulmuyor.",
         },
     }

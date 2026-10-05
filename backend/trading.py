@@ -133,8 +133,10 @@ REBALANCE_THRESHOLD = 0.05
 #
 # "buyhold" is the benchmark and MUST stay in this list -- see the module
 # docstring for why it is a real portfolio rather than a line in a report.
+# `claude` ran here until 2026-10-05 and was retired with its component (see
+# ensemble.py); its row stays in `portfolios`, frozen, and nothing reads it.
 STRATEGIES = ("buyhold", "voltarget", "trend", "defensive", "ensemble",
-              "technical", "ml", "macro", "claude", "miners")
+              "technical", "ml", "macro", "miners")
 
 # Which strategies ignore the direction signal entirely (they are mechanical
 # risk rules, not forecasts). Keeping this explicit stops a future edit from

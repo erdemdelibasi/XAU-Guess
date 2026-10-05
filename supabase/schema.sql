@@ -66,6 +66,8 @@ create table if not exists predictions (
     macro_direction         text, macro_confidence  numeric, macro_pct_change  numeric, macro_price  numeric, macro_correct  boolean,
 
     news_direction          text, news_confidence   numeric, news_pct_change   numeric, news_price   numeric, news_correct   boolean,
+    -- claude_* / weight_claude: the LLM component, retired 2026-10-05 (see
+    -- backend/ensemble.py). Kept for the rows already written.
     claude_direction        text, claude_confidence numeric, claude_pct_change numeric, claude_price numeric, claude_correct boolean,
     claude_reasoning        text,
 
@@ -153,7 +155,8 @@ select a.asset, s.strategy
 from (values ('gold'), ('silver')) as a(asset)
 cross join (values
     ('buyhold'), ('voltarget'), ('trend'), ('defensive'), ('ensemble'),
-    ('technical'), ('ml'), ('macro'), ('claude'), ('kanalfinans'), ('miners'),
+    ('technical'), ('ml'), ('macro'), ('kanalfinans'), ('miners'),
+    -- ('claude') ran until 2026-10-05; its frozen rows stay in live databases.
     -- `breakout` is NOT in trading.STRATEGIES and must not be added there:
     -- it is all-in/all-out on a discrete state, like `kanalfinans`, not a
     -- scaled target exposure. It is seeded here because it is a real book
@@ -234,7 +237,7 @@ insert into model_state (asset, component, weight)
 select a.asset, c.component, c.weight
 from (values ('gold'), ('silver')) as a(asset)
 cross join (values
-    ('technical', 0.25), ('ml', 0.25), ('macro', 0.25), ('news', 0.10), ('claude', 0.15)
+    ('technical', 0.294), ('ml', 0.294), ('macro', 0.294), ('news', 0.118)
 ) as c(component, weight)
 on conflict (asset, component) do nothing;
 

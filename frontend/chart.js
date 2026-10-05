@@ -64,14 +64,13 @@ const SERIES_COLOURS = {
   ml:        "#008300",   // slot 6  green
   macro:     "#9085e9",   // slot 7  violet
   miners:    "#e66767",   // slot 8  red
-  // Slots 9-10 exist only for the LIVE books chart: `claude` cannot be
-  // backtested at all and `kanalfinans` follows a person rather than a rule,
-  // so neither appears in the measured chart. The ten were re-validated as a
-  // set in the legend order the chips actually use -- and that order is why
-  // `miners` stays at slot 8: with `claude` between macro and miners, the
-  // tan sat next to the red and the pair failed the normal-vision floor
-  // (dE 13.7 against a 15 minimum). Moving it two places fixed it at 19.3.
-  claude:      "#1f9aa8",   // slot 9   teal
+  // Slot 9 (teal #1f9aa8) was `claude`, retired 2026-10-05; it is left
+  // empty rather than handed to another book, because colour follows the
+  // entity. Slot 10 exists only for the LIVE books chart: `kanalfinans`
+  // follows a person rather than a rule, so it is not in the measured chart.
+  // Legend order after slot 9 left is breakout, kanalfinans (app.js
+  // LIVE_SERIES), scored with palette.js: adjacent normal 31.8, colour-blind
+  // 2.1, closest pair 12.6, contrast 3.78:1 -- only the first moved (34.9).
   kanalfinans: "#a86a2a",   // slot 10  tan
   // Slot 11, added 2026-09-16 with the `breakout` paper book. Chosen by
   // re-running the validator over a gamut sweep, not by eye, and appended
