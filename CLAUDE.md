@@ -64,6 +64,10 @@ bkz. aşağıdaki Kanal Finans notu)
                               güne İKİ mail gitmesini önler: betik son 18
                               saatte bir koşu varsa tetiklemez, cron koşusu
                               da tetiklenmiş bir koşu varsa kendini atlar.
+                              Kendini atlamış cron koşusu "success" biter ama
+                              mail ATMAMIŞTIR -- betik onu saymaz (02.10'da
+                              saydı: 7 saat geç başlayıp atlamış bir koşu
+                              ertesi sabahın tetiğini bloke etti).
                               Makine kapalıysa açılınca çalışır
                               (StartWhenAvailable); açılmazsa cron gönderir
        |

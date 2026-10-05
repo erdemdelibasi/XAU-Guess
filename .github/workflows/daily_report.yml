@@ -34,11 +34,13 @@ jobs:
   report:
     runs-on: ubuntu-latest
     steps:
-      # Only a SCHEDULED run checks, and it looks only for DISPATCHED runs: a
-      # dispatch is never skipped, so a skipped cron run can never make the
-      # next day's mail skip too. trigger_report.ps1 guards the other order
-      # (cron ran first, the machine woke up later). 18 hours, not the UTC
-      # date: a cron run delayed past midnight would count for the wrong day.
+      # Only a SCHEDULED run checks, and it looks only for DISPATCHED runs.
+      # trigger_report.ps1 guards the other order (cron ran first, the machine
+      # woke up later) -- and it must not count a run that stood down here: a
+      # stood-down run still concludes "success", and on 10-02 one from the
+      # previous afternoon blocked the morning dispatch. It replays this rule.
+      # 18 hours, not the UTC date: a cron run delayed past midnight would
+      # count for the wrong day.
       - name: Stand down if this morning's mail was already dispatched
         id: gate
         if: github.event_name == 'schedule'

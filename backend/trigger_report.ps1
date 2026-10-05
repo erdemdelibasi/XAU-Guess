@@ -50,7 +50,7 @@ $gh = "C:\Program Files\GitHub CLI\gh.exe"
 $previousOutputEncoding = [Console]::OutputEncoding
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 try {
-    $raw = & $gh run list --repo $repo --workflow $workflow --limit 10 --json "createdAt,event,status,conclusion" 2>&1
+    $raw = & $gh run list --repo $repo --workflow $workflow --limit 20 --json "createdAt,startedAt,event,status,conclusion" 2>&1
     if ($LASTEXITCODE -ne 0) {
         Log "gh run list failed (exit=$LASTEXITCODE): $raw -- not dispatching, the cron fallback stays"
         exit 1
@@ -58,9 +58,30 @@ try {
     $cutoff = (Get-Date).ToUniversalTime().AddHours(-$windowHours)
     # Parsed here rather than with --jq: Windows PowerShell 5.1 strips the
     # double quotes a jq string literal needs on its way to a native program.
-    $recent = @(($raw | Out-String | ConvertFrom-Json) | Where-Object {
+    # Two steps on purpose: 5.1's ConvertFrom-Json writes a JSON array as ONE
+    # object, so @(... | ConvertFrom-Json) is an array holding the array.
+    $parsed = $raw | Out-String | ConvertFrom-Json
+    $runs = @($parsed | Where-Object { $_ })
+    # A scheduled run that found a dispatch in ITS OWN 18-hour window stood
+    # down and mailed nothing, yet still concludes "success". Counting it here
+    # cost a morning: on 10-01 the cron started 7 hours late (14:54Z) and stood
+    # down behind the 08:00Z dispatch; at 11:00 on 10-02 this guard saw it
+    # 17.1 hours back, skipped, and the mail went out with the 14:16Z cron
+    # instead. Same rule as daily_report.yml's gate step, applied at the time
+    # that step ran (startedAt).
+    $dispatched = @($runs | Where-Object {
+        $_.event -eq "workflow_dispatch" -and $_.conclusion -notin @("failure", "cancelled")
+    } | ForEach-Object { ([datetime]$_.createdAt).ToUniversalTime() })
+    function StoodDown($run) {
+        if ($run.event -ne "schedule") { return $false }
+        $at = if ($run.startedAt) { $run.startedAt } else { $run.createdAt }
+        $t = ([datetime]$at).ToUniversalTime()
+        return @($dispatched | Where-Object { $_ -le $t -and $_ -ge $t.AddHours(-$windowHours) }).Count -gt 0
+    }
+    $recent = @($runs | Where-Object {
         ([datetime]$_.createdAt).ToUniversalTime() -ge $cutoff -and
-        $_.conclusion -notin @("failure", "cancelled", "startup_failure", "timed_out")
+        $_.conclusion -notin @("failure", "cancelled", "startup_failure", "timed_out") -and
+        -not (StoodDown $_)
     })
     if ($recent.Count -gt 0) {
         $r = $recent[0]
