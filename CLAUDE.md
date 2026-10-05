@@ -973,10 +973,18 @@ olabilir (kesin nedensellik iddia edilemez, ama zamanlama örtüşüyor).
   İki sayı bu projenin kendi disipliniyle ölçüldü: `WHISPER_PROMPT` olmadan
   kanalın kendi konusu **"gümüş"**, 6 geçişin 2'sinde **"günmüş"** yazıldı —
   yani bir yazım hatası değil, `assets.py`'nin ayırdığı iki metalden birinin
-  **kaybolmuş sinyali**; ipucuyla 6/6 doğru. Ve koşu başına **3 video /
-  15 dakika** sınırı var, çünkü transkripsiyon artık CPU dakikaları harcıyor
+  **kaybolmuş sinyali**; ipucuyla 6/6 doğru. Ve koşu başına **8 video /
+  60 dakika** sınırı var, çünkü transkripsiyon artık CPU dakikaları harcıyor
   (6,4 dakikalık video = 147 sn) — sınır aynı zamanda fırtınayı bir daha
   kazanmamanın asıl güvencesi.
+
+  **Whisper 2026-10-05'ten beri makinenin yarı çekirdeğiyle, düşük öncelikte
+  ve her videoda EN FAZLA BİR KEZ çalışıyor.** 10.03–10.05'te XRP'nin iptal
+  edilmiş anahtarı her koşuda 401 verdi ve her koşu aynı 23 dakikalık videoyu
+  baştan yazıya döktü: on tam-CPU geçiş, bir kısmı kullanıcı dizüstünde
+  çalışırken. Transkript artık `state/transcripts/`'te, iki proje de kaydedene
+  kadar duruyor. 6 çekirdek 12'den hiç yavaş ölçülmedi (60 sn seste
+  16,6–23,7 sn'ye karşı 22,8–57,4 sn). Canlı ölçüm: 982 sn ses 281 sn'de.
 
   **Transkript gelmiyorsa `../Kanal-Finans-Fetcher/youtube.md`'ye bak** — o
   konudaki tek doğruluk kaynağı orası: ölçüm tablosu, daha önce yapılmış iki
@@ -1014,8 +1022,9 @@ denenir — takılan bir video geciker, kaybolmaz. Bir projenin çıkarımı
 başarısız olup diğerininki başarılı olursa (nadir — Claude ayrı bir kaynak,
 YouTube gibi bloklanmıyor), transkript zaten elde olduğu için o video bir
 dahaki YouTube çekişini beklemeden **aynı koşuda** her iki proje için de
-denenir; sadece başarısız kalan taraf bir sonraki koşuda YouTube'a yeniden
-gitmeyi gerektirir.
+denenir; başarısız kalan taraf bir sonraki koşuda **kayıtlı transkriptten**
+yeniden denenir (2026-10-05'ten beri) — YouTube'a gitmez, Whisper'ı yeniden
+çalıştırmaz.
 
 **Direnç seviyesi bilerek otomatik satış tetiklemez.** XRP-Guess canlı
 veride konuşmacının direnç kırılmasını bazen *alım fırsatı* olarak
