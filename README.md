@@ -291,11 +291,12 @@ koşusundan ayrıca izleniyor.
 
 **a) Paylaşılan çekiş** (`../Kanal-Finans-Fetcher` — bu reponun DIŞINDA,
 XRP-Guess ile paylaşılan sibling repo; ayrıntı o reponun README'si):
-1. O reponun `.env`'ine hem bu projenin hem XRP-Guess'in Supabase +
-   Anthropic bilgilerini yaz (`XAU_*` / `XRP_*` önekli).
+1. O reponun `.env`'ine hem bu projenin hem XRP-Guess'in Supabase
+   bilgilerini yaz (`XAU_*` / `XRP_*` önekli). API anahtarı gerekmez:
+   çıkarım Claude Code CLI ile, abonelikle yapılıyor.
 2. Task Scheduler → yeni görev → eylem:
    `wscript.exe "...\Kanal-Finans-Fetcher\run_fetcher_hidden.vbs"`
-3. Tetikleyici: **30 dakikada bir tekrarla, sınırsız süre**.
+3. Tetikleyici: günlük **01:00, 07:00, 13:00 ve 19:00**.
 
 **b) Bu projenin uygulama adımı** (`backend/kanal_finans.py`, YouTube'a
 gitmez, sadece Supabase okuyup portföye işlem uygular):
