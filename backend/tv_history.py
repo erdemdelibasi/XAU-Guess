@@ -135,8 +135,8 @@ def to_trade_dates(times: pd.Series) -> pd.Series:
     untouched and a 24-hour contract rolls. The returned stamp is midnight
     New York of the trade date, which is precisely how fetch_data stamps a
     completed Yahoo daily bar -- so the contract the old docstring claimed is
-    now actually true, and bar_is_complete reads the same calendar date for
-    both vendors.
+    now actually true, and bar_is_complete reads the same trade date for
+    both vendors (fetch_data.bar_trade_date).
     """
     local = times.dt.tz_convert(fetch_data.EXCHANGE_TZ)
     # Naive midnight first, THEN localise. Adding a tz-aware Timedelta across

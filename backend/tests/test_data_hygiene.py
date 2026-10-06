@@ -51,6 +51,24 @@ def test_early_close_session_is_kept():
     assert fetch_data.bar_is_complete(odd, _now("2025-11-28", 19))
 
 
+def test_an_evening_stamp_belongs_to_the_session_that_just_opened():
+    """The 2026-10-02 01:58 UTC run. COMEX reopens at 18:00 New York for the
+    NEXT trade date, and before 00:00 New York Yahoo serves that forming bar
+    with an evening stamp whose calendar date is the previous day. Read by
+    calendar date it had "closed" at 17:00 that day; the panel called it
+    "son kapanis 2026-10-02", the target came out a day late, and the next
+    night's run skipped the real 10-02 session as a duplicate."""
+    evening = pd.Timestamp("2026-10-01 21:57", tz=ET).tz_convert("UTC")
+    assert evening.date() == dt.date(2026, 10, 2), "UTC already says tomorrow"
+    assert fetch_data.bar_trade_date(evening) == dt.date(2026, 10, 2)
+    assert not fetch_data.bar_is_complete(evening, _now("2026-10-01", 22))
+    assert fetch_data.bar_is_complete(evening, _now("2026-10-02", 17))
+    # The ordinary stamps are untouched: a 00:00 bar and the Thanksgiving one.
+    assert fetch_data.bar_trade_date(_bar("2026-10-01")) == dt.date(2026, 10, 1)
+    odd = pd.Timestamp("2025-11-28 09:30", tz=ET).tz_convert("UTC")
+    assert fetch_data.bar_trade_date(odd) == dt.date(2025, 11, 28)
+
+
 def test_drop_forming_bar_removes_only_the_last_row():
     frame = pd.DataFrame({
         "time": [_bar("2026-09-03"), _bar("2026-09-04"), _bar("2026-09-08")],

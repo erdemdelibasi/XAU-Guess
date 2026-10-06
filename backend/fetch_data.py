@@ -161,11 +161,31 @@ def _result_to_frame(result: dict) -> pd.DataFrame:
 
 
 # COMEX metals settle at 13:30 and the electronic session closes at 17:00
-# America/New_York. A daily bar dated D is therefore final once the clock in
-# New York has passed D 17:00 -- which is the ONLY rule here that does not
-# depend on how Yahoo happens to stamp a row.
+# America/New_York, then reopens at 18:00 for the NEXT trade date. A daily bar
+# for trade date D is therefore final once the clock in New York has passed
+# D 17:00 -- which is the ONLY rule here that does not depend on how Yahoo
+# happens to stamp a row.
 EXCHANGE_TZ = ZoneInfo("America/New_York")
 SESSION_CLOSE_HOUR = 17
+SESSION_OPEN_HOUR = 18
+
+
+def bar_trade_date(bar_time: pd.Timestamp) -> dt.date:
+    """The trade date a daily bar belongs to, read in exchange time.
+
+    A stamp at or after the 18:00 reopen belongs to the session that just
+    opened, i.e. the NEXT trade date. Reading the plain calendar date there
+    puts a minutes-old bar on a day whose session has already closed --
+    measured 2026-10-02 01:58 UTC (21:58 New York): the 10-02 session, four
+    hours into trading, came back stamped after 00:00 UTC but before 00:00
+    New York, passed as complete, and became "son kapanis 2026-10-02". The
+    next night's run then found its own target taken and skipped the real
+    10-02 session for good.
+    """
+    local = bar_time.tz_convert(EXCHANGE_TZ)
+    if local.hour >= SESSION_OPEN_HOUR:
+        return local.date() + dt.timedelta(days=1)
+    return local.date()
 
 
 def bar_is_complete(bar_time: pd.Timestamp, now: dt.datetime | None = None) -> bool:
@@ -177,18 +197,23 @@ def bar_is_complete(bar_time: pd.Timestamp, now: dt.datetime | None = None) -> b
     the half-traded 2026-09-08 session was served stamped 04:00:00, mid-session
     and indistinguishable from a closed one). It also sometimes stamps a
     genuinely finished half-day session with a wall clock instead
-    (2025-11-28, the day after Thanksgiving, came back at 14:30 UTC).
+    (2025-11-28, the day after Thanksgiving, came back at 14:30 UTC). And
+    before 00:00 New York a forming bar carries an evening stamp whose
+    calendar date is the PREVIOUS day -- see bar_trade_date.
 
     So the previous rule here -- "a clean 00:00 stamp means the bar is done" --
     was wrong in BOTH directions: it kept every partial bar it was written to
     remove, and it threw away a real early-close session. Reading the bar's
-    own calendar date in exchange time and comparing it against the exchange
+    own trade date in exchange time and comparing it against the exchange
     clock is what the rule was trying to express in the first place.
+
+    "Complete" means the session is over, NOT that the bar is final: until
+    Yahoo settles it overnight the newest bar keeps absorbing the 18:00 reopen's
+    trades (predict.resolve_due_predictions has the measurement).
     """
     now = now or dt.datetime.now(dt.timezone.utc)
-    bar_date = bar_time.tz_convert(EXCHANGE_TZ).date()
     close = dt.datetime.combine(
-        bar_date, dt.time(SESSION_CLOSE_HOUR), tzinfo=EXCHANGE_TZ)
+        bar_trade_date(bar_time), dt.time(SESSION_CLOSE_HOUR), tzinfo=EXCHANGE_TZ)
     return now.astimezone(EXCHANGE_TZ) >= close
 
 

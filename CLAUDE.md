@@ -698,6 +698,25 @@ da onu `unique(asset, target_date)` yüzünden çift sanıp atlar. `predict.py`
 23:00 UTC'de (19:00 New York) çalıştığı için cron yolu zaten doğruydu; kural
 elle tetiklenen her koşuyu düzeltiyor. `tests/test_data_hygiene.py` kilitliyor.
 
+**"Takvim günü" de yetmedi (2026-10-06): mumun günü TRADE DATE'tir.** COMEX
+18:00 New York'ta **ertesi işlem günü** için yeniden açılıyor, ve 00:00 New
+York'tan önce Yahoo o yarım mumu akşam damgasıyla veriyor — New York takvimi
+bir önceki günü, UTC ise ertesi günü gösteriyor. GitHub cron'u gece yarısından
+(UTC) sonra geç başladığı üç gece (30.09, 01.10, 02.10) mum "kapanmış" sayıldı,
+panel "son kapanis 2026-10-02" dedi, hedef bir gün kaydı, ve 03.10 gecesi gerçek
+10-02 seansı "zaten var" diye **atlandı** — o seansın tahmini ve portföy
+işlemleri hiç yapılmadı, geri de getirilemez. `fetch_data.bar_trade_date` artık
+18:00 ve sonrasını ertesi işlem gününe sayıyor; kayan altı satırın hedefi elle
+düzeltildi (#38–43). Yerel tetik 23:00 UTC'de koştuğu için bu pencereye
+düşmüyor, ama bilgisayar kapalıysa yedek cron tam oraya düşer.
+
+**Ve "kapanmış" "kesinleşmiş" demek değil.** Yahoo 18:00'deki yeniden açılışın
+işlemlerini en yeni günlük mumun içine katmaya, onu gece uzlaşma fiyatına
+çekene kadar devam ediyor: 05.10 23:01 UTC'de altının 10-05 mumu 4.168,50
+(canlı kotasyon), 06.10 07:43 UTC'de 4.156,80. Bu yüzden **en yeni mum hiçbir
+puanlamanın ucu olmaz** — aşağıdaki "Taban oran düzeltmesinin EKSİK olduğu iki
+yer" bölümünün 1. maddesinin devamı.
+
 ### Kalibratör kendi çıktısına fit edilemez
 
 `predictions` tablosunda `tech_confidence_raw` / `ml_confidence_raw` /
@@ -1171,6 +1190,30 @@ olmayan **eski satırlar** canlı fiyat tabanında çözülmeye devam ediyor ve
 konsol bunu yazıyor — kalibrasyon kolonlarının aksine bu satırlar sicilde
 **zaten sayılıyor**, o yüzden atmak deliğe dönüşürdü. `price_at_prediction`
 değişmedi: portföyler o fiyattan işlem yaptı, canlı grafik ona marklıyor.
+
+**Bu düzeltme hiç tutmamış (2026-10-06'da ölçüldü).** `close_at_prediction`
+panelin son kapanışını yazıyordu, ve 23:00 UTC'de panelin son kapanışı **canlı
+kotasyonun kendisiydi** (yukarıdaki "kapanmış ≠ kesinleşmiş" notu). Kolonla
+yazılan **24 satırın 24'ü** seansın kesin kapanışını kaçırıyor — medyan %0,39
+(23:00 koşuları) / %0,57 (geç koşular), hiçbiri %0,01 içinde değil. Çözüm ucu
+da aynı kusurlu: hedef en yeni muma denk geldiğinde çözüm fiyatı yine o akşamın
+canlı fiyatıydı. Sicil kapanış→kapanış değil, 19:00→19:00 puanlanıyordu.
+
+Artık **iki uç da çözüm anında, kesinleşmiş mumlardan** okunuyor
+(`predict.score_row`): taban, satırın **yazıldığı anda** kapanmış son seans
+(`created_at`'ten — geç bir koşunun kendi hedef aritmetiğinden değil); hedef ise
+yalnızca **ardılı olan** mumlar arasında eşleşiyor, yani çözüm bir seans gecikiyor,
+başka hiçbir şey değişmiyor. `close_at_prediction` "özelliklerin gördüğü değer"
+olarak kalıyor, yalnızca seansı panelde bulunamayan satırın yedeği.
+
+Geçmiş **32 çözülmüş satır** aynı fonksiyonla yeniden puanlandı (eski değerler
+`backend/logs/rescore_2026-10-06_backup.json`, git dışı): hepsinin çözüm fiyatı
+değişti, **dördünün sonucu döndü** (#12, #20, #36, #37) — **dördünde de gerçek
+yön YUKARI→AŞAĞI döndü ve modelin "doğru" sayılan çağrısı yanlışa çıktı.** Yani
+kusur sicili modelin LEHİNE şişiriyordu. Özelliklerin son kapanışı hâlâ canlıya
+yakın (eğitim uzlaşma fiyatıyla yapıldı): ölçülmüş, belgelenmiş, küçük bir
+eğitim/canlı farkı — düzeltmesi koşu saatini değiştirmek demek ve `miners`'ın
+1 günlük ufku buna doğrudan bağlı, o yüzden ölçmeden dokunulmadı.
 
 **2. Kalibratör DOWN tarafını sistematik susturuyordu.** `calibration.apply`
 her çağrıdan `base_rate` çıkarıyordu — UP da olsa DOWN da olsa. Oysa

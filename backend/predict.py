@@ -42,7 +42,7 @@ endpoints only. No LLM is called any more, so no ANTHROPIC_API_KEY either.
 from __future__ import annotations
 
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -226,18 +226,37 @@ def resolve_due_predictions(db, asset, panel: pd.DataFrame) -> int:
     which is the same 1.8-point invisible bias assets.py exists to prevent,
     self-inflicted inside the learning loop.
 
-    So the basis is `close_at_prediction`: the close of the session the
-    features were built from, written by this same script. Rows from before
-    that column existed fall back to `price_at_prediction` and say so -- a
-    mixed-basis sample is worse than a smaller one, but a row that can never
-    resolve is worse than both, and unlike the calibration columns these rows
-    are already counted in the component records.
+    THAT FIX NEVER TOOK, AND BOTH ENDS WERE LIVE (measured 2026-10-06)
+    --------------------------------------------------------------------
+    The basis became `close_at_prediction`, the panel's last close at write
+    time -- and in all 24 rows written with it that value missed the session's
+    settled close: median 0.39% at the 23:00 UTC runs, 0.57% at the late ones,
+    not one within 0.01%. Yahoo keeps folding the 18:00 reopen's trades into
+    the newest daily bar until it settles it overnight: at 23:01 UTC on
+    2026-10-05 gold's 10-05 bar read 4168.50, the live quote; at 07:43 UTC it
+    read 4156.80. The resolution end had the same flaw, since a target matched
+    to the newest bar was that same moving quote. The record was being scored
+    19:00-to-19:00, not close-to-close.
 
+    So both ends now come from SETTLED bars, read at resolution time:
+
+      * the basis is the close of the last session that had closed when the
+        row was written -- from `created_at`, not from the row's own target
+        arithmetic, which a run late enough to see an evening-stamped bar
+        once got wrong (fetch_data.bar_trade_date);
+      * the target is matched only among bars that already have a successor,
+        so the newest bar is never a resolution price. That delays resolution
+        by one session and nothing else.
+
+    `close_at_prediction` stays what the features saw, and is the fallback
+    only for a row whose session is missing from the panel.
     `price_at_prediction` is untouched: it is what the portfolios actually
     traded at, what the live equity curve marks to, and what the page shows.
     """
     sessions = panel["time"].dt.date.tolist()
     session_close = dict(zip(sessions, panel["close"]))
+    # The newest bar may still be absorbing the reopen -- see the docstring.
+    settled = sessions[:-1]
 
     due = (db.table("predictions").select("*")
            .eq("asset", asset.key).is_("resolved_at", "null").execute().data)
@@ -245,45 +264,71 @@ def resolve_due_predictions(db, asset, panel: pd.DataFrame) -> int:
     now_iso = datetime.now(timezone.utc).isoformat()
 
     for row in due:
-        target = date.fromisoformat(row["target_date"])
-        match = next((s for s in sessions if s >= target), None)
-        if match is None:
-            continue  # target session hasn't closed yet -- leave it pending
-
-        resolution_price = float(session_close[match])
-        # The close the features were built from, falling back to the live
-        # quote only for rows written before that column existed.
-        basis = row.get("close_at_prediction")
-        legacy_basis = basis is None
-        basis = float(basis if basis is not None else row["price_at_prediction"])
-        actual = "UP" if resolution_price > basis else "DOWN"
-
-        update = {
-            "resolved_at": now_iso,
-            "price_at_resolution": resolution_price,
-            "actual_direction": actual,
-            "correct": actual == row["predicted_direction"],
-        }
-        for component in ensemble.COMPONENTS:
-            prefix = ensemble.COLUMN_PREFIX[component]
-            called = row.get(f"{prefix}_direction")
-            confidence = row.get(f"{prefix}_confidence")
-            # An abstaining component (confidence 0) is scored as NULL, not as
-            # wrong. It declined to speak; counting that as an error would
-            # punish exactly the behaviour macro_signal/news_signal are
-            # designed to produce when the evidence is thin.
-            if called is None or confidence is None or float(confidence) <= 0:
-                update[f"{prefix}_correct"] = None
-            else:
-                update[f"{prefix}_correct"] = (actual == called)
+        scored = score_row(row, settled, session_close)
+        if scored is None:
+            continue  # target session hasn't settled yet -- leave it pending
+        update, base, match = scored
+        update["resolved_at"] = now_iso
 
         db.table("predictions").update(update).eq("id", row["id"]).execute()
         resolved += 1
-        print(f"  cozuldu #{row['id']} (hedef {target}, seans {match}): "
-              f"tahmin={row['predicted_direction']} gercek={actual} "
-              f"dogru={update['correct']}"
-              + ("  [eski satir: canli fiyat tabanli]" if legacy_basis else ""))
+        print(f"  cozuldu #{row['id']} (seans {base or 'kayitli kapanis'} -> {match}): "
+              f"tahmin={row['predicted_direction']} gercek={update['actual_direction']} "
+              f"dogru={update['correct']}")
     return resolved
+
+
+def session_closed_at(written: datetime, sessions: list[date]) -> date | None:
+    """The newest of `sessions` that had already closed when `written` came."""
+    local = written.astimezone(fetch_data.EXCHANGE_TZ)
+    cutoff = local.date()
+    if local.hour < fetch_data.SESSION_CLOSE_HOUR:
+        cutoff -= timedelta(days=1)
+    earlier = [s for s in sessions if s <= cutoff]
+    return earlier[-1] if earlier else None
+
+
+def score_row(row: dict, settled: list[date], session_close: dict):
+    """(update, basis session, target session) for one prediction row, or
+    None while its target has not settled. Pure: resolve_due_predictions
+    writes the update, and a re-score of old rows calls this same function.
+    """
+    target = date.fromisoformat(row["target_date"])
+    match = next((s for s in settled if s >= target), None)
+    if match is None:
+        return None
+    resolution_price = float(session_close[match])
+
+    base = None
+    if row.get("created_at"):
+        written = datetime.fromisoformat(str(row["created_at"]).replace("Z", "+00:00"))
+        base = session_closed_at(written, settled)
+    if base is not None and base < match:
+        basis = float(session_close[base])
+    else:
+        base = None
+        stored = row.get("close_at_prediction")
+        basis = float(stored if stored is not None else row["price_at_prediction"])
+    actual = "UP" if resolution_price > basis else "DOWN"
+
+    update = {
+        "price_at_resolution": resolution_price,
+        "actual_direction": actual,
+        "correct": actual == row["predicted_direction"],
+    }
+    for component in ensemble.COMPONENTS:
+        prefix = ensemble.COLUMN_PREFIX[component]
+        called = row.get(f"{prefix}_direction")
+        confidence = row.get(f"{prefix}_confidence")
+        # An abstaining component (confidence 0) is scored as NULL, not as
+        # wrong. It declined to speak; counting that as an error would
+        # punish exactly the behaviour macro_signal/news_signal are
+        # designed to produce when the evidence is thin.
+        if called is None or confidence is None or float(confidence) <= 0:
+            update[f"{prefix}_correct"] = None
+        else:
+            update[f"{prefix}_correct"] = (actual == called)
+    return update, base, match
 
 
 # Columns added by a migration that has to be applied by hand in the Supabase
