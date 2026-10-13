@@ -83,7 +83,10 @@ bkz. aşağıdaki Kanal Finans notu)
                               eksi o gecikmeden kısa olmalı; 12 bunun ortası,
                               rapor eski 18'inde kaldı. Makine kapalıysa
                               açılınca çalışır (StartWhenAvailable); açılmazsa
-                              cron (geç de olsa) çalışır
+                              cron (geç de olsa) çalışır. Tek bir API hatası
+                              yedeğe düşürmez: koruma+tetik 60 sn arayla 3 kez
+                              denenir (07.10'da XRP raporu tek bir HTTP 500
+                              yüzünden 5,5 saat geç gitti)
        |
        v
 Supabase (Postgres + otomatik REST API, RLS ile korunur)
